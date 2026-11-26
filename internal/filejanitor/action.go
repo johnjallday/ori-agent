@@ -66,6 +66,11 @@ type FileAction struct {
 	// Place is set only on an OperationPlace action. Additive: an older build
 	// drops it on rewrite and then refuses to validate the action.
 	Place *PlacedInto `json:"place,omitempty"`
+	// Send is set only on an OperationSend action: the receiving workspace and the
+	// identities of both folders, enough to put the file back without the
+	// connection. Additive: an older build drops it on rewrite, and this build then
+	// refuses to validate or undo the action, so a send can only lose its undo.
+	Send *SentTo `json:"send,omitempty"`
 
 	// BeforeFingerprint is the file state the user approved. It is rechecked
 	// immediately before the mutation; a mismatch makes the action stale.
@@ -115,6 +120,11 @@ const (
 	// connector, which cannot promise not to replace a file. An older build that
 	// reads one of these refuses to validate it, so it never widens what may move.
 	OperationPlace Operation = "place"
+	// OperationSend moves a reviewed file to the top level of another workspace's
+	// folder, on a connection the person turned on, through the conditional mover.
+	// Like OperationPlace it is never requested by a client, never dispatched to
+	// the filesystem connector, and refused by an older build's validation.
+	OperationSend Operation = "send"
 )
 
 // ValidOperations is the complete set a client may ask for. There is no
@@ -133,6 +143,24 @@ type PlacedInto struct {
 	FolderID string `json:"folder_id"`
 	// LeftAt is set when a placement went wrong and the entry could not be moved
 	// back: where it is now, relative to the managed folder.
+	LeftAt string `json:"left_at,omitempty"`
+}
+
+// SentTo is what an OperationSend action recorded about the two folders, so Undo
+// can check the very same folders. Identities are "device:inode" and folder
+// generations; nothing here is a path. The file's name is the action's
+// SourceName in both folders.
+type SentTo struct {
+	ConnectionID        string `json:"connection_id"`
+	ReceiverWorkspaceID string `json:"receiver_workspace_id"`
+	// ReceiverRootID is the receiver's folder generation (JanitorSettings.RootID).
+	ReceiverRootID string `json:"receiver_root_id"`
+	// ReceiverRootDirID and RootDirID are the receiver's and the sender's folder
+	// identities when the file was sent.
+	ReceiverRootDirID string `json:"receiver_root_dir_id"`
+	RootDirID         string `json:"root_dir_id"`
+	// LeftAt is set when a send went wrong and the entry could not be moved back:
+	// its name at the receiver's top level.
 	LeftAt string `json:"left_at,omitempty"`
 }
 
@@ -237,12 +265,15 @@ func (a FileAction) Validate() error {
 		return fmt.Errorf("%w: candidate id is required", ErrInvalidAction)
 	}
 	switch a.Operation {
-	case OperationMove, OperationTrash, OperationPlace:
+	case OperationMove, OperationTrash, OperationPlace, OperationSend:
 	default:
 		return fmt.Errorf("%w: unknown operation %q", ErrInvalidAction, a.Operation)
 	}
 	if (a.Operation == OperationPlace) != (a.Place != nil) {
 		return fmt.Errorf("%w: only a placement records the folders it verified", ErrInvalidAction)
+	}
+	if (a.Operation == OperationSend) != (a.Send != nil) {
+		return fmt.Errorf("%w: only a send records the folders it went between", ErrInvalidAction)
 	}
 	if err := ValidateFileName(a.SourceName); err != nil {
 		return fmt.Errorf("%w: source name is not a top-level file name", ErrInvalidAction)
@@ -286,6 +317,18 @@ func (a FileAction) Validate() error {
 	}
 	if a.Operation == OperationTrash && strings.TrimSpace(a.DestinationRelative) != "" {
 		return fmt.Errorf("%w: a Trash action has no destination inside the folder", ErrInvalidAction)
+	}
+	if a.Operation == OperationSend {
+		// A send lands at the receiver's top level under its own name: it has no
+		// destination inside the sender's folder, and records only identities.
+		s := a.Send
+		if strings.TrimSpace(a.DestinationRelative) != "" || !ValidCategory(a.DestinationCategory) ||
+			!strings.HasPrefix(s.ConnectionID, "connection-") || !managedRootGeneration.MatchString(s.ConnectionID) ||
+			strings.TrimSpace(s.ReceiverWorkspaceID) == "" || strings.EqualFold(s.ReceiverWorkspaceID, a.WorkspaceID) ||
+			!managedRootGeneration.MatchString(s.ReceiverRootID) || deviceOf(s.ReceiverRootDirID) == "" || deviceOf(s.RootDirID) == "" ||
+			a.BeforeFingerprint.FileID == "" || (s.LeftAt != "" && ValidateFileName(s.LeftAt) != nil) {
+			return fmt.Errorf("%w: a send needs the receiving workspace and the identities it verified", ErrInvalidAction)
+		}
 	}
 	return nil
 }
@@ -362,6 +405,10 @@ func (a FileAction) Undoable() bool {
 	// (an older build dropped them, or the move was never verified) there is
 	// nothing safe to reverse, and every Undo entry point stays closed.
 	if a.Operation == OperationPlace && (a.Place == nil || a.AfterFingerprint.FileID == "") {
+		return false
+	}
+	// A send is reversed the same way, between the two folders it recorded.
+	if a.Operation == OperationSend && (a.Send == nil || a.AfterFingerprint.FileID == "") {
 		return false
 	}
 	switch a.Undo {

@@ -12,7 +12,13 @@ import (
 // The same revalidation runs inside edit/approval transactions. It cannot grant
 // mutation authority; the executor still revalidates immediately before moving.
 func (s *Service) revalidatedReviewDraft(state ScanState, batchID string, binding reviewDraftBinding, groups ReviewGroups, root ManagedRoot) ReviewDraftView {
-	view := projectReviewDraft(state, batchID, binding, groups)
+	return s.revalidatedReviewDraftWith(state, batchID, binding, groups, root, nil)
+}
+
+// revalidatedReviewDraftWith is revalidatedReviewDraft with the connections that
+// are on (see send_review.go). With no route it is exactly the original.
+func (s *Service) revalidatedReviewDraftWith(state ScanState, batchID string, binding reviewDraftBinding, groups ReviewGroups, root ManagedRoot, routes sendRoutes) ReviewDraftView {
+	view := projectReviewDraftWith(state, batchID, binding, groups, routes)
 	finish := func(view ReviewDraftView) ReviewDraftView {
 		view.Groups = reviewDraftGroupViews(groups, view.Choices)
 		return view

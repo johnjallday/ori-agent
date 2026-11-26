@@ -92,7 +92,7 @@ func normalizeStatusBody(t *testing.T, body map[string]any) string {
 // prefixes. A canonical route that was never registered would 404 here while
 // its legacy twin answers, which is exactly the drift this guards.
 func TestCanonicalRouteSetMatchesLegacy(t *testing.T) {
-	readEndpoints := []string{"", "/readiness", "/skipped", "/categories", "/batches", "/history"}
+	readEndpoints := []string{"", "/readiness", "/skipped", "/categories", "/batches", "/history", "/connections", "/arrivals"}
 
 	h, _ := newTestHandler(t, map[string]string{"ws-1": userprofile.LocalUserID})
 
@@ -137,6 +137,13 @@ func TestBothPrefixesEnforceOwnership(t *testing.T) {
 		{"relink", http.MethodPost, "/relink", `{"path":"/tmp"}`},
 		{"revoke", http.MethodPost, "/revoke", ""},
 		{"set up", http.MethodPost, "/setup", `{"path":"/tmp"}`},
+		{"list connections", http.MethodGet, "/connections", ""},
+		{"connect", http.MethodPost, "/connections", `{"receiver_workspace_id":"ws-1","kinds":["documents"]}`},
+		{"turn off a connection", http.MethodPost, "/connections/connection-1/turn-off", ""},
+		{"list arrivals", http.MethodGet, "/arrivals", ""},
+		{"dismiss an arrival", http.MethodPost, "/arrivals/arrival-1/dismiss", ""},
+		{"undo a send", http.MethodPost, "/arrivals/arrival-1/undo", ""},
+		{"ask for a suggestion", http.MethodPost, "/batches/batch-1/suggestion", ""},
 	}
 
 	for _, tc := range cases {

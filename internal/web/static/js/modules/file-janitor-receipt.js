@@ -33,7 +33,19 @@ export function receiptWhere(model, ctx) {
   const folder = ctx?.folderName || 'the folder';
   const filing = ctx?.filingRoot || 'Filed';
   const parts = [];
-  if ((model?.filed || 0) > 0) parts.push('They are in ' + folder + '/' + filing + '.');
+  const sent = model?.sent || 0;
+  if (sent > 0) {
+    // FR 30: "14 went to Documents. 29 are in Downloads/Filed."
+    for (const send of model.sends || [])
+      parts.push(
+        (send.count === 1 ? '1 went to ' : send.count + ' went to ') + send.receiverName + '.'
+      );
+    const unnamed = sent - (model.sends || []).reduce((total, send) => total + send.count, 0);
+    if (unnamed > 0) parts.push(unnamed + ' went to another workspace.');
+    const here = (model.filed || 0) - sent;
+    if (here > 0)
+      parts.push((here === 1 ? '1 is in ' : here + ' are in ') + folder + '/' + filing + '.');
+  } else if ((model?.filed || 0) > 0) parts.push('They are in ' + folder + '/' + filing + '.');
   if (typeof model?.looseNow === 'number') {
     const loose = model.looseNow;
     parts.push(
@@ -62,6 +74,13 @@ export function receiptModelFromReceipt(receipt) {
     filed: receipt.filed || 0,
     trashed: receipt.trashed || 0,
     completed: 0,
+    sent: receipt.sent || 0,
+    sends: (receipt.sends || []).map(item => ({
+      workspaceId: item.receiver_workspace_id,
+      receiverName: item.receiver_name || 'Another workspace',
+      count: item.count || 0,
+      link: typeof item.receiver_link === 'string' ? item.receiver_link : ''
+    })),
     byDestination: (receipt.by_destination || []).map(item => ({
       destination: item.destination,
       count: item.count
@@ -82,9 +101,14 @@ export function receiptModelFromResult(result) {
   let filed = 0;
   let trashed = 0;
   let completed = 0;
+  let sent = 0;
   for (const outcome of outcomes) {
     if (outcome.result === 'applied' && outcome.operation === 'trash') trashed += 1;
-    else if (outcome.result === 'applied' && outcome.operation === 'move') {
+    else if (outcome.result === 'applied' && outcome.operation === 'send') {
+      // Sent to another workspace; the receipt read names which.
+      filed += 1;
+      sent += 1;
+    } else if (outcome.result === 'applied' && outcome.operation === 'move') {
       filed += 1;
       const folder = directoryOf(outcome.destination);
       if (folder) byDestination.set(folder, (byDestination.get(folder) || 0) + 1);
@@ -106,6 +130,8 @@ export function receiptModelFromResult(result) {
     filed,
     trashed,
     completed,
+    sent,
+    sends: [],
     byDestination: [...byDestination].map(([destination, count]) => ({ destination, count })),
     notMoved,
     notMovedTotal: notMoved.length,
@@ -165,6 +191,30 @@ export function renderReceipt(doc, model, ctx = {}) {
     );
   const where = receiptWhere(model, ctx);
   if (where) panel.appendChild(h('p', 'fj-receipt-where', where));
+
+  // One row per receiving workspace, with Open <receiver>, above the Filed rows
+  // (FR 31).
+  if ((model.sends || []).length) {
+    const sends = h('ul', 'fj-receipt-rows fj-receipt-sends');
+    for (const send of model.sends) {
+      const row = h('li', 'fj-receipt-row fj-receipt-send');
+      row.appendChild(h('span', 'fj-receipt-count', String(send.count)));
+      const arrow = h('span', 'fj-receipt-arrow', '→');
+      arrow.setAttribute('aria-hidden', 'true');
+      row.appendChild(arrow);
+      const where = h('span', 'fj-receipt-to');
+      where.appendChild(h('span', 'fj-receipt-to-name', send.receiverName));
+      where.appendChild(h('span', 'fj-receipt-to-help', ' workspace, top level'));
+      row.appendChild(where);
+      if (send.link && send.link.startsWith('/workspaces/')) {
+        const open = h('a', 'fj-btn fj-btn-secondary fj-receipt-open', 'Open ' + send.receiverName);
+        open.href = send.link;
+        row.appendChild(open);
+      }
+      sends.appendChild(row);
+    }
+    panel.appendChild(sends);
+  }
 
   // One row per destination, then the Trash on its own row.
   const rows = h('ul', 'fj-receipt-rows');
@@ -246,6 +296,8 @@ export function locationText(outcome) {
       return 'It is still in the Trash.';
     case 'folder':
       return 'A file with the original name is in the folder.';
+    case 'sent':
+      return 'It is still in the workspace it was sent to.';
     default:
       return 'Ori cannot find it.';
   }

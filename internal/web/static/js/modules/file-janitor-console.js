@@ -179,6 +179,8 @@
   // scan batch.
   let expandedCandidates = new Set();
   let historyActions = [];
+  // Receiving workspaces' names by ID, for History's "sent to <receiver>".
+  let historyReceivers = {};
   let historyLoaded = false;
   let historyFilter = '';
   // The last undo outcome, kept so the history reload that follows an undo does
@@ -1163,7 +1165,9 @@
       count(value.move_count) &&
       count(value.trash_count) &&
       count(value.total) &&
-      value.total === value.move_count + value.trash_count &&
+      (value.send_count === undefined || count(value.send_count)) &&
+      value.total === value.move_count + (value.send_count || 0) + value.trash_count &&
+      (value.sends === undefined || (Array.isArray(value.sends) && value.sends.length <= 8)) &&
       value.changed &&
       count(value.changed.total) &&
       Array.isArray(value.changed.items) &&
@@ -2097,7 +2101,37 @@
       ) &&
       section(value.left_out) &&
       section(value.trash) &&
-      section(value.could_not_file)
+      section(value.could_not_file) &&
+      // Leaving: one card per connection that is on, three names each at most.
+      (value.leaving === undefined ||
+        (Array.isArray(value.leaving) &&
+          value.leaving.length <= 8 &&
+          value.leaving.every(
+            card =>
+              typeof card.connection_id === 'string' &&
+              typeof card.receiver_name === 'string' &&
+              count(card.count) &&
+              count(card.not_sent_count) &&
+              count(card.kept_count) &&
+              Array.isArray(card.files) &&
+              card.files.length <= 3 &&
+              Array.isArray(card.not_sent_files) &&
+              card.not_sent_files.length <= 3
+          ))) &&
+      // The agent's suggestion: its paragraph and one card per workspace.
+      (value.suggestion === undefined ||
+        (value.suggestion &&
+          typeof value.suggestion.paragraph === 'string' &&
+          value.suggestion.paragraph.length <= 700 &&
+          Array.isArray(value.suggestion.cards) &&
+          value.suggestion.cards.length <= 8 &&
+          value.suggestion.cards.every(
+            card =>
+              typeof card.connection_id === 'string' &&
+              count(card.count) &&
+              Array.isArray(card.files) &&
+              card.files.length <= 3
+          )))
     );
   }
 
@@ -2502,15 +2536,107 @@
         null,
         binding
       );
+    } else if (choice.kind === 'send') {
+      // FR 27: the row's files go to that workspace on the press.
+      await submitReviewEdit(
+        'send_group',
+        { group_id: row.group_id, connection_id: choice.connectionId },
+        null,
+        binding
+      );
+    } else if (choice.kind === 'connect') {
+      // "Send to another workspace…" opens the connect step in Settings (FR 4).
+      renderBatch();
+      openConnectFromReview();
     } else if (choice.kind === 'leave') {
       // Nothing recorded for the row any more; nothing to ask the server when
-      // nothing was placed.
-      if (row.placed_count > 0)
+      // nothing was placed or sent.
+      if (row.placed_count > 0 || row.sent_count > 0)
         await submitReviewEdit('clear_group', { group_id: row.group_id }, null, binding);
       else renderBatch();
     } else if (choice.kind === 'stop') {
       await stopAskingAboutRow(row, binding);
     }
+  }
+
+  // The Leaving card's controls (FR 22, 23): its tick, "Keep these in <folder>
+  // instead" and "Send them to <receiver>".
+  async function answerLeaving(card, action, binding) {
+    const sentence = {
+      send_connection: count =>
+        (count === 1 ? '1 file will' : count + ' files will') +
+        ' go to ' +
+        card.receiver_name +
+        '.',
+      unsend_connection: () => 'Nothing will go to ' + card.receiver_name + '.',
+      keep_connection: () =>
+        'These files will stay in ' + compactFolderName(lastStatus?.settings?.root_path) + '.'
+    }[action];
+    const saved = await submitReviewEdit(
+      action,
+      { connection_id: card.connection_id },
+      null,
+      binding
+    );
+    if (saved && sentence) {
+      const after = (picture?.leaving || []).find(
+        item => item.connection_id === card.connection_id
+      );
+      announce(sentence(after ? after.count : 0));
+    }
+  }
+
+  // The agent slice is on only with a model set and a Filing agent here (FR 42).
+  let askingAgent = false;
+
+  function suggestionAgentName() {
+    const settings = (lastStatus && lastStatus.settings) || {};
+    const guidance = lastStatus && lastStatus.guidance;
+    if (!settings.content_mode || settings.content_mode === 'metadata_only') return '';
+    if (!guidance || !guidance.available) return '';
+    if (!picture || !(picture.leaving || []).length || !(picture.waiting > 0)) return '';
+    return guidance.agent_name || 'The Curator';
+  }
+
+  async function askAgentForSuggestion() {
+    const name = suggestionAgentName();
+    const batchID = lastBatch?.id;
+    if (!name || !batchID || askingAgent) return;
+    askingAgent = true;
+    renderBatch();
+    try {
+      const response = await fetch(
+        apiBase(wsId()) + '/batches/' + encodeURIComponent(batchID) + '/suggestion',
+        { method: 'POST' }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || name + ' could not be asked.');
+      }
+      const suggestion = body.suggestion || {};
+      const count = (suggestion.cards || []).reduce((total, card) => total + (card.count || 0), 0);
+      announce(
+        suggestion.empty || count === 0
+          ? name + ' had no suggestion.'
+          : name + ' suggested ' + (count === 1 ? '1 file' : count + ' files') + ' to send.'
+      );
+    } catch (error) {
+      showError(error.message);
+    }
+    askingAgent = false;
+    await loadReviewPicture();
+  }
+
+  // openConnectFromReview switches to Settings with the connect card open.
+  function openConnectFromReview() {
+    selectTab('settings');
+    if (connectionsLoadState === 'ready') {
+      openConnectStep();
+      renderSettings();
+      return;
+    }
+    connectAfterLoad = true;
   }
 
   // The files "Leave here, stop asking" will cover, which Review again must be able
@@ -2881,6 +3007,24 @@
           void submitReviewEdit(
             ticked ? 'select_group' : 'deselect_group',
             { group_id: folder.group_id },
+            null,
+            binding
+          ),
+        // Leaving (FR 21 to 23, FR 27): a card's tick and its two switches, and one
+        // "Send to <receiver>" entry per connection in each row menu.
+        onTickLeaving: (card, ticked) =>
+          void answerLeaving(card, ticked ? 'send_connection' : 'unsend_connection', binding),
+        onKeepLeaving: card => void answerLeaving(card, 'keep_connection', binding),
+        onSendLeaving: card => void answerLeaving(card, 'send_connection', binding),
+        // The agent's suggestion (FR 42 to 48): asked only on the button, and only
+        // with a model set; its card's tick is the one way its files become sends.
+        askAgent: suggestionAgentName(),
+        asking: askingAgent,
+        onAskAgent: () => void askAgentForSuggestion(),
+        onTickSuggestion: (card, ticked) =>
+          void submitReviewEdit(
+            ticked ? 'send_suggested' : 'unsend_suggested',
+            { connection_id: card.connection_id },
             null,
             binding
           ),
@@ -3513,6 +3657,8 @@
     if (repair) health.appendChild(repair);
     panel.appendChild(health);
 
+    connectionSections().forEach(section => panel.appendChild(section));
+
     const protectionSection = protectionSettings();
     if (protectionSection) panel.appendChild(protectionSection);
 
@@ -3547,6 +3693,220 @@
     panel.appendChild(status);
 
     host.appendChild(panel);
+  }
+
+  // ------------------------------------------------------------ connections
+  //
+  // "Sends to" and "Receives from": the one-way connections that let this
+  // workspace's Filing send reviewed files to another workspace's folder. The
+  // drawing lives in file-janitor-connections.js; this owns the state and every
+  // request. A request names the other workspace or the connection by ID, never a
+  // folder: the server works out both folders itself.
+  let connections = null; // the last /connections answer for this workspace
+  let connectionsLoadState = 'idle'; // idle | loading | ready | error
+  let connectionsWorkspace = '';
+  let connectCard = null; // { receiverId, kinds: [ids], error } while the card is open
+  let connectionBusy = ''; // '' | 'connect' | the connection id being turned off
+  let connectAfterLoad = false; // a review row asked for the connect step before the list loaded
+
+  function resetConnections() {
+    connections = null;
+    connectionsLoadState = 'idle';
+    connectionsWorkspace = '';
+    connectCard = null;
+    connectionBusy = '';
+    connectAfterLoad = false;
+  }
+
+  // connectionAgentName is the agent named on the connect card, only when the
+  // agent can suggest sends: Filing uses a model and an agent helps here (FR 42).
+  function connectionAgentName() {
+    const settings = (lastStatus && lastStatus.settings) || {};
+    const guidance = lastStatus && lastStatus.guidance;
+    const usesModel = settings.content_mode && settings.content_mode !== 'metadata_only';
+    if (!usesModel || !guidance || !guidance.available) return '';
+    return guidance.agent_name || 'The Curator';
+  }
+
+  function connectionSections() {
+    const drawing = window.FileJanitorConnections;
+    const settings = (lastStatus && lastStatus.settings) || {};
+    if (!drawing || !settings.root_path) return [];
+    const id = wsId();
+    if (connectionsWorkspace !== id) {
+      resetConnections();
+      connectionsWorkspace = id;
+    }
+    if (connectionsLoadState === 'idle') void loadConnections();
+    if (connectionsLoadState !== 'ready') {
+      const section = el('div', 'fj-setting fj-setting-sends');
+      section.appendChild(el('h4', 'fj-setting-heading', 'Sends to'));
+      section.appendChild(
+        el(
+          'p',
+          'fj-setting-help',
+          connectionsLoadState === 'error'
+            ? 'Ori could not read which workspaces this one sends to. Close Settings and open it again.'
+            : 'Reading which workspaces this one sends to…'
+        )
+      );
+      return [section];
+    }
+    const ctx = {
+      card: connectCard,
+      busyId: connectionBusy,
+      agentName: connectionAgentName(),
+      onConnectStart: startConnect,
+      onConnectCancel: cancelConnect,
+      onReceiverChange: changeConnectReceiver,
+      onKindToggle: toggleConnectKind,
+      onConnectAllow: (receiverId, kinds) => void allowConnect(receiverId, kinds),
+      onTurnOff: view => void turnOffConnection(view)
+    };
+    const out = [drawing.renderSendsTo(document, connections, ctx)];
+    const receives = drawing.renderReceivesFrom(document, connections, ctx);
+    if (receives) out.push(receives);
+    return out;
+  }
+
+  async function connectionRequest(path, options) {
+    const id = wsId();
+    const response = await fetch(apiBase(id) + '/connections' + (path || ''), options);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.connections) {
+      const apiError = body.error || body;
+      const error = new Error(
+        (apiError && apiError.message) || 'Ori could not change this connection.'
+      );
+      error.refused = apiError && apiError.code === 'connection_refused';
+      throw error;
+    }
+    return body.connections;
+  }
+
+  async function loadConnections() {
+    const id = wsId();
+    if (!id) return;
+    connectionsLoadState = 'loading';
+    try {
+      const loaded = await connectionRequest('', { method: 'GET' });
+      if (wsId() !== id) return;
+      connections = loaded;
+      connectionsLoadState = 'ready';
+      if (connectAfterLoad) {
+        connectAfterLoad = false;
+        openConnectStep();
+      }
+    } catch {
+      if (wsId() !== id) return;
+      connectionsLoadState = 'error';
+    }
+    if (settingsOpen) renderSettings();
+  }
+
+  // openConnectStep opens the connect card, from Settings or from a review
+  // row's "Send to another workspace…" (FR 4).
+  function openConnectStep() {
+    const receivers = (connections && connections.receivers) || [];
+    const first = receivers.find(option => !option.refusal) || receivers[0];
+    const drawing = window.FileJanitorConnections;
+    connectCard = {
+      receiverId: first ? first.workspace_id : '',
+      kinds: first && drawing ? drawing.preTicked(first) : [],
+      error: ''
+    };
+  }
+
+  function startConnect() {
+    openConnectStep();
+    renderSettings();
+    document.getElementById('fileJanitorConnectTitle')?.focus?.();
+  }
+
+  function cancelConnect() {
+    connectCard = null;
+    renderSettings();
+    document.getElementById('fileJanitorConnectStart')?.focus?.();
+  }
+
+  function changeConnectReceiver(receiverId) {
+    const receiver = ((connections && connections.receivers) || []).find(
+      option => option.workspace_id === receiverId
+    );
+    const drawing = window.FileJanitorConnections;
+    connectCard = {
+      receiverId,
+      kinds: receiver && drawing ? drawing.preTicked(receiver) : [],
+      error: ''
+    };
+    renderSettings();
+    document.getElementById('fileJanitorConnectReceiver')?.focus?.();
+  }
+
+  function toggleConnectKind(kind, checked) {
+    if (!connectCard) return;
+    const kinds = new Set(connectCard.kinds || []);
+    if (checked) kinds.add(kind);
+    else kinds.delete(kind);
+    connectCard = { ...connectCard, kinds: [...kinds], error: '' };
+    renderSettings();
+    document.getElementById('fileJanitorConnectKind-' + kind)?.focus?.();
+  }
+
+  async function allowConnect(receiverId, kinds) {
+    if (connectionBusy || !connectCard) return;
+    connectionBusy = 'connect';
+    renderSettings();
+    try {
+      connections = await connectionRequest('', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiver_workspace_id: receiverId, kinds })
+      });
+      connectCard = null;
+      connectionBusy = '';
+      const view = (connections.sends_to || []).find(
+        item => item.receiver_workspace_id === receiverId
+      );
+      const name = view ? view.receiver_name : 'that workspace';
+      renderSettings();
+      setSettingsMessage(
+        `On. ${name} can now receive files, and each send waits for you on Review.`
+      );
+      announce(`Sends to ${name} is on.`);
+      // The review's picture and plan depend on which connections are on.
+      void loadBatch();
+    } catch (error) {
+      connectionBusy = '';
+      if (connectCard) connectCard = { ...connectCard, error: error.message };
+      renderSettings();
+      setSettingsMessage(error.message);
+    }
+  }
+
+  async function turnOffConnection(view) {
+    if (connectionBusy || !view || !view.id) return;
+    connectionBusy = view.id;
+    renderSettings();
+    try {
+      connections = await connectionRequest('/' + encodeURIComponent(view.id) + '/turn-off', {
+        method: 'POST'
+      });
+      connectionBusy = '';
+      renderSettings();
+      const sending = view.sender_workspace_id === wsId();
+      const message = sending
+        ? `Turned off. Nothing more goes to ${view.receiver_name}; files already sent stay there.`
+        : `Turned off. ${view.sender_name} can no longer send files here; files already sent stay here.`;
+      setSettingsMessage(message);
+      announce(message);
+      // Review must not keep drawing a Leaving card for a connection that is off.
+      void loadBatch();
+    } catch (error) {
+      connectionBusy = '';
+      renderSettings();
+      setSettingsMessage(error.message);
+    }
   }
 
   // The removal confirmation, kept in state so the section can render either
@@ -4031,14 +4391,23 @@
     entry.appendChild(mark);
     entry.appendChild(el('span', 'fj-history-name', displayName(action)));
 
+    // A send has no destination inside this folder: it says which workspace.
+    const receiver =
+      action.operation === 'send'
+        ? historyReceivers[action.send?.receiver_workspace_id] || 'another workspace'
+        : '';
     const what =
       action.operation === 'trash'
         ? action.result === 'applied'
           ? ' — moved to Trash'
           : ' — not removed'
-        : action.result === 'applied'
-          ? ' — filed to ' + (action.destination_relative || '')
-          : ' — not moved';
+        : action.operation === 'send'
+          ? action.result === 'applied'
+            ? ' — sent to ' + receiver
+            : ' — not sent'
+          : action.result === 'applied'
+            ? ' — filed to ' + (action.destination_relative || '')
+            : ' — not moved';
     entry.appendChild(el('span', 'fj-history-what', what));
 
     if (action.undo === 'undone') {
@@ -4053,7 +4422,11 @@
 
     // Undo is offered only where the server says it is still possible, and the
     // label names the actual reversal rather than a generic "undo".
-    if (action.result === 'applied' && action.undo === 'available') {
+    if (action.operation === 'send' && action.result === 'applied' && action.undo !== 'undone') {
+      // A send is put back with both folders held: from the receipt's Undo all,
+      // or from the receiving workspace's "Undo this send".
+      entry.appendChild(el('span', 'fj-muted', ' Put back from the receipt, or from ' + receiver));
+    } else if (action.result === 'applied' && action.undo === 'available') {
       entry.appendChild(
         button(
           action.operation === 'trash' ? 'Restore from Trash' : 'Undo move',
@@ -4233,6 +4606,8 @@
       const body = await listRead;
       if (!current()) return;
       historyActions = Array.isArray(body.actions) ? body.actions : [];
+      historyReceivers =
+        body.receivers && typeof body.receivers === 'object' ? { ...body.receivers } : {};
       historyLoaded = true;
       historyListLoadState = 'ready';
       if (historyStatusMessage.startsWith('History unavailable.')) historyStatusMessage = '';
@@ -4958,6 +5333,11 @@
     }
     const repair = !downloadsReviewRequested() && repairAction(status);
     if (repair) host.appendChild(repair);
+    // What other workspaces sent here, above the review (FR 36). Drawn only when
+    // something that arrived is still loose at the top level.
+    const arrivalsHost = el('div', 'fj-arrivals-host');
+    arrivalsHost.id = 'fileJanitorArrivalsHost';
+    host.appendChild(arrivalsHost);
     const batchHost = el('div', 'fj-batch');
     batchHost.id = 'fileJanitorBatch';
     host.appendChild(batchHost);
@@ -4976,7 +5356,128 @@
     announcer.setAttribute('aria-atomic', 'true');
     host.appendChild(announcer);
     renderBatch();
+    renderArrivalsStrip();
     if (lastResults) renderResults(lastResults, { focus: false });
+  }
+
+  // ---------------------------------------------------------------- arrivals
+  //
+  // The receiving side (FR 36 to 39): what other workspaces sent here, with "Undo
+  // this send" and Dismiss. The list is read once per visit to Review.
+  let arrivals = [];
+  let arrivalsLoadState = 'idle'; // idle | loading | ready | error
+  let arrivalsWorkspace = '';
+  let arrivalsShown = {}; // arrival id -> names shown
+  let arrivalBusy = '';
+  let arrivalMessage = '';
+
+  function resetArrivals() {
+    arrivals = [];
+    arrivalsLoadState = 'idle';
+    arrivalsWorkspace = '';
+    arrivalsShown = {};
+    arrivalBusy = '';
+    arrivalMessage = '';
+  }
+
+  function renderArrivalsStrip() {
+    const host = document.getElementById('fileJanitorArrivalsHost');
+    const drawing = window.FileJanitorConnections;
+    if (!host || !drawing || typeof drawing.renderArrivals !== 'function') return;
+    const id = wsId();
+    if (arrivalsWorkspace !== id) {
+      resetArrivals();
+      arrivalsWorkspace = id;
+    }
+    if (arrivalsLoadState === 'idle' && lastStatus?.settings?.root_path) void loadArrivals();
+    clear(host);
+    const section = drawing.renderArrivals(document, arrivals, {
+      shown: arrivalsShown,
+      busyId: arrivalBusy,
+      message: arrivalMessage,
+      onUndo: arrival => void undoArrival(arrival),
+      onDismiss: arrival => void dismissArrival(arrival),
+      onShowMore: arrival => {
+        arrivalsShown = {
+          ...arrivalsShown,
+          [arrival.id]: (arrivalsShown[arrival.id] || 5) + 5
+        };
+        renderArrivalsStrip();
+      }
+    });
+    if (section) host.appendChild(section);
+  }
+
+  async function arrivalRequest(path, options) {
+    const response = await fetch(apiBase(wsId()) + '/arrivals' + (path || ''), options);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const apiError = body.error || body;
+      throw new Error((apiError && apiError.message) || 'Ori could not do that.');
+    }
+    return body;
+  }
+
+  async function loadArrivals() {
+    const id = wsId();
+    if (!id) return;
+    arrivalsLoadState = 'loading';
+    try {
+      const body = await arrivalRequest('', { method: 'GET' });
+      if (wsId() !== id) return;
+      arrivals = Array.isArray(body.arrivals) ? body.arrivals.slice(0, 20) : [];
+      arrivalsLoadState = 'ready';
+    } catch {
+      if (wsId() !== id) return;
+      arrivals = [];
+      arrivalsLoadState = 'error';
+    }
+    renderArrivalsStrip();
+  }
+
+  async function undoArrival(arrival) {
+    if (arrivalBusy) return;
+    arrivalBusy = arrival.id;
+    renderArrivalsStrip();
+    try {
+      const body = await arrivalRequest('/' + encodeURIComponent(arrival.id) + '/undo', {
+        method: 'POST'
+      });
+      const back = body.undo?.back || 0;
+      const notBack = body.undo?.not_back || 0;
+      arrivalMessage =
+        (back === 1 ? '1 file is back in ' : back + ' files are back in ') +
+        arrival.sender_name +
+        '.' +
+        (notBack > 0
+          ? ' ' +
+            (notBack === 1 ? '1 file was' : notBack + ' files were') +
+            ' not put back: they are no longer loose here.'
+          : '');
+    } catch (error) {
+      arrivalMessage = error.message;
+    }
+    arrivalBusy = '';
+    announce(arrivalMessage);
+    arrivalsLoadState = 'idle';
+    renderArrivalsStrip();
+    // The files left this folder: the review reads the folder again.
+    void loadBatch();
+  }
+
+  async function dismissArrival(arrival) {
+    if (arrivalBusy) return;
+    arrivalBusy = arrival.id;
+    try {
+      await arrivalRequest('/' + encodeURIComponent(arrival.id) + '/dismiss', { method: 'POST' });
+      arrivals = arrivals.filter(item => item.id !== arrival.id);
+      arrivalMessage = '';
+    } catch (error) {
+      arrivalMessage = error.message;
+    }
+    arrivalBusy = '';
+    renderArrivalsStrip();
+    document.getElementById('fileJanitorBatch')?.focus?.();
   }
 
   function announce(message) {
@@ -5254,6 +5755,11 @@
     consoleOpen = false;
     consoleVisit++;
     settingsOpen = false;
+    // Read connections again on the next visit: the other workspace may have
+    // turned one off, or pointed at another folder, in the meantime. The same for
+    // what arrived.
+    resetConnections();
+    resetArrivals();
     consoleCloseButton = null;
     const host = document.getElementById(CONSOLE_HOST_ID);
     if (host) {
@@ -5609,6 +6115,9 @@
     const next = validTab(tab);
     if (!next) return;
     if (consoleTab !== next) consoleVisit++;
+    // Coming back to Review reads what arrived again: a send may have landed, or
+    // been undone from the other workspace, meanwhile.
+    if (next === 'review' && consoleTab !== next) arrivalsLoadState = 'idle';
     consoleTab = next;
     rememberedTab.set(wsId(), next);
     // Moving tabs drops the Trash tick: it is never restored after coming back
@@ -7601,8 +8110,9 @@
       settingsOpen = true;
       renderSettings();
     },
-    _setHistory: actions => {
+    _setHistory: (actions, receivers) => {
       historyActions = actions || [];
+      historyReceivers = receivers || {};
       historyLoaded = true;
       renderHistory();
     },
@@ -7626,6 +8136,8 @@
       removalSummary = null;
       removalConfirming = false;
       removalCompanionChecked = false;
+      resetConnections();
+      resetArrivals();
       pageOffset = 0;
       filter = '';
       batchTotal = 0;

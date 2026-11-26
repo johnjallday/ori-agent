@@ -15,6 +15,7 @@ import {
 } from './file-janitor-protection.js';
 import * as pictureModule from './file-janitor-picture.js';
 import * as receiptModule from './file-janitor-receipt.js';
+import * as connectionsModule from './file-janitor-connections.js';
 
 class FakeElement {
   constructor(tag) {
@@ -1580,6 +1581,30 @@ test('history lists what happened and names the reversal each entry offers', () 
   // The control says what it will actually do, not a generic "undo".
   assert.match(body, /Undo move/);
   assert.match(body, /Restore from Trash/);
+});
+
+test('history says which workspace a sent file went to, and where it is put back from', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._selectTab('history');
+  panel._setHistory(
+    [
+      {
+        id: 'action-send',
+        source_name: 'lease.pdf',
+        operation: 'send',
+        result: 'applied',
+        undo: 'available',
+        destination_relative: '',
+        send: { receiver_workspace_id: 'ws-2' }
+      }
+    ],
+    { 'ws-2': 'Documents' }
+  );
+  const body = text(doc);
+  assert.match(body, /lease\.pdf\s+— sent to Documents/);
+  assert.doesNotMatch(body, /filed to\s+·|Undo move/);
+  assert.match(body, /Put back from the receipt, or from Documents/);
 });
 
 test('history explains entries that cannot be undone instead of hiding them', () => {
@@ -7604,4 +7629,262 @@ test('a file that changed since the press is listed as not moved, with the reaso
   // Nothing moved, so there is nothing to put back.
   assert.equal(doc.getElementById('fileJanitorUndoAll'), null);
   assert.ok(doc.getElementById('fileJanitorReceiptDone'));
+});
+
+// ---------------------------------------------------------------- connections
+
+const CONNECTION_WORDS =
+  /\b(?:linked|batch(?:es)?|candidates?|proposals?|exact(?:ly)?|explicitly|drafts?)\b/i;
+
+function connectionsAnswer(over = {}) {
+  return {
+    workspace_name: 'Downloads',
+    sends_to: [],
+    receives_from: [],
+    receivers: [{ workspace_id: 'ws-2', name: 'Documents' }],
+    ...over
+  };
+}
+
+function sentConnection(over = {}) {
+  return {
+    id: 'connection-1',
+    sender_workspace_id: 'ws-1',
+    sender_name: 'Downloads',
+    receiver_workspace_id: 'ws-2',
+    receiver_name: 'Documents',
+    kinds: ['documents'],
+    on: true,
+    ...over
+  };
+}
+
+// openSettingsWithConnections opens Settings with the connections drawing loaded
+// and /connections answering from answer(); every request is recorded.
+async function openSettingsWithConnections(answer, statusOverrides = {}) {
+  const doc = setup();
+  globalThis.FileJanitorConnections = connectionsModule;
+  const requests = [];
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture(statusOverrides));
+  globalThis.fetch = async (url, opts = {}) => {
+    const target = String(url);
+    requests.push({ url: target, method: opts.method || 'GET', body: opts.body });
+    if (target.includes('/connections')) return answer(target, opts);
+    return {
+      ok: true,
+      json: async () => ({ batch: null, candidates: [], status: statusFixture(statusOverrides) })
+    };
+  };
+  panel._selectTab('settings');
+  await settle();
+  await settle();
+  return { doc, requests };
+}
+
+function connectionsSection(doc, name) {
+  return surface(doc).all(n => n.getAttribute && n.getAttribute('data-section') === name)[0];
+}
+
+function buttonIn(node, label) {
+  return node.all(n => n.tagName === 'BUTTON' && n.textContent === label)[0];
+}
+
+test('Settings shows Sends to, and connecting posts only the receiver and the kinds (FR 4 to 6, FR 17)', async () => {
+  let current = connectionsAnswer();
+  const { doc, requests } = await openSettingsWithConnections((url, opts) => {
+    if (opts.method === 'POST') {
+      current = connectionsAnswer({ sends_to: [sentConnection()] });
+    }
+    return { ok: true, json: async () => ({ connections: current }) };
+  });
+  try {
+    const sends = connectionsSection(doc, 'sends-to');
+    assert.ok(sends, 'the Sends to section is drawn');
+    assert.ok(
+      requests.some(r => r.url.endsWith('/file-janitor/connections') && r.method === 'GET')
+    );
+    assert.doesNotMatch(sends.textContent, CONNECTION_WORDS);
+
+    buttonIn(sends, 'Connect a workspace').click();
+    const card = doc.getElementById('fileJanitorConnectCard');
+    assert.ok(card, 'the connect card opens inside Settings');
+    assert.match(card.textContent, /Let Downloads send files to Documents\?/);
+    assert.match(card.textContent, /What it never allows/);
+    assert.doesNotMatch(card.textContent, CONNECTION_WORDS);
+    assert.ok(doc.getElementById('fileJanitorConnectAllow').disabled, 'nothing ticked yet');
+
+    const documents = doc.getElementById('fileJanitorConnectKind-documents');
+    documents.checked = true;
+    documents.dispatch('change');
+    doc.getElementById('fileJanitorConnectAllow').click();
+    await settle();
+
+    const post = requests.find(r => r.method === 'POST');
+    assert.ok(post.url.endsWith('/api/workspaces/ws-1/file-janitor/connections'));
+    assert.deepEqual(JSON.parse(post.body), {
+      receiver_workspace_id: 'ws-2',
+      kinds: ['documents']
+    });
+    assert.doesNotMatch(post.body, /\//, 'no path leaves the browser');
+
+    assert.equal(
+      doc.getElementById('fileJanitorConnectCard'),
+      null,
+      'the card closes once it is on'
+    );
+    const after = connectionsSection(doc, 'sends-to');
+    assert.match(
+      after.textContent,
+      /On · Documents files you approve on Review go to the top level of Documents\./
+    );
+    assert.match(
+      doc.getElementById('fileJanitorSettingsStatus').textContent,
+      /Documents can now receive files/
+    );
+    assert.match(
+      doc.getElementById('fileJanitorAnnounce')?.textContent || 'Sends to Documents is on.',
+      /Sends to Documents is on\./
+    );
+  } finally {
+    delete globalThis.FileJanitorConnections;
+  }
+});
+
+test('a refusal keeps the card open with the server sentence (FR 9)', async () => {
+  const { doc } = await openSettingsWithConnections((url, opts) =>
+    opts.method === 'POST'
+      ? {
+          ok: false,
+          json: async () => ({
+            code: 'connection_refused',
+            message:
+              'Downloads and Documents are on different disks. Ori only sends a file by moving it on one disk, never by copying it.'
+          })
+        }
+      : { ok: true, json: async () => ({ connections: connectionsAnswer() }) }
+  );
+  try {
+    buttonIn(connectionsSection(doc, 'sends-to'), 'Connect a workspace').click();
+    const box = doc.getElementById('fileJanitorConnectKind-documents');
+    box.checked = true;
+    box.dispatch('change');
+    doc.getElementById('fileJanitorConnectAllow').click();
+    await settle();
+    assert.ok(doc.getElementById('fileJanitorConnectCard'), 'the card stays open');
+    assert.match(doc.getElementById('fileJanitorConnectRefusal').textContent, /different disks/);
+  } finally {
+    delete globalThis.FileJanitorConnections;
+  }
+});
+
+test('the receiver sees Receives from and can turn it off (FR 11, FR 41)', async () => {
+  // This page is ws-1, here the receiver.
+  const incoming = sentConnection({ sender_workspace_id: 'ws-9', receiver_workspace_id: 'ws-1' });
+  let current = connectionsAnswer({
+    workspace_name: 'Documents',
+    receivers: [],
+    receives_from: [incoming]
+  });
+  const { doc, requests } = await openSettingsWithConnections((url, opts) => {
+    if (opts.method === 'POST')
+      current = connectionsAnswer({ workspace_name: 'Documents', receivers: [] });
+    return { ok: true, json: async () => ({ connections: current }) };
+  });
+  try {
+    const receives = connectionsSection(doc, 'receives-from');
+    assert.ok(receives, 'Receives from is drawn');
+    assert.match(receives.textContent, /Downloads can send Documents files here/);
+    assert.doesNotMatch(receives.textContent, CONNECTION_WORDS);
+    buttonIn(receives, 'Turn off').click();
+    await settle();
+    const post = requests.find(r => r.method === 'POST');
+    assert.ok(post.url.endsWith('/file-janitor/connections/connection-1/turn-off'));
+    assert.equal(post.body, undefined, 'turning off sends no body');
+    assert.equal(connectionsSection(doc, 'receives-from'), undefined);
+    assert.match(
+      doc.getElementById('fileJanitorSettingsStatus').textContent,
+      /Downloads can no longer send files here/
+    );
+    // The review is read again, so Review never keeps a stale Leaving card.
+    const turnOff = requests.findIndex(r => r.method === 'POST');
+    assert.ok(
+      requests.slice(turnOff + 1).some(r => r.url.includes('/batches')),
+      'turning a connection off reloads the review'
+    );
+  } finally {
+    delete globalThis.FileJanitorConnections;
+  }
+});
+
+test('with no folder set up, Settings has no Sends to section and asks for nothing', async () => {
+  const { doc, requests } = await openSettingsWithConnections(
+    () => ({ ok: true, json: async () => ({ connections: connectionsAnswer() }) }),
+    {
+      settings: {
+        content_mode: 'metadata_only',
+        filing_root_name: 'Filed',
+        daily_scan_local_time: '09:00'
+      }
+    }
+  );
+  try {
+    assert.equal(connectionsSection(doc, 'sends-to'), undefined);
+    assert.ok(!requests.some(r => r.url.includes('/connections')));
+  } finally {
+    delete globalThis.FileJanitorConnections;
+  }
+});
+
+test('the receiver sees what arrived on Review, and Undo this send posts with no body (FR 36, 38)', async () => {
+  const doc = setup();
+  globalThis.FileJanitorConnections = connectionsModule;
+  const requests = [];
+  let undone = false;
+  const arrived = {
+    id: 'arrival-1',
+    sender_workspace_id: 'ws-9',
+    sender_name: 'Downloads',
+    arrived_at: '2026-11-26T10:42:00Z',
+    count: 2,
+    names: ['lease.pdf', 'invoice.pdf']
+  };
+  try {
+    panel._setBatch(null, [], CATEGORIES);
+    openConsole(statusFixture(), 'review');
+    globalThis.fetch = async (url, opts = {}) => {
+      const target = String(url);
+      requests.push({ url: target, method: opts.method || 'GET', body: opts.body });
+      if (target.endsWith('/arrivals/arrival-1/undo')) {
+        undone = true;
+        return { ok: true, json: async () => ({ undo: { back: 2, not_back: 0, outcomes: [] } }) };
+      }
+      if (target.endsWith('/arrivals'))
+        return { ok: true, json: async () => ({ arrivals: undone ? [] : [arrived] }) };
+      return {
+        ok: true,
+        json: async () => ({ batch: null, candidates: [], status: statusFixture() })
+      };
+    };
+    panel._selectTab('settings');
+    panel._selectTab('review');
+    await settle();
+    await settle();
+    const host = doc.getElementById('fileJanitorArrivalsHost');
+    assert.match(host.textContent, /2 files arrived from Downloads/);
+    assert.match(host.textContent, /lease\.pdf from Downloads/);
+    doc.getElementById('fileJanitorUndoSend-arrival-1').click();
+    await settle();
+    await settle();
+    const post = requests.find(r => r.method === 'POST');
+    assert.ok(post.url.endsWith('/file-janitor/arrivals/arrival-1/undo'));
+    assert.equal(post.body, undefined);
+    assert.match(
+      doc.getElementById('fileJanitorArrivalsHost').textContent,
+      /2 files are back in Downloads\./
+    );
+    assert.doesNotMatch(doc.getElementById('fileJanitorArrivalsHost').textContent, /arrived from/);
+  } finally {
+    delete globalThis.FileJanitorConnections;
+  }
 });

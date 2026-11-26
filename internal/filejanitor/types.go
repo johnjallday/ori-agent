@@ -220,6 +220,12 @@ type JanitorSettings struct {
 	PendingFolderGrant     *PendingFolderGrant        `json:"pending_folder_grant,omitempty"`
 	LastFolderGrant        *FolderGrantReceipt        `json:"last_folder_grant,omitempty"`
 	LastAssistedAutomation *AssistedAutomationReceipt `json:"last_assisted_automation,omitempty"`
+	// SendsTo are the connections this workspace's Filing sends files on: one way,
+	// each to another workspace's folder, turned on by the person (see
+	// send_connection.go). Additive: an older build drops it on rewrite, which only
+	// loses the ability to send. Files already sent carry their own record, so
+	// their undo does not need it.
+	SendsTo []SendConnection `json:"sends_to,omitempty"`
 	// UpdatedAt is the last time these settings changed.
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
@@ -288,6 +294,7 @@ func (s JanitorSettings) Normalize() JanitorSettings {
 	if s.SchemaVersion != SettingsSchemaVersion {
 		out.SetupDecision = nil
 		out.SetupPreparation = nil
+		out.SendsTo = nil
 	}
 	out.SchemaVersion = SettingsSchemaVersion
 	out.WorkspaceID = strings.TrimSpace(out.WorkspaceID)
@@ -353,6 +360,7 @@ func (s JanitorSettings) Normalize() JanitorSettings {
 	if !out.ContentMode.ReadsFileContent() {
 		out.ContentProvider = ""
 	}
+	out.SendsTo = normalizeSendConnections(out.WorkspaceID, out.SendsTo)
 	// A confirmed root with no completion timestamp (or the reverse) is a
 	// half-written record: treat it as not set up rather than as configured.
 	if out.RootPath == "" || out.DirectoryReferenceID == "" {
@@ -416,6 +424,9 @@ func (s JanitorSettings) Validate() error {
 	}
 	if s.RootPath != "" && !filepath.IsAbs(s.RootPath) {
 		return fmt.Errorf("%w: root path %q must be absolute", ErrInvalidSettings, s.RootPath)
+	}
+	if err := validateSendConnections(s.WorkspaceID, s.SendsTo); err != nil {
+		return err
 	}
 	if pending := s.PendingFolderGrant; pending != nil {
 		if strings.TrimSpace(pending.RunID) == "" || strings.TrimSpace(pending.OperationID) == "" ||

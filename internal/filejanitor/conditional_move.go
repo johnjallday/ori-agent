@@ -28,7 +28,15 @@ import (
 // says exactly where anything it could not move back now is. See MoveRaceError.
 //
 // The caller holds lockRoot. Legacy category filing keeps using Mover; only
-// reviewed-destination filing and its Undo use this.
+// reviewed-destination filing, sends to another workspace, and their Undo use
+// this.
+//
+// A send moves one file between two managed folders: from the top level of the
+// sender's folder to the top level of the receiver's folder, under the same name,
+// on one disk. Both folders are opened and checked by identity exactly as one
+// folder is, the rename is the same kernel rename that refuses an occupied name,
+// and the move back after a failed check is the same no-replace rename. The
+// caller holds both folders' locks (lockRoots).
 
 // DirRef names a folder inside the managed root and the identity it had when
 // the person reviewed it. Rel is a slash path from the root ("" is the root
@@ -51,6 +59,23 @@ type ConditionalMove struct {
 	FromName, ToName string
 	// Expect is the file as it was reviewed. Its FileID must be non-empty.
 	Expect Fingerprint
+	// DestRoot and DestRootID name a second managed folder (absolute, clean) and
+	// its "device:inode". Both empty is a move inside Root, as before. When set,
+	// To is inside DestRoot rather than Root, and the move is a send: top level to
+	// top level under one name, both folders on one disk.
+	DestRoot   string
+	DestRootID string
+}
+
+// crossRoot reports whether the move goes from one managed folder to another.
+func (m ConditionalMove) crossRoot() bool { return m.DestRoot != "" || m.DestRootID != "" }
+
+// toRoot is the managed folder To is in, and its identity.
+func (m ConditionalMove) toRoot() (string, string) {
+	if m.crossRoot() {
+		return m.DestRoot, m.DestRootID
+	}
+	return m.Root, m.RootID
 }
 
 // ConditionalMover performs one conditional move.
@@ -105,7 +130,8 @@ type MoveRaceError struct {
 	// nothing moved.
 	RolledBack bool
 	// LeftAt is where the entry that could not be moved back is now, relative to
-	// the managed folder. Empty when RolledBack, or when Ori cannot find it.
+	// the managed folder To is in (the receiver's folder for a send). Empty when
+	// RolledBack, or when Ori cannot find it.
 	LeftAt string
 	// LeftIsReviewed is true when that entry is the reviewed file (the folder it
 	// went into changed), false when a different file took the reviewed file's name.
@@ -164,13 +190,75 @@ func (m ConditionalMove) validate() error {
 	if ValidateFileName(m.FromName) != nil || ValidateFileName(m.ToName) != nil {
 		return invalid("a file name is not a single name")
 	}
+	if m.Expect.Size < 0 {
+		return invalid("the reviewed size is not valid")
+	}
+	if m.crossRoot() {
+		return m.validateCrossRoot(invalid)
+	}
 	// A move inside one folder is a rename, and a case-only rename would look
 	// like an occupied name to the kernel. Filing and Undo always change folder.
 	if m.From.Rel == m.To.Rel || m.From.ID == m.To.ID {
 		return invalid("the file would stay in the same folder")
 	}
-	if m.Expect.Size < 0 {
-		return invalid("the reviewed size is not valid")
+	return nil
+}
+
+// validateCrossRoot is the shape of a send and of its undo: one managed folder's
+// top level to another's, under the same name. Anything deeper, a rename, or two
+// folders that are the same or nested is refused before any syscall.
+func (m ConditionalMove) validateCrossRoot(invalid func(string) error) error {
+	if m.DestRoot == "" || !strings.HasPrefix(m.DestRoot, "/") || path.Clean(m.DestRoot) != m.DestRoot || strings.ContainsRune(m.DestRoot, 0) {
+		return invalid("the receiving folder is not an absolute path")
+	}
+	if m.DestRootID == "" {
+		return invalid("the receiving folder's identity is missing")
+	}
+	if m.DestRoot == m.Root || m.DestRootID == m.RootID || RootsOverlap(m.Root, m.DestRoot) {
+		return invalid("the two folders are the same folder or one is inside the other")
+	}
+	if m.From != (DirRef{Rel: "", ID: m.RootID}) || m.To != (DirRef{Rel: "", ID: m.DestRootID}) {
+		return invalid("a file is only sent from one folder's top level to the other's")
+	}
+	if m.FromName != m.ToName {
+		return invalid("a sent file keeps its name")
+	}
+	return nil
+}
+
+// deviceOf is the device part of a "device:inode" identity, or "" when the
+// identity is not in that form.
+func deviceOf(id string) string {
+	device, inode, found := strings.Cut(id, ":")
+	if !found || device == "" || inode == "" || strings.Contains(inode, ":") {
+		return ""
+	}
+	return device
+}
+
+// sameDevice reports whether two "device:inode" identities are on one disk. An
+// identity in any other form is never on the same disk as anything.
+func sameDevice(aID, bID string) bool {
+	a, b := deviceOf(aID), deviceOf(bID)
+	return a != "" && a == b
+}
+
+// ConditionalMoveBetween reports nil when files can be sent from folder a to
+// folder b and back: both folders' filesystems refuse to replace a name, and both
+// are on one disk, so a send is a rename and never a copy. It is the one check for
+// turning a connection on and for the press that sends.
+func (s *Service) ConditionalMoveBetween(a, aID, b, bID string) error {
+	if s == nil {
+		return ErrMoveUnsupported
+	}
+	if err := s.conditionalMoverFor().Supported(a, aID); err != nil {
+		return err
+	}
+	if err := s.conditionalMoverFor().Supported(b, bID); err != nil {
+		return err
+	}
+	if !sameDevice(aID, bID) {
+		return ErrMoveCrossDevice
 	}
 	return nil
 }

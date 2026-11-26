@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -50,11 +51,45 @@ type Mover interface {
 // the same free name.
 var applyLocks sync.Map // root path -> *sync.Mutex
 
+// rootLockKey is the key one folder's lock is stored under.
+func rootLockKey(root string) string { return strings.ToLower(filepath.Clean(root)) }
+
 func lockRoot(root string) func() {
-	value, _ := applyLocks.LoadOrStore(strings.ToLower(filepath.Clean(root)), &sync.Mutex{})
+	value, _ := applyLocks.LoadOrStore(rootLockKey(root), &sync.Mutex{})
 	lock := value.(*sync.Mutex)
 	lock.Lock()
 	return lock.Unlock
+}
+
+// lockRoots takes the locks of several folders, for work that touches more than
+// one: a press that sends files to another workspace, and the undo of a send. The
+// locks are always taken in ascending key order and released in reverse, so two
+// workspaces sending to each other at the same moment cannot each hold one lock
+// and wait for the other. A folder named twice is locked once.
+//
+// The caller must not already hold any of these locks (they are not reentrant),
+// and must not call anything that takes a folder lock itself while holding them.
+func lockRoots(roots ...string) func() {
+	keys := make([]string, 0, len(roots))
+	for _, root := range roots {
+		key := rootLockKey(root)
+		if !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	unlocks := make([]func(), 0, len(keys))
+	for _, key := range keys {
+		value, _ := applyLocks.LoadOrStore(key, &sync.Mutex{})
+		lock := value.(*sync.Mutex)
+		lock.Lock()
+		unlocks = append(unlocks, lock.Unlock)
+	}
+	return func() {
+		for i := len(unlocks) - 1; i >= 0; i-- {
+			unlocks[i]()
+		}
+	}
 }
 
 // SetMover injects the component that performs moves.

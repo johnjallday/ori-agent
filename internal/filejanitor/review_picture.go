@@ -33,7 +33,32 @@ const (
 	PictureLeftOut      = "left_out"       // taken out of a ticked folder
 	PictureTrash        = "trash"          // marked for Trash, one file at a time
 	PictureCouldNotFile = "could_not_file" // failed or changed in an earlier attempt
+	// With a connection on: a file that will leave for another workspace, and a
+	// file of a kind a connection carries whose card is not ticked.
+	PictureLeaving = "leaving"
+	PictureNotSent = "not_sent"
 )
+
+// PictureLeavingFileLimit is how many names a Leaving card shows before "and N
+// more" (FR 21).
+const PictureLeavingFileLimit = 3
+
+// PictureLeavingCard is one receiving workspace's card in "Leaving": the files of
+// the kinds its connection carries. GroupState is the card's tick: ticked when
+// every such file is going, unticked when none is. KeptCount counts files of
+// those kinds the person kept in this folder's Filed folders instead (FR 23).
+type PictureLeavingCard struct {
+	ConnectionID        string        `json:"connection_id"`
+	ReceiverWorkspaceID string        `json:"receiver_workspace_id"`
+	ReceiverName        string        `json:"receiver_name"`
+	Kinds               []Category    `json:"kinds"`
+	GroupState          string        `json:"group_state"` // ticked | partial | unticked | none
+	Count               int           `json:"count"`
+	Files               []PictureFile `json:"files"`
+	NotSentCount        int           `json:"not_sent_count"`
+	NotSentFiles        []PictureFile `json:"not_sent_files"`
+	KeptCount           int           `json:"kept_count"`
+}
 
 // Two more lists the paging read serves, keyed by a pair's or bundle's ID: every
 // member of that card, wherever it is now.
@@ -90,6 +115,9 @@ type PictureLooseRow struct {
 	PlacedCategory Category `json:"placed_category,omitempty"` // set when every placed file shares one folder
 	TrashCount     int      `json:"trash_count"`
 	LooseCount     int      `json:"loose_count"`
+	// SentCount is how many of the row's files the person sent to another
+	// workspace from the row's menu; they are not in PlacedCount.
+	SentCount int `json:"sent_count,omitempty"`
 	// Singles are the loose files that sit with no sibling (at most twelve). Pairs
 	// and Bundles draw the rest of a possible-copies or music row as cards.
 	Singles []PictureFile   `json:"singles"`
@@ -125,6 +153,7 @@ type PictureBundle struct {
 	PlacedCount    int      `json:"placed_count"`
 	PlacedCategory Category `json:"placed_category,omitempty"`
 	TrashCount     int      `json:"trash_count"`
+	SentCount      int      `json:"sent_count,omitempty"`
 }
 
 // PictureSection is a bounded list with its whole count.
@@ -158,6 +187,13 @@ type ReviewPicture struct {
 	LeftOut      PictureSection    `json:"left_out"`
 	Trash        PictureSection    `json:"trash"`
 	CouldNotFile PictureSection    `json:"could_not_file"`
+	// Leaving has one card per connection that is on (FR 20, 21). Absent with no
+	// connection, so the picture is then exactly what it was before sends.
+	Leaving []PictureLeavingCard `json:"leaving,omitempty"`
+	// Suggestion is the Filing agent's kept suggestion for this review, drawn
+	// above Leaving with its cards unticked (FR 47, 48). Absent with no model,
+	// no connection, or no suggestion.
+	Suggestion *PictureSuggestion `json:"suggestion,omitempty"`
 }
 
 // PictureFilesQuery names one list to page: the section, and the folder category
@@ -207,6 +243,16 @@ type pictureLayout struct {
 	// the file itself changed or went missing since the scan; they are still
 	// waiting, so they are part of the scan's waiting total.
 	changed int
+	// leaving and notSent are keyed by connection ID; sentBy counts each question
+	// row's files sent from its menu; kept counts, per connection, the files of a
+	// carried kind the person kept in Filed instead.
+	leaving map[string][]PictureFile
+	notSent map[string][]PictureFile
+	sentBy  map[string]int
+	kept    map[string]int
+	// leftOutSend counts, per connection, files of a carried kind taken out of a
+	// card one at a time, so the Leaving card reads partial rather than ticked.
+	leftOutSend map[string]int
 }
 
 // Why a ticked file that is no longer the file that was ticked is not filed.
@@ -235,7 +281,10 @@ func layoutReviewPicture(groups ReviewGroups, view ReviewDraftView, candidates [
 		placed: map[string][]Category{}, trashBy: map[string]int{}, selected: map[string]int{},
 		family: map[string][]PictureFile{}, bundle: map[string][]PictureFile{},
 		familyOrder: map[string][]string{}, bundleOrder: map[string][]string{},
+		leaving: map[string][]PictureFile{}, notSent: map[string][]PictureFile{}, sentBy: map[string]int{}, kept: map[string]int{},
+		leftOutSend: map[string]int{},
 	}
+	routes := view.routes
 	choices := make(map[string]ReviewChoiceView, len(view.Choices))
 	for _, choice := range view.Choices {
 		choices[choice.CandidateID] = choice
@@ -307,6 +356,12 @@ func layoutReviewPicture(groups ReviewGroups, view ReviewDraftView, candidates [
 				layout.bundle[file.BundleID] = append(layout.bundle[file.BundleID], file)
 			}
 		}
+		// The connection that carries this file's kind, if any: a confident file of
+		// that kind is drawn as leaving or not sent, never as an unticked Filed card.
+		carrying, carried := sendRoute{}, false
+		if group.Kind == "filing" {
+			carrying, carried = routes.carrying(group.Category)
+		}
 		switch {
 		case chosen && choice.Operation == OperationTrash:
 			file := decorate(pictureFileFor(candidate, PictureTrash))
@@ -315,6 +370,23 @@ func layoutReviewPicture(groups ReviewGroups, view ReviewDraftView, candidates [
 			if group.Kind == "question" {
 				layout.trashBy[group.ID]++
 			}
+		case chosen && choice.ConnectionID != "":
+			file := decorate(pictureFileFor(candidate, PictureLeaving))
+			file.Category = choice.Category
+			file.YourChoice = group.Kind == "question"
+			layout.leaving[choice.ConnectionID] = append(layout.leaving[choice.ConnectionID], file)
+			track(file)
+			if group.Kind == "question" {
+				layout.sentBy[group.ID]++
+			}
+		case chosen && carried && choice.Category == group.Category:
+			// A file of a carried kind the person kept here: drawn in Filed, and
+			// counted on the Leaving card so it can offer to send them again.
+			layout.kept[carrying.ConnectionID]++
+			file := decorate(pictureFileFor(candidate, PictureFiled))
+			file.Category = choice.Category
+			layout.filed[choice.Category] = append(layout.filed[choice.Category], file)
+			track(file)
 		case chosen:
 			file := pictureFileFor(candidate, PictureFiled)
 			file.Category = choice.Category
@@ -331,6 +403,13 @@ func layoutReviewPicture(groups ReviewGroups, view ReviewDraftView, candidates [
 			file := pictureFileFor(candidate, PictureLeftOut)
 			file.Category = group.Category
 			layout.leftOut = append(layout.leftOut, file)
+			if carried {
+				layout.leftOutSend[carrying.ConnectionID]++
+			}
+		case carried:
+			file := pictureFileFor(candidate, PictureNotSent)
+			file.Category = group.Category
+			layout.notSent[carrying.ConnectionID] = append(layout.notSent[carrying.ConnectionID], file)
 		case group.Kind == "filing":
 			file := pictureFileFor(candidate, PictureUnfiled)
 			file.Category = group.Category
@@ -449,6 +528,7 @@ func buildReviewPicture(groups ReviewGroups, view ReviewDraftView, candidates []
 			shown += looseIn(bundle.Files)
 		}
 		row.More = row.LooseCount - shown
+		row.SentCount = layout.sentBy[group.ID]
 		if placed := layout.placed[group.ID]; len(placed) > 0 {
 			same := true
 			for _, category := range placed {
@@ -459,6 +539,25 @@ func buildReviewPicture(groups ReviewGroups, view ReviewDraftView, candidates []
 			}
 		}
 		picture.Loose = append(picture.Loose, row)
+	}
+	for _, route := range view.routes {
+		leaving, notSent := layout.leaving[route.ConnectionID], layout.notSent[route.ConnectionID]
+		card := PictureLeavingCard{
+			ConnectionID: route.ConnectionID, ReceiverWorkspaceID: route.ReceiverWorkspaceID, ReceiverName: route.ReceiverName,
+			Kinds: append([]Category(nil), route.Kinds...), GroupState: "none",
+			Count: len(leaving), Files: firstFiles(leaving, PictureLeavingFileLimit),
+			NotSentCount: len(notSent), NotSentFiles: firstFiles(notSent, PictureLeavingFileLimit),
+			KeptCount: layout.kept[route.ConnectionID],
+		}
+		switch {
+		case len(leaving) == 0 && len(notSent) > 0:
+			card.GroupState = "unticked"
+		case len(leaving) > 0 && len(notSent) == 0 && layout.leftOutSend[route.ConnectionID] == 0:
+			card.GroupState = "ticked"
+		case len(leaving) > 0:
+			card.GroupState = "partial"
+		}
+		picture.Leaving = append(picture.Leaving, card)
 	}
 	return picture
 }
@@ -479,7 +578,7 @@ func looseIn(files []PictureFile) int {
 // Trash box holds them.
 func drawn(files []PictureFile) bool {
 	for _, file := range files {
-		if file.Placement == PictureLoose || file.Placement == PictureFiled {
+		if file.Placement == PictureLoose || file.Placement == PictureFiled || file.Placement == PictureLeaving {
 			return true
 		}
 	}
@@ -520,6 +619,8 @@ func (l pictureLayout) cards(groupID string) ([]PicturePair, []PictureBundle) {
 				bundle.LooseCount++
 			case PictureTrash:
 				bundle.TrashCount++
+			case PictureLeaving:
+				bundle.SentCount++
 			case PictureFiled:
 				bundle.PlacedCount++
 				placedIn = append(placedIn, file.Category)
@@ -579,6 +680,15 @@ func (l pictureLayout) pictureList(section, key string) ([]PictureFile, error) {
 		return l.trash, nil
 	case PictureCouldNotFile:
 		return l.couldNot, nil
+	case PictureLeaving, PictureNotSent:
+		// A Leaving card's full list, keyed by its connection.
+		if !validConnectionID(key) {
+			return nil, ErrInvalidAction
+		}
+		if section == PictureLeaving {
+			return l.leaving[key], nil
+		}
+		return l.notSent[key], nil
 	}
 	return nil, ErrInvalidAction
 }
@@ -590,6 +700,9 @@ type pictureSnapshot struct {
 	groups     ReviewGroups
 	view       ReviewDraftView
 	candidates []JanitorCandidate
+	// state is the saved scan the snapshot was taken from, for the agent's kept
+	// suggestion.
+	state ScanState
 }
 
 // latestPendingBatch is the newest retained batch that still has work waiting or
@@ -639,14 +752,14 @@ func (s *Service) readPictureSnapshot(ctx context.Context, owner, workspaceID, b
 	if err != nil {
 		return pictureSnapshot{}, err
 	}
-	view := s.revalidatedReviewDraft(state, batchID, binding, groups, root)
+	view := s.revalidatedReviewDraftWith(state, batchID, binding, groups, root, s.liveSendRoutes(owner, workspaceID))
 	// Owner, grant or folder changes while the draft was revalidated must not lend
 	// the old scan's choices to a replacement scope.
 	_, freshBinding, freshRoot, err := s.reviewDraftSnapshot(owner, workspaceID, batchID, state)
 	if err != nil || freshRoot != root || freshBinding != binding || ctx.Err() != nil {
 		return pictureSnapshot{}, ErrReviewUnavailable
 	}
-	return pictureSnapshot{batchID: batchID, groups: groups, view: view, candidates: state.CandidatesFor(batchID)}, nil
+	return pictureSnapshot{batchID: batchID, groups: groups, view: view, candidates: state.CandidatesFor(batchID), state: state}, nil
 }
 
 // ReadReviewPicture is the one bounded read that draws the review's first
@@ -663,7 +776,13 @@ func (s *Service) ReadReviewPicture(ctx context.Context, owner, workspaceID, bat
 			LeftOut: pictureSection(nil), Trash: pictureSection(nil), CouldNotFile: pictureSection(nil),
 		}, nil
 	}
-	return buildReviewPicture(snapshot.groups, snapshot.view, snapshot.candidates), nil
+	picture := buildReviewPicture(snapshot.groups, snapshot.view, snapshot.candidates)
+	if len(snapshot.view.routes) > 0 {
+		if settings, err := s.store.LoadSettings(workspaceID); err == nil {
+			picture.Suggestion = pictureSuggestion(snapshot.state, settings, snapshot.view, snapshot.batchID)
+		}
+	}
+	return picture, nil
 }
 
 // ReadReviewPictureFiles pages one list of the picture ("and N more", a row's

@@ -712,12 +712,16 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 		offset = total
 	}
 	end := min(offset+limit, total)
+	page := actions[offset:end]
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"success": true,
-		"actions": actions[offset:end],
-		"total":   total,
-		"limit":   limit,
-		"offset":  offset,
+		"actions": page,
+		// The names of the workspaces this page's sends went to, for "sent to
+		// Documents"; a send's journal entry holds only the workspace's ID.
+		"receivers": h.service.ReceiverNames(page),
+		"total":     total,
+		"limit":     limit,
+		"offset":    offset,
 	})
 }
 

@@ -448,7 +448,7 @@ func (h *Handler) respondError(w http.ResponseWriter, err error, fallback string
 			status = http.StatusForbidden
 		case filejanitor.CodeWorkspaceMissing:
 			status = http.StatusNotFound
-		case filejanitor.CodeFolderConflict, filejanitor.CodeFolderChanged, filejanitor.CodePrivacyReviewRequired:
+		case filejanitor.CodeFolderConflict, filejanitor.CodeFolderChanged, filejanitor.CodePrivacyReviewRequired, filejanitor.CodeConnectionRefused:
 			status = http.StatusConflict
 		case filejanitor.CodePersistenceFailed, filejanitor.CodeBindingFailed:
 			status = http.StatusInternalServerError

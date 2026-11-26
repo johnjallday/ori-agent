@@ -51,6 +51,11 @@ type PreviewItem struct {
 	// name the file will actually get (FR-84).
 	Renamed bool  `json:"renamed,omitempty"`
 	Size    int64 `json:"size,omitempty"`
+	// ConnectionID is set on a send line: the connection the file goes out on.
+	// NameUsed says something already has the file's name at the receiver's top
+	// level, so the file will stay where it is (a send never renames).
+	ConnectionID string `json:"connection_id,omitempty"`
+	NameUsed     bool   `json:"name_used,omitempty"`
 }
 
 // Preview is the plan plus the approval that authorizes exactly it.

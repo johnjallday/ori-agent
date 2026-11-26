@@ -739,10 +739,83 @@ N files · time" with an **Undo all** link while on offer and "put back" after.
 `authorization_audit_test.go` and `route_parity_test.go`, stays inside reset
 admission, and returns no path, fingerprint or token.
 
+## Sending to another workspace (filing-sends-to-workspace)
+
+A workspace's Filing can send reviewed files to the top level of another
+workspace's folder, on a one-way connection the person turns on ("Downloads sends
+to Documents"). PRD: `tasks/prd-filing-sends-to-workspace.md` (archived after
+merge).
+
+- **Connection.** Stored in the sender's settings (`sends_to`), with both
+  workspaces' folder generations and both folders' `device:inode`. Whether it is
+  on is worked out every time (`connectionState`): relinking, revoking, removing
+  Filing or deleting either workspace ends it with no hook, and both sides say why.
+  Turning it on is refused, in one sentence, across disks, on a file system the
+  conditional mover refuses, for a receiver without Filing, paused or without
+  folder access, for overlapping folders, for the reverse of a connection that is
+  on, and for a kind another connection carries.
+- **Mover.** `ConditionalMove` gains `DestRoot/DestRootID`: top level to top level
+  under one name, both folders opened no-follow and checked by identity, one disk,
+  the kernel's no-replace rename, and a no-replace move back after a failed check.
+  `lockRoots` takes both folders' locks in ascending key order.
+- **Saved choices.** A send is a positive mark, `connection_id`, on a move choice;
+  it counts only while that connection is on and carries the file's kind. Losing
+  it (an older build's rewrite) files the file into Filed instead, never the
+  reverse. Routes (connections that are on) are worked out once per request and
+  bound by the draft revision (only when there is at least one) and the plan
+  digest; with no connection both are byte-identical to before.
+- **Picture.** `leaving` (one card per connection, ticked on open for confident
+  files of a carried kind), placements `leaving` and `not_sent`, `sent_count` on
+  question rows and bundles. Without a connection the picture JSON is unchanged.
+- **Press.** `lockRoots(sender, receivers)`, routes rechecked under the locks,
+  `sendOne` re-reads the saved connection before each file, journals
+  `OperationSend` + `send{connection_id, receiver_workspace_id, receiver_root_id,
+  receiver_root_dir_id, root_dir_id, left_at}` with no path, and moves through the
+  conditional mover. A used name leaves the file and the receipt says why; the plan
+  learns that with one no-follow stat per name, never a listing. Sends count in
+  the 1,000-file limit.
+- **Receipt and undo.** `sent` and `sends[]` (per receiver, with a page link) on
+  the receipt; never in `by_destination`. Undo all puts sends back from the
+  receiver with no connection needed, and reports them, touching nothing, when the
+  receiver no longer manages that folder. History's per-file Undo refuses a send.
+  The receiver's **Undo this send** (`UndoArrival`) returns only that press's files
+  still at its top level and never takes the filing's once-only Undo all claim.
+- **Receiver.** `arrivals` in the receiver's scan state: a display list written
+  once per press; drawing it reads only the receiver's own state and one stat per
+  name.
+- **Agent suggestion.** With a model set, "Ask <Curator> what to send" runs one
+  bounded turn (`send_suggestion_turn.go`) offered exactly one tool,
+  `filing_suggest_sends`, that only hands back a paragraph and file references.
+  The server keeps only waiting files on a connection that is on, as `suggestions`
+  (one per review), drawn unticked; only the person's tick sends them.
+
+### Storage (still scan state schema 3, additive)
+
+Sender settings `sends_to`; scan state `actions[].send`, `review_drafts[].choices[].
+connection_id`, `suggestions`; receiver scan state `arrivals`. What an older
+binary drops when it rewrites: `sends_to` (cannot send; sends already made keep
+their own record), an action's `send` block (that send can no longer be undone;
+an older build refuses the unknown `send` operation without touching the disk),
+`connection_id` (the file is filed into Filed instead), `arrivals` (the strip
+disappears), `suggestions` (the suggestion disappears). None widens what may move.
+
+### Routes added (both prefixes)
+
+`GET/POST .../connections`, `POST .../connections/{id}/turn-off`, `GET
+.../arrivals`, `POST .../arrivals/{id}/dismiss` and `/undo`, `POST
+.../batches/{id}/suggestion`. Each is in the authorization audit, route parity
+and path-leak lists, takes no path and returns none. New saved-choice actions:
+`send_connection`, `unsend_connection`, `keep_connection`, `send_group`,
+`send_suggested`, `unsend_suggested`.
+
 ## Non-goals
 
 No physical staging folders, recursive/folder moves, custom trees, content or
 archive inspection, hashing/duplicate verification, inferred disposal, learned
 approval, scheduled deletion, model dependency, workspace-navigation redesign,
 cross-batch approval, or backup guarantee. Explicit per-file system Trash and
-supported move Undo remain separate existing actions.
+supported move Undo remain separate existing actions. For sends: no sending
+without asking, no receivers without Filing, no folder choice or folder creation
+inside the receiver, no copying across disks, no two-way connections or onward
+sends, no map line between workspaces, and no agent tool that moves, renames or
+deletes a file.

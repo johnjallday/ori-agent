@@ -9,6 +9,14 @@ func (s *Service) reviewApprovalBinding(state ScanState, workspaceID, owner, bat
 	for _, draft := range state.ReviewDrafts {
 		if draft.BatchID == batchID {
 			hasDraft = true
+			// A choice marked as a send is filed only by the one press, which
+			// moves it to the other workspace. This older preview and apply would
+			// file it into Filed instead, so it is refused.
+			for _, choice := range draft.Choices {
+				if choice.ConnectionID != "" {
+					return "", "", ErrReviewConflict
+				}
+			}
 			break
 		}
 	}

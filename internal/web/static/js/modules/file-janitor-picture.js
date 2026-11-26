@@ -17,6 +17,10 @@ const COULD_NOT_FILE = 'could_not_file';
 // The lists behind a pair card and a bundle card that hold more files than they show.
 const FAMILY = 'family';
 const BUNDLE = 'bundle';
+// With a connection on: files going to another workspace, and files of a kind a
+// connection carries whose card is not ticked.
+const LEAVING = 'leaving';
+const NOT_SENT = 'not_sent';
 
 // The words on screen for each question group, keyed by the server's fixed rule
 // word (R17). The "Why?" sentence says what Ori actually checked (R18).
@@ -179,7 +183,8 @@ export function fileButtonModel({
 } = {}) {
   // A plan from another revision is not a forecast for the choices on screen.
   if (!planCurrent || saveState) plan = null;
-  const moves = plan?.move_count || 0;
+  // "File N files" counts the files going to another workspace too (FR 26).
+  const moves = (plan?.move_count || 0) + (plan?.send_count || 0);
   const trash = plan?.trash_count || 0;
   // Until a matching plan is available, the button says File and waits rather
   // than claiming there is nothing to file.
@@ -277,6 +282,11 @@ export function moreTitle(picture, more) {
   }
   if (more.section === LEFT_OUT) return LEFT_OUT_LABEL;
   if (more.section === TRASH) return 'Trash';
+  if (more.section === LEAVING || more.section === NOT_SENT) {
+    const card = (picture?.leaving || []).find(item => item.connection_id === more.key);
+    const name = card ? card.receiver_name : 'Another workspace';
+    return more.section === LEAVING ? 'Going to ' + name : name + ', not sent';
+  }
   return 'Could not be filed';
 }
 
@@ -291,8 +301,10 @@ function builder(doc) {
 
 // These are whole-section counts, not samples. A placed sibling may be drawn
 // both in its destination and on its pair card, but is no longer a question.
-function decisionSummary(h, picture, plan, folderName, sections) {
+function decisionSummary(h, picture, plan, folderName, sections, filedRoot) {
   const { move_count: moves, trash_count: trash } = plan;
+  if ((plan.send_count || 0) > 0)
+    return sendSummary(h, picture, plan, folderName, sections, filedRoot);
   const undecided = picture.loose.reduce((total, row) => total + row.loose_count, 0);
   const summary = h('div', 'fj-decision-summary');
   const counts = h('p', 'fj-decision-counts');
@@ -328,10 +340,248 @@ function decisionSummary(h, picture, plan, folderName, sections) {
   return summary;
 }
 
+// sendSummary names both totals when files are leaving (FR 26): "14 to Documents ·
+// 29 to Downloads/Filed · 11 stay loose".
+export function sendTotals(picture, plan, folderName, filedRoot = 'Filed') {
+  const parts = [];
+  for (const send of plan?.sends || []) {
+    if (send.count > 0) parts.push(send.count + ' to ' + send.receiver_name);
+  }
+  if ((plan?.move_count || 0) > 0)
+    parts.push(plan.move_count + ' to ' + folderName + '/' + (filedRoot || 'Filed'));
+  const loose = (picture?.loose || []).reduce((total, row) => total + (row.loose_count || 0), 0);
+  if (loose > 0) parts.push(loose + (loose === 1 ? ' stays loose' : ' stay loose'));
+  if ((plan?.trash_count || 0) > 0) parts.push(plan.trash_count + ' marked for Trash');
+  return parts;
+}
+
+function sendSummary(h, picture, plan, folderName, sections, filedRoot) {
+  const summary = h('div', 'fj-decision-summary');
+  const counts = h('p', 'fj-decision-counts');
+  sendTotals(picture, plan, folderName, filedRoot).forEach((text, index) => {
+    if (index) {
+      const separator = h('span', '', '·');
+      separator.setAttribute('aria-hidden', 'true');
+      counts.appendChild(separator);
+    }
+    counts.appendChild(h('span', '', text));
+  });
+  summary.appendChild(counts);
+  return summary;
+}
+
 function sectionTitle(h, text) {
   const title = h('h4', 'fj-box-title', text);
   title.setAttribute('tabindex', '-1');
   return title;
+}
+
+// leavingCard is one receiving workspace's card in "Leaving <folder>" (FR 21 to
+// 23, FR 25): its tick, the receiver's name, the count, the first three names,
+// "and N more", where the files land, how many will stay because the name is
+// used, and the quiet switch between sending and keeping.
+function leavingCard(h, card, ctx, folderName) {
+  const leaving = card.count || 0;
+  const notSent = card.not_sent_count || 0;
+  const article = h('article', 'fj-leaving-card' + (leaving === 0 ? ' is-unticked' : ''));
+  article.setAttribute('data-fj-leaving', card.connection_id);
+  const head = h('div', 'fj-folder-head');
+  const label = h('label', 'fj-folder-tick');
+  const box = h('input');
+  box.type = 'checkbox';
+  box.id = 'fileJanitorLeaving-' + card.connection_id;
+  box.checked = card.group_state === 'ticked' || card.group_state === 'partial';
+  box.indeterminate = card.group_state === 'partial';
+  box.disabled = !ctx.editsAvailable || (leaving === 0 && notSent === 0 && !card.kept_count);
+  box.setAttribute(
+    'aria-label',
+    'Send ' + filesWord(leaving + notSent) + ' to the ' + card.receiver_name + ' workspace'
+  );
+  box.setAttribute('aria-checked', box.indeterminate ? 'mixed' : box.checked ? 'true' : 'false');
+  box.addEventListener('change', () => ctx.onTickLeaving?.(card, box.checked));
+  label.appendChild(box);
+  const icon = h('span', 'fj-leaving-icon', '→');
+  icon.setAttribute('aria-hidden', 'true');
+  label.appendChild(icon);
+  const name = h('span', 'fj-folder-name', card.receiver_name);
+  label.appendChild(name);
+  label.appendChild(h('span', 'fj-leaving-kind', ' workspace'));
+  head.appendChild(label);
+  head.appendChild(h('span', 'fj-folder-count', String(leaving)));
+  article.appendChild(head);
+
+  if (leaving > 0) {
+    article.appendChild(
+      nameList(h, card.files, 'fj-folder-files', ctx, {
+        location: LEAVING + '-' + card.connection_id,
+        fallback: 'fileJanitorLeavingTitle',
+        planned: true
+      })
+    );
+    if (leaving > card.files.length)
+      article.appendChild(
+        moreButton(h, ctx, LEAVING, card.connection_id, card.files.length, leaving)
+      );
+    article.appendChild(
+      h(
+        'p',
+        'fj-leaving-note',
+        'They land at the top level of ' +
+          card.receiver_name +
+          '. Nothing already there is touched.'
+      )
+    );
+    const send = (ctx.plan?.sends || []).find(item => item.connection_id === card.connection_id);
+    if (send?.name_used > 0)
+      article.appendChild(
+        h(
+          'p',
+          'fj-leaving-used',
+          filesWord(send.name_used) +
+            ' will stay in ' +
+            folderName +
+            ': the name is already used in ' +
+            card.receiver_name +
+            '.'
+        )
+      );
+    const keep = h('button', 'fj-link', 'Keep these in ' + folderName + ' instead');
+    keep.type = 'button';
+    keep.id = 'fileJanitorKeepLeaving-' + card.connection_id;
+    keep.disabled = !ctx.editsAvailable;
+    keep.addEventListener('click', () => ctx.onKeepLeaving?.(card));
+    article.appendChild(keep);
+  } else {
+    article.appendChild(
+      h('p', 'fj-leaving-note', 'Nothing is leaving for ' + card.receiver_name + '.')
+    );
+    if (notSent > 0 || card.kept_count > 0) {
+      const send = h('button', 'fj-link', 'Send them to ' + card.receiver_name);
+      send.type = 'button';
+      send.id = 'fileJanitorSendLeaving-' + card.connection_id;
+      send.disabled = !ctx.editsAvailable;
+      send.addEventListener('click', () => ctx.onSendLeaving?.(card));
+      article.appendChild(send);
+    }
+  }
+  if (notSent > 0) {
+    article.appendChild(h('p', 'fj-not-filed', 'Not sent'));
+    article.appendChild(
+      nameList(h, card.not_sent_files, 'fj-folder-files', ctx, {
+        location: NOT_SENT + '-' + card.connection_id,
+        fallback: 'fileJanitorLeavingTitle'
+      })
+    );
+    if (notSent > card.not_sent_files.length)
+      article.appendChild(
+        moreButton(h, ctx, NOT_SENT, card.connection_id, card.not_sent_files.length, notSent)
+      );
+  }
+  return article;
+}
+
+export const SUGGESTION_LABEL = 'A suggestion, it moves nothing';
+
+// suggestionSection is "Ask <agent> what to send" and, once asked, the agent's
+// suggestion: its face and name, the label, its paragraph whole, and one card per
+// workspace with the tick off. File names are untrusted text, so a suggested send
+// always needs this one extra tick (FR 48).
+function suggestionSection(h, picture, ctx) {
+  const section = h('section', 'fj-suggestion');
+  section.setAttribute('aria-labelledby', 'fileJanitorSuggestionTitle');
+  const suggestion = picture.suggestion;
+  const agent = (suggestion && suggestion.agent_name) || ctx.askAgent || 'The Filing agent';
+  const head = h('div', 'fj-suggestion-head');
+  const face = h('span', 'fj-suggestion-face', Array.from(agent)[0] || '?');
+  face.setAttribute('aria-hidden', 'true');
+  head.appendChild(face);
+  const title = h('h4', 'fj-suggestion-title', agent);
+  title.id = 'fileJanitorSuggestionTitle';
+  head.appendChild(title);
+  if (suggestion) head.appendChild(h('span', 'fj-suggestion-label', SUGGESTION_LABEL));
+  section.appendChild(head);
+
+  if (suggestion && suggestion.empty) {
+    section.appendChild(h('p', 'fj-suggestion-paragraph', agent + ' had no suggestion.'));
+  } else if (suggestion) {
+    section.appendChild(h('p', 'fj-suggestion-paragraph', suggestion.paragraph || ''));
+    const cards = h('div', 'fj-folder-cards');
+    for (const card of suggestion.cards || []) {
+      const article = h('article', 'fj-leaving-card fj-suggested-card is-unticked');
+      article.setAttribute('data-fj-suggested', card.connection_id);
+      const label = h('label', 'fj-folder-tick');
+      const box = h('input');
+      box.type = 'checkbox';
+      box.id = 'fileJanitorSuggested-' + card.connection_id;
+      box.checked = card.group_state === 'ticked' || card.group_state === 'partial';
+      box.indeterminate = card.group_state === 'partial';
+      box.disabled = !ctx.editsAvailable;
+      box.setAttribute(
+        'aria-label',
+        'Send the ' +
+          filesWord(card.count) +
+          ' ' +
+          agent +
+          ' suggested to the ' +
+          card.receiver_name +
+          ' workspace'
+      );
+      box.setAttribute(
+        'aria-checked',
+        box.indeterminate ? 'mixed' : box.checked ? 'true' : 'false'
+      );
+      box.addEventListener('change', () => ctx.onTickSuggestion?.(card, box.checked));
+      label.appendChild(box);
+      label.appendChild(h('span', 'fj-folder-name', card.receiver_name));
+      label.appendChild(h('span', 'fj-leaving-kind', ' workspace'));
+      const head = h('div', 'fj-folder-head');
+      head.appendChild(label);
+      head.appendChild(h('span', 'fj-folder-count', String(card.count)));
+      article.appendChild(head);
+      const names = h('ul', 'fj-folder-files');
+      for (const file of card.files || []) {
+        const item = h('li', 'fj-file');
+        setName(h, item, file.name);
+        names.appendChild(item);
+      }
+      article.appendChild(names);
+      if (card.count > (card.files || []).length)
+        article.appendChild(h('p', 'fj-sub', 'and ' + (card.count - card.files.length) + ' more'));
+      article.appendChild(
+        h('p', 'fj-leaving-note', 'Tick to send these too. Nothing moves until you press File.')
+      );
+      cards.appendChild(article);
+    }
+    section.appendChild(cards);
+  }
+  if (ctx.askAgent) {
+    const ask = h(
+      'button',
+      'fj-btn fj-btn-secondary',
+      ctx.asking ? 'Asking ' + ctx.askAgent + '…' : 'Ask ' + ctx.askAgent + ' what to send'
+    );
+    ask.type = 'button';
+    ask.id = 'fileJanitorAskAgent';
+    ask.disabled = Boolean(ctx.asking) || !ctx.editsAvailable;
+    ask.addEventListener('click', () => ctx.onAskAgent?.());
+    section.appendChild(ask);
+  }
+  return section;
+}
+
+// leavingFrame is "Leaving <folder>", drawn above the folder's own frame whenever a
+// connection is on (FR 20).
+function leavingFrame(h, picture, ctx, folderName) {
+  const frame = h('section', 'fj-frame fj-leaving-frame');
+  frame.setAttribute('aria-labelledby', 'fileJanitorLeavingTitle');
+  const title = h('h3', 'fj-frame-title', 'Leaving ' + folderName);
+  title.id = 'fileJanitorLeavingTitle';
+  title.setAttribute('tabindex', '-1');
+  frame.appendChild(title);
+  const cards = h('div', 'fj-folder-cards');
+  for (const card of picture.leaving) cards.appendChild(leavingCard(h, card, ctx, folderName));
+  frame.appendChild(cards);
+  return frame;
 }
 
 // renderPicture draws the first screenful. ctx supplies the folder's display
@@ -339,6 +589,8 @@ function sectionTitle(h, text) {
 // the callbacks. Draws no control that the server did not describe.
 export function renderPicture(doc, picture, ctx) {
   const h = builder(doc);
+  // The connections that are on, for the row menus' "Send to <receiver>" entries.
+  ctx = { ...ctx, leaving: Array.isArray(picture.leaving) ? picture.leaving : [] };
   const folderName = ctx.folderName || 'This folder';
   const root = h('section', 'fj-picture');
   root.id = 'fileJanitorPicture';
@@ -350,6 +602,13 @@ export function renderPicture(doc, picture, ctx) {
   const lead = h('p', 'fj-lead', leadSentences(folderName, picture.content_read).join(' '));
   lead.id = 'fileJanitorLead';
   root.appendChild(lead);
+
+  const leaving = Array.isArray(picture.leaving) && picture.leaving.length > 0;
+  // The agent's suggestion, above Leaving (FR 43, 47, 48). With no model the
+  // console passes no agent and the server sends no suggestion: nothing is drawn.
+  if (leaving && (ctx.askAgent || picture.suggestion))
+    root.appendChild(suggestionSection(h, picture, ctx));
+  if (leaving) root.appendChild(leavingFrame(h, picture, ctx, folderName));
 
   const frame = h('section', 'fj-frame');
   frame.setAttribute('aria-labelledby', 'fileJanitorFrameTitle');
@@ -394,11 +653,18 @@ export function renderPicture(doc, picture, ctx) {
   if (picture.trash.count > 0) frame.appendChild(trashBox(h, picture, trashTitle, ctx));
   if (ctx.plan && !ctx.plan.over_limit && Number.isSafeInteger(ctx.plan.move_count))
     root.appendChild(
-      decisionSummary(h, picture, ctx.plan, folderName, {
-        filed: filedTitle,
-        loose: looseTitle,
-        trash: trashTitle
-      })
+      decisionSummary(
+        h,
+        picture,
+        ctx.plan,
+        folderName,
+        {
+          filed: filedTitle,
+          loose: looseTitle,
+          trash: trashTitle
+        },
+        ctx.filedRoot
+      )
     );
   if (picture.could_not_file.count > 0) frame.appendChild(couldNotFile(h, picture, ctx));
   if (ctx.more) frame.appendChild(morePanel(h, picture, ctx));
@@ -583,20 +849,35 @@ function folderCard(h, folder, ctx) {
 // A row menu never offers Trash. When the row's files are in several folders none of
 // the choices describes the row, so a disabled line says so and "Leave here" stays
 // selectable.
-export function rowMenuValue(row) {
+export function rowMenuValue(row, leaving = []) {
   const placed = row?.placed_count || 0;
+  const sent = row?.sent_count || 0;
+  if (sent > 0) {
+    // The whole row sent to the one workspace that is connected.
+    if (sent === row.count && placed === 0 && leaving.length === 1)
+      return 'send:' + leaving[0].connection_id;
+    return 'mixed';
+  }
   if (placed === 0) return 'leave';
   if (placed === row.count && row.placed_category) return 'move:' + row.placed_category;
   return 'mixed';
 }
 
-export function rowMenuOptions(destinations, value = 'leave') {
+// With a connection on, a row can also be sent: one entry per connected workspace
+// and, last, "Send to another workspace…", which opens the connect step (FR 27).
+// With no connection the menu is exactly what it was before sends.
+export function rowMenuOptions(destinations, value = 'leave', leaving = []) {
   const options = [
     { value: 'leave', label: 'Leave here' },
     { value: 'stop', label: 'Leave here, stop asking' }
   ];
   for (const destination of destinations || [])
     options.push({ value: 'move:' + destination.id, label: 'Move to ' + destination.label });
+  if (leaving.length) {
+    for (const card of leaving)
+      options.push({ value: 'send:' + card.connection_id, label: 'Send to ' + card.receiver_name });
+    options.push({ value: 'connect', label: 'Send to another workspace…' });
+  }
   // Some placed, some still loose or in Trash, or placed in different folders: no
   // single choice describes the row, and the note below it says exactly what.
   if (value === 'mixed') options.push({ value: 'mixed', label: 'Mixed choices', disabled: true });
@@ -604,8 +885,10 @@ export function rowMenuOptions(destinations, value = 'leave') {
 }
 
 export function parseChoice(value) {
-  if (value === 'leave' || value === 'stop') return { kind: value };
+  if (value === 'leave' || value === 'stop' || value === 'connect') return { kind: value };
   if (String(value).startsWith('move:')) return { kind: 'move', category: String(value).slice(5) };
+  if (String(value).startsWith('send:'))
+    return { kind: 'send', connectionId: String(value).slice(5) };
   return null;
 }
 
@@ -624,6 +907,12 @@ export function rowNote(row, ctx) {
     else parts.push(placed + ' placed in other folders');
   }
   if (trash > 0) parts.push(trash + ' in Trash');
+  const sent = row?.sent_count || 0;
+  if (sent > 0) {
+    const leaving = ctx?.leaving || [];
+    const name = leaving.length === 1 ? leaving[0].receiver_name : 'other workspaces';
+    parts.push((sent === row.count ? 'All going to ' : sent + ' going to ') + name);
+  }
   return parts.join(' · ');
 }
 
@@ -738,12 +1027,12 @@ export function bundleMenuValue(bundle) {
 export const KEPT_NOTE = 'Ori will not ask about these again.';
 
 // The menu of a row or a bundle: the same choices, one value in, one choice out.
-function choiceMenu(h, { id, label, value, destinations, disabled, onChoice }) {
+function choiceMenu(h, { id, label, value, destinations, leaving, disabled, onChoice }) {
   const select = h('select', 'fj-row-menu');
   select.id = id;
   select.setAttribute('aria-label', label);
   select.disabled = disabled;
-  for (const option of rowMenuOptions(destinations, value)) {
+  for (const option of rowMenuOptions(destinations, value, leaving || [])) {
     const node = h('option', '', option.label);
     node.value = option.value;
     node.selected = option.value === value;
@@ -761,8 +1050,9 @@ function rowMenu(h, row, ctx) {
   return choiceMenu(h, {
     id: 'fileJanitorRowMenu-' + row.key,
     label: looseLabel(row) + ': what to do with these files',
-    value: rowMenuValue(row),
+    value: rowMenuValue(row, ctx.leaving || []),
     destinations: ctx.destinations,
+    leaving: ctx.leaving || [],
     disabled: !ctx.editsAvailable,
     onChoice: choice => ctx.onRowChoice?.(row, choice)
   });

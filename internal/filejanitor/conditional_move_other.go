@@ -24,3 +24,6 @@ func (unsupportedConditionalMover) MakeFolder(context.Context, string, string, D
 func (unsupportedConditionalMover) MoveIfUnchanged(context.Context, ConditionalMove) (Fingerprint, error) {
 	return Fingerprint{}, ErrMoveUnsupported
 }
+
+// namesUsed is unavailable here, like every send.
+func namesUsed(string, string, []string) (map[string]bool, error) { return nil, ErrMoveUnsupported }

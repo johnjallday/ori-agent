@@ -97,6 +97,9 @@ type PlanItem struct {
 	// FingerprintKey binds the item to the file state the user was shown. If
 	// the file changes between preview and confirm, the plan no longer matches.
 	FingerprintKey string
+	// ConnectionID is set only on an OperationSend item: the connection the file
+	// goes out on.
+	ConnectionID string
 }
 
 // PayloadHash computes the stable hash of a plan. Items are sorted so the same
@@ -105,12 +108,16 @@ type PlanItem struct {
 func PayloadHash(workspaceID, batchID string, items []PlanItem) string {
 	normalized := make([]string, 0, len(items))
 	for _, item := range items {
-		normalized = append(normalized, strings.Join([]string{
+		parts := []string{
 			item.CandidateID,
 			string(item.Operation),
 			string(item.Category),
 			item.FingerprintKey,
-		}, "|"))
+		}
+		if item.ConnectionID != "" {
+			parts = append(parts, item.ConnectionID) // only a send has one; every other hash is unchanged
+		}
+		normalized = append(normalized, strings.Join(parts, "|"))
 	}
 	sort.Strings(normalized)
 	sum := sha256.Sum256([]byte(workspaceID + "\x00" + batchID + "\x00" + strings.Join(normalized, "\n")))

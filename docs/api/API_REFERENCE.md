@@ -2225,6 +2225,33 @@ manual consent, not just `paused:true` or missing approval data.
 See [reviewed creation architecture](../architecture/file-janitor-creation-flow.md)
 for persistence versions, dispatch/receipt refusal fences and lifecycle semantics.
 
+### Sending to another workspace
+
+A one-way connection lets this workspace's Filing send reviewed files to the top
+level of another workspace's folder. No request names a folder: the receiver is
+named by workspace ID, a connection or an arrival by its ID, and the server works
+out both folders. No response carries a path. Architecture:
+[group review](../architecture/file-janitor-group-review.md#sending-to-another-workspace-filing-sends-to-workspace).
+
+| Method / suffix | Body | Effect |
+| --- | --- | --- |
+| `GET /connections` | None | `{connections: {workspace_name, sends_to[], receives_from[], receivers[]}}`; each connection `{id, sender_*, receiver_*, kinds, on, ended?}`; each receiver option `{workspace_id, name, guided_documents?, refusal?}`. |
+| `POST /connections` | `{ "receiver_workspace_id": "<id>", "kinds": ["documents"] }` | Turns the connection on after every check; refusal is `409 connection_refused` with one sentence. Moves nothing. |
+| `POST /connections/{connectionID}/turn-off` | None | Removes the connection from either side; idempotent. Moves nothing. |
+| `GET /arrivals` | None | `{arrivals: [{id, sender_workspace_id, sender_name, arrived_at, count, names[]}]}`: sends still loose at this folder's top level. |
+| `POST /arrivals/{arrivalID}/dismiss` | None | Hides the strip. Moves nothing. |
+| `POST /arrivals/{arrivalID}/undo` | None | "Undo this send": puts that press's files still at the top level back in the sender's folder; `{undo: {back, not_back, outcomes[]}}`. |
+| `POST /batches/{batchID}/suggestion` | None | One bounded turn of the Filing agent (model mode only); `{suggestion: {agent_name, paragraph, empty, cards[]}}`, cards unticked; `409 suggestion_unavailable` otherwise. Moves and ticks nothing. |
+
+With a connection on: the picture gains `leaving[]` and, after an Ask,
+`suggestion`; the plan gains `send_count` and `sends[]` (with `name_used`) and
+binds both folders' identities in `plan_digest`; the receipt gains `sent` and
+`sends[]` (`receiver_link` opens the receiver's Review); History's response gains
+`receivers {id: name}`. Saved-choice edits gain `connection_id` for the actions
+`send_connection`, `unsend_connection`, `keep_connection`, `send_group`,
+`send_suggested`, `unsend_suggested`. With no connection every response is as
+before.
+
 ## Folder Agent API
 
 "Hire an agent for <folder>" (`tasks/prd-folder-agent-evolution.md`). Every entry that shows a folder (Home's Explore a folder, the composer's Add folder, Create Workspace's assisted pane) shows the same card. Its Hire step names who is hired before anything exists. Hire & build then creates an anchored workspace on the folder, the hired agent in it, and its first ticket `Look around <folder>`. The agent then walks the folder (metadata only), takes one bounded look and reports. **No request carries a filesystem path.** The folder is chosen on the server, and Start names only the server's choice token. Bodies are capped at 8 KiB and refuse unknown fields with `400`. Every error is flat, `{"error": "<one sentence>"}`, and the card shows the sentence unchanged. Some errors add `code`, `duplicate` or `repair: "choose_folder"`. `503` means the feature is not wired.

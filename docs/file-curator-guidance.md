@@ -49,6 +49,22 @@ MCP availability and task skill overrides cannot replace it. Existing user
 instructions and imported-skill trust settings are preserved. No shared agent
 definition, tool allowlist or opt-in setting is modified to attach guidance.
 
+## Suggesting what to send
+
+When this folder's Filing sends to another workspace and uses a model, the Review
+tab offers **Ask <Curator> what to send**. Pressing it starts one bounded turn of
+the Curator's own model, outside chat, that is offered exactly one tool,
+`filing_suggest_sends`, whose only effect is to hand back a paragraph and file
+references. The Curator is given the waiting files' names, kinds, sizes and dates
+and the connected workspaces' names, each behind a short reference, fenced as
+untrusted data; it sees no file contents and nothing inside any other workspace.
+The server keeps only files that are waiting in that review on a connection that
+is on, and draws them unticked: a suggested send always needs the user's tick and
+**File**. The Curator's chat tools and the Filing connector's four read-only
+tools are unchanged. With "names and details only, no model" the button and any
+suggestion are absent. The bundled guidance tells the Curator that a suggestion
+moves nothing and never to claim a file was sent.
+
 ## Stored facts and review return
 
 The approved Filing folder's projection is shared by the review UI and the

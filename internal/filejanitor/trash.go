@@ -245,6 +245,10 @@ func (s *Service) Undo(ctx context.Context, workspaceID, actionID, userID string
 			return fmt.Errorf("%w: an undo is already running for this file", ErrUndoUnavailable)
 		case !stored.Undoable():
 			return fmt.Errorf("%w: only a completed action can be undone", ErrUndoUnavailable)
+		case stored.Operation == OperationSend:
+			// A send is put back with both folders held: from its receipt's Undo all,
+			// or from the receiving workspace's "Undo this send".
+			return fmt.Errorf("%w: a file sent to another workspace is put back from its receipt", ErrUndoUnavailable)
 		case !stored.BelongsToRoot(settings.RootID):
 			// The action was performed against a folder this workspace no longer
 			// manages. Its paths are relative, so reversing it now would write
@@ -413,7 +417,7 @@ func (s *Service) finishUndo(workspaceID string, action FileAction, state UndoSt
 		result.Result = "undone"
 		// A placement is not a category move: nothing in the assistant's category
 		// knowledge cites it, so there is no evidence to notify about.
-		if action.Operation != OperationPlace {
+		if action.Operation != OperationPlace && action.Operation != OperationSend {
 			s.notifyReviewedKnowledge(workspaceID, action.ID, true)
 		}
 	} else {
