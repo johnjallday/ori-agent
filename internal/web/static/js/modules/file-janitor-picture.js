@@ -693,6 +693,13 @@ function fileRow(h, className, file, location, fallback) {
   return row;
 }
 
+function folderChoiceButton(h, ctx, selection) {
+  const b = h('button', 'fj-btn fj-btn-quiet', 'Choose a folder…');
+  b.type = 'button';
+  b.addEventListener('click', () => ctx.onChooseFolder(selection));
+  return b;
+}
+
 function fileChoice(h, row, file, ctx) {
   const select = h('select', 'fj-row-menu fj-file-choice');
   select.id = row.id + '-choice';
@@ -746,6 +753,8 @@ function nameList(h, files, className, ctx, { location, fallback, planned: usePl
       if (expanded) {
         const choices = h('div', 'fj-inline-choice');
         choices.appendChild(fileChoice(h, item, file, ctx));
+        if (ctx.onChooseFolder)
+          choices.appendChild(folderChoiceButton(h, ctx, { candidate_id: file.id }));
         const cancel = h('button', 'fj-btn', 'Cancel');
         cancel.type = 'button';
         cancel.id = item.id + '-cancel';
@@ -807,6 +816,10 @@ function folderCard(h, folder, ctx) {
   card.appendChild(head);
   const destination = ctx.filedRoot ? ctx.filedRoot + '/' + name : folder.destination;
   card.appendChild(h('p', 'fj-folder-destination', destination));
+  if (ctx.onChooseFolder && (folder.count || folder.unfiled_count))
+    card.appendChild(
+      folderChoiceButton(h, ctx, { section: folder.count ? FILED : UNFILED, key: folder.category })
+    );
   if (unticked) card.appendChild(h('p', 'fj-not-filed', 'Not filed'));
   if (folder.count > 0) {
     card.appendChild(
@@ -1211,6 +1224,8 @@ function looseSection(h, picture, title, ctx) {
       )
     );
     box.appendChild(rowMenu(h, row, ctx));
+    if (ctx.onChooseFolder && row.loose_count)
+      box.appendChild(folderChoiceButton(h, ctx, { section: LOOSE, key: row.group_id }));
     const note = rowNote(row, ctx);
     if (note) box.appendChild(h('p', 'fj-row-note', note));
     const why = h('details', 'fj-why');

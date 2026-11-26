@@ -67,7 +67,7 @@ func (s *Service) LookupFilingHistory(ctx context.Context, owner, workspaceID, q
 			outcome = "No verified filing from this attempt."
 		case ResultApplied:
 			switch a.Operation {
-			case OperationMove, OperationPlace:
+			case OperationMove, OperationPlace, OperationDeliver:
 				if validateDestinationRelative(a.DestinationRelative) != nil {
 					continue
 				}

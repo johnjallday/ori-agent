@@ -44,6 +44,8 @@ const (
 type DocumentsDestination struct {
 	Folder string `json:"folder"`
 	New    string `json:"new,omitempty"`
+	// Only the reviewed picker path sets this; never decoded from a Documents request.
+	chosenPath string
 }
 
 // DocumentsPreviewItem is one file's source and where it will be named.
@@ -95,6 +97,7 @@ type DocumentsFilingResult struct {
 type documentsPlanItem struct {
 	candidate JanitorCandidate
 	finalName string
+	delivery  *DeliveredTo
 }
 
 type documentsPlan struct {
@@ -175,6 +178,9 @@ func (s *Service) planDocuments(owner, workspaceID string, sel DocumentsSelectio
 	filedName := strings.TrimSpace(settings.FilingRootName)
 	if filedName == "" {
 		filedName = DefaultFilingRootName
+	}
+	if dest.chosenPath != "" {
+		return s.planChosenFolder(owner, workspaceID, sel, dest.chosenPath, state, root, scope)
 	}
 	final, ok := destinationShape(dest, filedName)
 	if !ok {
@@ -309,7 +315,11 @@ func (s *Service) FileDocumentsSelection(ctx context.Context, owner, workspaceID
 		return DocumentsFilingResult{}, ErrReviewUnavailable
 	}
 
-	unlock := lockRoot(root.Path)
+	roots := []string{root.Path}
+	if req.Destination.chosenPath != "" {
+		roots = append(roots, req.Destination.chosenPath)
+	}
+	unlock := lockRoots(roots...)
 	defer unlock()
 
 	// A retry of an admitted press reports the first result; the same key for
@@ -457,6 +467,9 @@ func (s *Service) FileDocumentsSelection(ctx context.Context, owner, workspaceID
 	if ready {
 		for _, item := range plan.items {
 			planItem := PlanItem{CandidateID: item.candidate.ID, Operation: OperationPlace, FingerprintKey: item.candidate.Fingerprint.Key()}
+			if item.delivery != nil {
+				planItem.Operation = OperationDeliver
+			}
 			outcome := s.placeOne(runCtx, settings, root.Path, admitted.approval, planItem, item, folder, plan.rootDirID)
 			if outcome.ActionID == "" {
 				unrecorded = append(unrecorded, FilingUnrecorded{CandidateID: item.candidate.ID, Reason: outcome.Message})
@@ -497,9 +510,18 @@ func (s *Service) documentsResult(state ScanState, record FilingRecord, replayed
 
 // newPlacedAction builds the journal entry for one placement.
 func newPlacedAction(id string, candidate JanitorCandidate, destination string, approval ApprovalRecord, rootID string, placed PlacedInto) (FileAction, error) {
+	return newPlacementRecord(id, candidate, destination, approval, rootID, &placed, nil)
+}
+
+func newPlacementRecord(id string, candidate JanitorCandidate, destination string, approval ApprovalRecord, rootID string, placed *PlacedInto, delivery *DeliveredTo) (FileAction, error) {
+	operation := OperationPlace
+	if delivery != nil {
+		operation = OperationDeliver
+		placed = nil
+	}
 	action := FileAction{
 		ID: id, WorkspaceID: candidate.WorkspaceID, RootID: strings.TrimSpace(rootID), BatchID: candidate.BatchID, CandidateID: candidate.ID,
-		Operation: OperationPlace, SourceName: candidate.Name, DestinationRelative: destination, Place: &placed,
+		Operation: operation, SourceName: candidate.Name, DestinationRelative: destination, Place: placed, Delivery: delivery,
 		BeforeFingerprint: candidate.Fingerprint, ApprovedAt: approval.ConsumedAt, ApprovedBy: approval.UserID,
 		IdempotencyKey: approval.IdempotencyKey, Result: ResultPending, Undo: UndoUnavailable,
 	}
@@ -544,7 +566,7 @@ func (s *Service) placeOne(ctx context.Context, settings JanitorSettings, root s
 	}
 
 	relative := path.Join(folder.Rel, item.finalName)
-	action, err := newPlacedAction("action-"+uuid.New().String(), candidate, relative, approval, settings.RootID, PlacedInto{RootDirID: rootDirID, FolderID: folder.ID})
+	action, err := newPlacementRecord("action-"+uuid.New().String(), candidate, relative, approval, settings.RootID, &PlacedInto{RootDirID: rootDirID, FolderID: folder.ID}, item.delivery)
 	if err != nil {
 		return failed("Ori could not record this action, so it did not perform it.")
 	}
@@ -558,11 +580,16 @@ func (s *Service) placeOne(ctx context.Context, settings JanitorSettings, root s
 		return outcomeFor(action)
 	}
 
-	after, moveErr := s.conditionalMoverFor().MoveIfUnchanged(ctx, ConditionalMove{
+	move := ConditionalMove{
 		Root: root, RootID: rootDirID,
 		From: DirRef{Rel: "", ID: rootDirID}, To: DirRef{Rel: folder.Rel, ID: folder.ID},
 		FromName: candidate.Name, ToName: item.finalName, Expect: candidate.Fingerprint,
-	})
+	}
+	if d := item.delivery; d != nil {
+		move.DestRoot, move.DestRootID = d.path, d.FolderID
+		move.To = DirRef{ID: d.FolderID}
+	}
+	after, moveErr := s.conditionalMoverFor().MoveIfUnchanged(ctx, move)
 	if moveErr == nil {
 		action = action.MarkApplied(after, s.clock())
 		_ = s.updateAction(settings.WorkspaceID, action, CandidateApplied)
@@ -572,9 +599,11 @@ func (s *Service) placeOne(ctx context.Context, settings JanitorSettings, root s
 	var race *MoveRaceError
 	if errors.As(moveErr, &race) && !race.RolledBack {
 		// The file went somewhere and could not be moved back. Say where.
-		p := *action.Place
-		p.LeftAt = race.LeftAt
-		action.Place = &p
+		if action.Place != nil {
+			p := *action.Place
+			p.LeftAt = race.LeftAt
+			action.Place = &p
+		}
 		summary := "Ori moved this file and could not put it back where it was."
 		if race.LeftAt != "" {
 			summary += " It is in " + race.LeftAt + "."

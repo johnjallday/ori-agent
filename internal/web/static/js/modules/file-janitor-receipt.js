@@ -45,7 +45,8 @@ export function receiptWhere(model, ctx) {
     const here = (model.filed || 0) - sent;
     if (here > 0)
       parts.push((here === 1 ? '1 is in ' : here + ' are in ') + folder + '/' + filing + '.');
-  } else if ((model?.filed || 0) > 0) parts.push('They are in ' + folder + '/' + filing + '.');
+  } else if (model?.delivered) parts.push('Filed to the chosen folder.');
+  else if ((model?.filed || 0) > 0) parts.push('They are in ' + folder + '/' + filing + '.');
   if (typeof model?.looseNow === 'number') {
     const loose = model.looseNow;
     parts.push(
@@ -75,6 +76,7 @@ export function receiptModelFromReceipt(receipt) {
     trashed: receipt.trashed || 0,
     completed: 0,
     sent: receipt.sent || 0,
+    ...(receipt.delivered ? { delivered: receipt.delivered } : {}),
     sends: (receipt.sends || []).map(item => ({
       workspaceId: item.receiver_workspace_id,
       receiverName: item.receiver_name || 'Another workspace',
@@ -102,14 +104,16 @@ export function receiptModelFromResult(result) {
   let trashed = 0;
   let completed = 0;
   let sent = 0;
+  let delivered = 0;
   for (const outcome of outcomes) {
     if (outcome.result === 'applied' && outcome.operation === 'trash') trashed += 1;
     else if (outcome.result === 'applied' && outcome.operation === 'send') {
       // Sent to another workspace; the receipt read names which.
       filed += 1;
       sent += 1;
-    } else if (outcome.result === 'applied' && outcome.operation === 'move') {
+    } else if (outcome.result === 'applied' && ['deliver', 'move'].includes(outcome.operation)) {
       filed += 1;
+      if (outcome.operation === 'deliver') delivered++;
       const folder = directoryOf(outcome.destination);
       if (folder) byDestination.set(folder, (byDestination.get(folder) || 0) + 1);
     } else if (outcome.result === 'applied') completed += 1;
@@ -128,6 +132,7 @@ export function receiptModelFromResult(result) {
     state: result?.interrupted ? 'interrupted' : 'done',
     replayed: Boolean(result?.replayed),
     filed,
+    ...(delivered ? { delivered } : {}),
     trashed,
     completed,
     sent,

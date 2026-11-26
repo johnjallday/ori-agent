@@ -2998,6 +2998,38 @@
         onSelectFile: selectFile,
         onRowChoice: (row, choice) => void answerRow(row, choice, binding),
         onFileChoice: (file, choice) => void answerFile(file, choice, binding),
+        onChooseFolder:
+          window.FilingFolderChoice && reviewEditsAvailable()
+            ? (selected, suggested) => {
+                const { scope, batchID, revision, groupRevision } = binding;
+                const current = () =>
+                  scopeCurrent(scope) &&
+                  consoleOpen &&
+                  consoleTab === 'review' &&
+                  lastBatch?.id === batchID &&
+                  reviewDraft?.revision === revision &&
+                  reviewDraft?.group_revision === groupRevision;
+                if (!current()) return;
+                window.FilingFolderChoice.openFolderChoice({
+                  workspace: scope.id,
+                  endpoint:
+                    apiBase(scope.id) +
+                    '/batches/' +
+                    encodeURIComponent(batchID) +
+                    '/chosen-folder',
+                  selection: { ...selected, revision: groupRevision, draft_revision: revision },
+                  suggested,
+                  current,
+                  onFiled: async result => {
+                    if (!scopeCurrent(scope)) return;
+                    await loadBatch();
+                    if (!scopeCurrent(scope)) return;
+                    await showReceipt(scope, result);
+                    await loadHistory();
+                  }
+                });
+              }
+            : null,
         onReviewAgain: kept => void reviewKeptAgain(kept, binding),
         onRetry: file =>
           void submitReviewEdit('retry_files', { candidate_ids: [file.id] }, null, binding),

@@ -71,6 +71,7 @@ type FilingReceipt struct {
 	// Sent counts the filed files that went to another workspace (they are in
 	// Filed too), and Sends splits them by receiver. Sent files are never in
 	// ByDestination, which holds this folder's Filed folders only.
+	Delivered     int                  `json:"delivered,omitempty"` // filed to a chosen folder, not under Downloads/Filed
 	Sent          int                  `json:"sent,omitempty"`
 	Sends         []ReceiptSend        `json:"sends,omitempty"`
 	ByDestination []ReceiptDestination `json:"by_destination"`
@@ -192,6 +193,9 @@ func buildReceipt(state ScanState, record FilingRecord, currentRootID string, of
 			entry.Count++
 		case action.Result == ResultApplied:
 			receipt.Filed++
+			if action.Operation == OperationDeliver {
+				receipt.Delivered++
+			}
 			destination := path.Dir(action.DestinationRelative)
 			entry := byDestination[destination]
 			if entry == nil {

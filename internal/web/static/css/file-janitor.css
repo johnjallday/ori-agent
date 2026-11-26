@@ -35,6 +35,28 @@
   margin-block: 1rem;
 }
 
+.fj-destination-dialog {
+  width: min(30rem, calc(100vw - 2rem));
+  max-height: 85vh;
+  padding: 1.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.fj-destination-dialog::backdrop {
+  background: #0008;
+}
+.fj-destination-dialog .fj-input {
+  display: block;
+  width: 100%;
+  margin-block: 0.75rem;
+}
+.fj-destination-dialog button {
+  margin: 0.15rem;
+}
+
 /* Lines and the dashed "Not filed" border come from the app's real tokens, so they
    show on both the light and dark surfaces. The footer (the one-file bar, the Trash
    tick) is a sibling of the picture, not inside it, so it needs them too: a border

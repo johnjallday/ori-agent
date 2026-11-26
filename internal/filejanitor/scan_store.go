@@ -128,6 +128,9 @@ type ScanState struct {
 	ReviewDrafts []ReviewDraft `json:"review_drafts,omitempty"`
 	// Actions is the durable journal of every attempted mutation.
 	Actions []FileAction `json:"actions,omitempty"`
+	// ChosenPaths resolves a delivery's private identity-bound locator for Undo.
+	// Never projected to chat, History, workspace directory tools, or automation.
+	ChosenPaths map[string]string `json:"chosen_paths,omitempty"`
 	// Filings records each one-press filing: what was admitted, by whom, and the
 	// retry key that makes a repeated press report the first result. It holds no
 	// authority and no path; the per-file facts stay in Actions, where the filing
@@ -609,6 +612,17 @@ func pruneScanState(state ScanState, now time.Time) ScanState {
 	// and the newest are kept.
 	if len(state.Actions) > MaxRetainedActions {
 		state.Actions = state.Actions[len(state.Actions)-MaxRetainedActions:]
+	}
+	if len(state.ChosenPaths) > 0 {
+		keep := map[string]string{}
+		for _, act := range state.Actions {
+			if d := act.Delivery; d != nil {
+				if p, ok := state.ChosenPaths[d.Key]; ok {
+					keep[d.Key] = p
+				}
+			}
+		}
+		state.ChosenPaths = keep
 	}
 	// Filing records keep the newest few, oldest dropped first.
 	if len(state.Filings) > MaxRetainedFilings {
