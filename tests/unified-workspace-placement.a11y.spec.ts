@@ -142,13 +142,10 @@ for (const variant of [
       expect(await workspaceCount(page)).toBe(before);
       if (variant.touch) await confirm.tap();
       else await confirm.press('Enter');
-      await expect(
-        review.getByRole('heading', { name: 'Workspace created', exact: true })
-      ).toBeVisible();
-      // The result announces into its labelled status region.
-      await expect(review.getByRole('status')).toContainText('Workspace created');
+      await expect(page.locator('#addFolderModal')).toBeHidden();
+      await expect(page.locator('#toastContainer').getByRole('status')).toContainText('created.');
       expect(await workspaceCount(page)).toBe(before + 1);
-      await accessibility(page);
+      await accessibility(page, '#toastContainer');
       await page.screenshot({ path: `${evidence}/a11y-${variant.name}-result.png` });
     });
   });
@@ -334,9 +331,8 @@ test('actual Chrome 200 percent zoom keeps the shared review complete and operab
     const confirm = review.getByRole('button', { name: 'Create workspace', exact: true });
     await unobscured(confirm);
     await confirm.press('Enter');
-    await expect(
-      review.getByRole('heading', { name: 'Workspace created', exact: true })
-    ).toBeVisible();
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    await expect(page.locator('#toastContainer')).toContainText('created.');
     expect(await workspaceCount(page)).toBe(count + 1);
     console.log('ACTUAL_BROWSER_ZOOM', JSON.stringify({ zoom, before }));
   } finally {

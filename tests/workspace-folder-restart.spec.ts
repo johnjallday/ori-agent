@@ -69,7 +69,7 @@ test('server restart retains the draft but loses selection authority without rep
     expect(resumed.folder_path).toBeUndefined();
     await page.goto('/');
     await page.locator('#cockpitCreateWorkspaceBtn').click();
-    await page.getByRole('button', { name: 'Resume', exact: true }).click();
+    await page.getByRole('button', { name: 'Continue draft', exact: true }).click();
     await expect(page.locator('#workspaceBuildPlanName')).toHaveValue(saved.name);
     await expect(page.locator('#workspaceBuildFolderProblem')).toContainText(
       'unavailable or expired'

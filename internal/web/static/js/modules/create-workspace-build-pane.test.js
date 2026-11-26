@@ -670,9 +670,17 @@ test('collapse and expand report the user’s choice and toggle the Build with b
 test('pane-only lines keep their place, carry local actions, and can be removed', () => {
   const { pane, root, events } = loadPane();
   pane.mount({ assistant });
-  const id = pane.showLine('Resume building Field Notes?', {
+  const prompt = pane.COPY.resumeQuestion({ draft: { name: 'Field Notes' } });
+  assert.equal(prompt, 'Continue the draft for “Field Notes”?');
+  assert.match(
+    pane.COPY.resumeQuestion({ folder: { observation: { folder: 'Albums' } } }),
+    /Albums/
+  );
+  const message = pane.COPY.resumeQuestion({ first_request: 'A newsletter\n' + 'x'.repeat(100) });
+  assert.match(message, /A newsletter x+…”\?$/);
+  const id = pane.showLine(prompt, {
     chips: [
-      { id: 'resume', label: 'Resume' },
+      { id: 'resume', label: pane.COPY.resume },
       { id: 'start_over', label: 'Start over' }
     ]
   });
@@ -683,7 +691,7 @@ test('pane-only lines keep their place, carry local actions, and can be removed'
   assert.equal(events.at(-1).type, 'workspace-build-action');
   assert.equal(events.at(-1).detail.action, 'resume');
   pane.removeLine(id);
-  assert.equal(/Resume building/.test(root.textContent), false);
+  assert.equal(root.textContent.includes(prompt), false);
   pane.applySession({ transcript: [{ role: 'user', text: 'hello' }] });
   assert.match(entries(root)[0].textContent, /What should this workspace do\?/);
 });

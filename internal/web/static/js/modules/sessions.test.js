@@ -8577,8 +8577,8 @@ test('an unanswered Resume question does not tie the dialog’s create to the pa
   const lines = [];
   manager.workspaceBuildPane = () => ({
     COPY: {
-      resumeQuestion: name => `Resume building ${name}?`,
-      resume: 'Resume',
+      resumeQuestion: session => `Continue the draft for “${session.draft.name}”?`,
+      resume: 'Continue draft',
       startOver: 'Start over'
     },
     showLine: text => lines.push(text) || 'line-1',
@@ -8596,7 +8596,7 @@ test('an unanswered Resume question does not tie the dialog’s create to the pa
     })
   });
   await manager.openWorkspaceBuildSession();
-  assert.deepEqual(lines, ['Resume building Desk?']);
+  assert.deepEqual(lines, ['Continue the draft for “Desk”?']);
   assert.equal(
     context.buildSession,
     null,
@@ -8798,7 +8798,52 @@ test('a chat handoff waits for its reviewed folder and drops a result after the 
   assert.deepEqual(applied, [[review, false]]);
 });
 
-test('a saved creation receipt takes priority over an attached folder', async () => {
+test('New Workspace retires only a verified previous creation and continues its original entry', async () => {
+  for (const closeDuringRead of [false, true]) {
+    const reference = { id: 'previous', digest: 'digest' };
+    const context = { generation: 1, mode: 'ordinary', entryPoint: 'workspace_hub_create' };
+    let observe;
+    let released = 0;
+    let opened = 0;
+    const api = {
+      savedCreationReference: () => reference,
+      observeCreationOperation: (_fetch, ref) => {
+        assert.equal(ref, reference);
+        return new Promise(resolve => {
+          observe = resolve;
+        });
+      },
+      releaseCreationReference: (_storage, ref) => {
+        assert.equal(ref, reference);
+        released++;
+        return true;
+      }
+    };
+    const manager = loadSessionManager(() => assert.fail('opening must never submit'), {
+      OriWorkspaceCreationOperation: api
+    });
+    manager.workspaceCreatorContext = context;
+    manager.refreshWizardChrome = manager.syncOrdinaryCreationReview = () => {};
+    manager.maybeStartWorkspaceBuild = c => {
+      assert.equal(c, context);
+      opened++;
+    };
+    const opening = manager.openWorkspaceCreatorBuild(context);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(context.ordinaryReview.accepted, true, 'no new confirmation during observation');
+    if (closeDuringRead) manager.workspaceCreatorContext = null;
+    observe({ state: 'complete', result: { folder: { id: 'documents' } } });
+    await opening;
+    assert.equal(released, closeDuringRead ? 0 : 1);
+    assert.equal(opened, closeDuringRead ? 0 : 1);
+    if (!closeDuringRead) {
+      assert.equal(manager.wizardStep, 1);
+      assert.equal(context.ordinaryReview, null);
+    }
+  }
+});
+
+test('an unverified previous confirmation takes priority over an attached folder', async () => {
   const reference = { operationId: 'previous' };
   const status = { hidden: true };
   const manager = loadSessionManager(
@@ -8810,7 +8855,7 @@ test('a saved creation receipt takes priority over an attached folder', async ()
   manager.workspaceCreatorContext = context;
   manager.refreshWizardChrome = manager.syncOrdinaryCreationReview = () => {};
   manager.readOrdinaryCreationStatus = () => {
-    context.ordinaryReview.observedState = 'complete';
+    context.ordinaryReview.observedState = 'uncertain';
   };
   await manager.openWorkspaceCreatorBuild(context, null, () =>
     assert.fail('do not replace a receipt')

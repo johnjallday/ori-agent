@@ -90,6 +90,40 @@ test('review submits the existing material request without normalizing away expl
   assert.deepEqual(sent, { id: reference.id, request: material });
 });
 
+test('only the exact journal lookup can report a missing saved request', async () => {
+  const missing = { code: 'creation_record_missing', details: { operation_id: reference.id } };
+  for (const [status, body, state] of [
+    [404, missing, 'missing'],
+    [404, { ...missing, details: { operation_id: 'another-id' } }, 'uncertain'],
+    [404, { code: 'not_found' }, 'uncertain'],
+    [404, {}, 'uncertain'],
+    [403, missing, 'uncertain'],
+    [503, missing, 'uncertain'],
+    [200, missing, 'uncertain']
+  ]) {
+    const observed = await observeCreationOperation(async (url, options) => {
+      assert.equal(url, `/api/workspaces/create-operations/${reference.id}`);
+      assert.equal(options.method, undefined);
+      return { ...response(body, status === 200), status };
+    }, reference);
+    assert.equal(observed.state, state);
+  }
+
+  const methods = [];
+  const store = storage();
+  const sent = await confirmCreationOperation(
+    async (_url, options) => {
+      methods.push(options.method || 'GET');
+      return { ...response(missing, false), status: 404 };
+    },
+    store,
+    reference
+  );
+  assert.equal(sent.state, 'uncertain', 'a dispatch never treats absence as a refused creation');
+  assert.deepEqual(savedCreationReference(store), reference);
+  assert.deepEqual(methods, ['POST', 'GET']);
+});
+
 test('a refused status retains the exact diagnostic without another confirmation or automatic retry', async () => {
   const refusal = {
     error: 'Review the changed roles.',
