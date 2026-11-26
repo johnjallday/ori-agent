@@ -30,7 +30,11 @@ func preparationAccessMatches(ws *workspace.Workspace, preparation *SetupPrepara
 		return false
 	}
 	if !hasJanitorAccessResources(ws) {
-		revision, err := setupAccessRevision(ws)
+		accessDigest := setupAccessRevision
+		if preparation.Station != nil {
+			accessDigest = stationAccess
+		}
+		revision, err := accessDigest(ws)
 		return err == nil && preparation.AccessRevision != "" && revision == preparation.AccessRevision
 	}
 	ref, err := ws.GetDirectoryReference(preparation.ReferenceID)

@@ -42,7 +42,13 @@ func (h *Handler) SetupReview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var review filejanitor.LinkedSetupReview
-	if request.SelectionToken == "" {
+	if r.URL.Query().Get("station") == "build" {
+		if request.SelectionToken != "" {
+			_ = orihttp.RespondBadRequest(w, "A station uses its reviewed folder.")
+			return
+		}
+		review, err = h.service.ReviewStation(workspaceID, owner, request.ReferenceID, request.Monitoring)
+	} else if request.SelectionToken == "" {
 		review, err = h.service.ReviewLinkedSetup(workspaceID, owner, request.ReferenceID, request.Monitoring)
 	} else {
 		path, ok := h.resolveReviewedSelection(w, workspaceID, request.SelectionToken)
@@ -171,7 +177,7 @@ func (h *Handler) PrepareReview(w http.ResponseWriter, r *http.Request) {
 	}
 	automation, _ := h.automation.(filejanitor.PreparationAutomation)
 	prepared, err := h.service.PrepareLinkedSetup(filejanitor.LinkedPreparationRequest{
-		Context: r.Context(), WorkspaceID: workspaceID, OwnerUserID: owner, ReferenceID: request.ReferenceID,
+		BuildStation: r.URL.Query().Get("station") == "build", Context: r.Context(), WorkspaceID: workspaceID, OwnerUserID: owner, ReferenceID: request.ReferenceID,
 		SelectedPath: selectedPath, Monitoring: request.Monitoring, ReviewRevision: request.ReviewRevision,
 	}, automation)
 	w.Header().Set("Cache-Control", "no-store")

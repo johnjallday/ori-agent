@@ -4,6 +4,7 @@
 // sends a path. Words come from the server's view (facts line, stage line,
 // tools); this module only lays them out.
 
+import { filingStationOffer, stationPile } from './filing-station-offer.js';
 import { documentsOrganizationOffer } from './documents-organization.js';
 import { renderHireDraftEditor } from './folder-agent-hire-editor.js';
 import { publishFolderAgentChat } from './folder-agent-chat.js';
@@ -184,6 +185,7 @@ export function folderAgentReportView(view) {
     rootPolicy: String(view.root_policy || ''),
     organizationReview: view.organization_review === true,
     filingReviewHint: String(view.filing_review_hint || ''),
+    filingPile: stationPile(view.filing_pile),
     policyNote: String(view.policy_note || ''),
     // The setup is done but filing was not allowed yet: one step left.
     filingPermissionRequired: Boolean(view.filing_permission_required),
@@ -2675,7 +2677,8 @@ export function renderFolderAgentReport(
   // none; beside it, it would only repeat the counts.
   if (!premiseLine && view.facts && (!view.whatItIs || view.policyNote))
     card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
-  if (view.organizationReview && fetchImpl)
+  if (view.filingPile) card.append(filingStationOffer(doc, view));
+  else if (view.organizationReview && fetchImpl)
     card.append(
       documentsOrganizationOffer(
         doc,

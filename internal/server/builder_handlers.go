@@ -1050,6 +1050,11 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 		service.SetCompanionProvisioner(sessionhttp.NewCapabilityCompanionProvisioner(b.sessionHandler))
 	}
 	b.workspaceCapabilityService = service
+	if b.fileJanitorService != nil {
+		b.fileJanitorService.SetStationHost(func(owner, id string) (filejanitor.StationLook, error) {
+			return b.folderAgentService.StationLook(owner, id)
+		}, service)
+	}
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetTemplateCapabilityService(service)
 	}

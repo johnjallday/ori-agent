@@ -8,6 +8,49 @@
   display: none;
 }
 
+.filing-station-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.8rem;
+  border-inline-start: 0.25rem solid var(--bs-primary);
+}
+.filing-station-offer :is(strong, p) {
+  width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.filing-station-plot {
+  position: absolute;
+  inset-inline-start: 100%;
+  bottom: 0;
+  width: 3.2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border: 2px dashed currentColor;
+  border-radius: 42%;
+  color: var(--bs-body-color);
+  font-size: 0.8rem;
+  font-weight: 700;
+  isolation: isolate;
+  pointer-events: none;
+}
+.filing-station-plot::before {
+  content: "";
+  position: absolute;
+  width: 1.6rem;
+  height: 1.1rem;
+  transform: rotate(-7deg);
+  z-index: -1;
+  background: var(--bs-body-bg);
+  border: 1px solid currentColor;
+  box-shadow:
+    2px 2px var(--bs-secondary-color),
+    4px 4px var(--bs-body-bg);
+}
+
 /* Saved proposals: compact plan cards inside the existing review console. */
 .fj-saved-batches {
   margin-block: 1rem;

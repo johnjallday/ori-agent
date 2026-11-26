@@ -42,6 +42,7 @@ type View struct {
 	ProgressLine string   `json:"progress_line,omitempty"`
 
 	ProjectHolders     *ProjectHoldersView    `json:"project_holders,omitempty"`
+	FilingPile         *LooseFilePile         `json:"filing_pile,omitempty"`
 	FilingReviewHint   string                 `json:"filing_review_hint,omitempty"`
 	OrganizationReview bool                   `json:"organization_review,omitempty"`
 	RootPolicy         folderlook.RootPolicy  `json:"root_policy,omitempty"`
@@ -271,6 +272,9 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	if strings.HasPrefix(rec.AssignedLink, GuidedDocumentsLinkPrefix) {
 		v.FilingReviewHint = s.looseDocumentHint(rec)
 		v.OrganizationReview = v.FilingReviewHint == "eligible" || v.FilingReviewHint == "history"
+		if _, ok := s.stationLook(rec); ok && s.deps.StationAvailable != nil && s.deps.StationAvailable(rec.OwnerUserID, rec.WorkspaceID) {
+			v.FilingPile = rec.LooseDocuments.Pile
+		}
 	} else if rec.RootPolicy == folderlook.RootDocuments || completed(rec) {
 		_, err := s.organizationAccess(rec.OwnerUserID, rec)
 		v.OrganizationReview = err == nil

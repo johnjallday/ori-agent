@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/diridentity"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -26,7 +27,9 @@ type LinkedSetupCandidate struct {
 }
 
 type LinkedSetupReview struct {
-	State             string                 `json:"state"`
+	State             string `json:"state"`
+	BuildStation      bool   `json:"build_station,omitempty"`
+	station           *stationBuild
 	WorkspaceID       string                 `json:"workspace_id"`
 	Candidates        []LinkedSetupCandidate `json:"candidates"`
 	SelectedReference string                 `json:"reference_id,omitempty"`
@@ -62,18 +65,18 @@ type SetupReviewTerms struct {
 // Status (whose persistence health probe creates a state directory), ConfirmSetup
 // or an automation method. No raw client path can enter this boundary.
 func (s *Service) ReviewLinkedSetup(workspaceID, ownerUserID, referenceID string, monitoring bool) (LinkedSetupReview, error) {
-	review, err := s.reviewLinkedSetup(workspaceID, ownerUserID, referenceID, "", monitoring, false)
-	if err != nil {
-		return review, err
-	}
 	settings, err := s.store.LoadSettings(workspaceID)
 	if err != nil {
 		return LinkedSetupReview{}, err
 	}
-	preparation := settings.SetupPreparation
-	if preparation == nil {
-		return review, nil
+	if settings.SetupPreparation == nil {
+		return s.reviewLinkedSetup(workspaceID, ownerUserID, referenceID, "", monitoring, false)
 	}
+	return s.observeLinkedPreparation(workspaceID, ownerUserID, settings)
+}
+
+func (s *Service) observeLinkedPreparation(workspaceID, ownerUserID string, settings JanitorSettings) (LinkedSetupReview, error) {
+	preparation := settings.SetupPreparation
 	if preparation.OwnerUserID != ownerUserID {
 		return LinkedSetupReview{State: "repair_required", WorkspaceID: workspaceID}, nil
 	}
@@ -108,11 +111,15 @@ func (s *Service) ReviewSetupSelection(workspaceID, ownerUserID, selectedPath st
 }
 
 func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID, selectedPath string, monitoring, continuing bool) (LinkedSetupReview, error) {
+	return s.reviewSetup(workspaceID, ownerUserID, referenceID, selectedPath, monitoring, continuing, nil)
+}
+
+func (s *Service) reviewSetup(workspaceID, ownerUserID, referenceID, selectedPath string, monitoring, continuing bool, station *stationBuild) (LinkedSetupReview, error) {
 	var review LinkedSetupReview
 	ws, err := s.readWorkspace(workspaceID)
 	if err != nil || ws == nil || !linkedSetupOwned(ws, ownerUserID) ||
 		(ws.Status != "" && ws.Status != workspace.StatusActive) ||
-		strings.EqualFold(ws.Kind, "group") || !ws.HasInstalledCapability(workspace.CapabilityFileJanitor) {
+		strings.EqualFold(ws.Kind, "group") || (station == nil && !ws.HasInstalledCapability(workspace.CapabilityFileJanitor)) {
 		return review, setupErr(CodeWorkspaceMissing, "This workspace is unavailable for Filing setup.", "", nil)
 	}
 	// Folder snapshots carry capability provenance, but lifecycle may already
@@ -122,13 +129,16 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID, selec
 		(primary.Status != "" && primary.Status != workspace.StatusActive) {
 		return review, setupErr(CodeWorkspaceMissing, "This workspace is unavailable for Filing setup.", "", nil)
 	}
+	if station != nil && (!station.matches(ws, ownerUserID) || !station.matches(primary, ownerUserID) || (!continuing && (ws.HasInstalledCapability(workspace.CapabilityFileJanitor) || primary.HasInstalledCapability(workspace.CapabilityFileJanitor)))) {
+		return review, stationChanged()
+	}
 	settings, err := s.store.LoadSettings(workspaceID)
 	if err != nil {
 		return review, err
 	}
 	automation := s.reviewAutomationSettings(settings)
 	review = LinkedSetupReview{
-		WorkspaceID: workspaceID, Candidates: []LinkedSetupCandidate{},
+		BuildStation: station != nil, station: station, WorkspaceID: workspaceID, Candidates: []LinkedSetupCandidate{},
 		DisclosureVersion: SetupDisclosureVersion, Monitoring: monitoring,
 		Terms: setupReviewTerms(automation),
 	}
@@ -271,14 +281,22 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID, selec
 		}
 		return review, err
 	}
+	if station != nil && (diridentity.Of(info) != station.Look.Witness || selected.ReferenceID != station.Look.ReferenceID) {
+		return review, stationChanged()
+	}
 	review.State, review.rootPath, review.rootIdentity = "review", root, platformFileID(info)
 	install, _ := ws.GetInstalledCapability(workspace.CapabilityFileJanitor)
-	review.accessRevision, err = setupAccessRevision(ws)
+	accessDigest := setupAccessRevision
+	if station != nil {
+		accessDigest = stationAccess
+		install = workspace.InstalledCapability{}
+	}
+	review.accessRevision, err = accessDigest(ws)
 	if err != nil {
 		return LinkedSetupReview{}, err
 	}
 	if !continuing {
-		primaryAccess, err := setupAccessRevision(primary)
+		primaryAccess, err := accessDigest(primary)
 		if err != nil || primaryAccess != review.accessRevision {
 			review.State = "repair_required"
 			return review, nil
@@ -301,6 +319,12 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID, selec
 	review.bindingRevision, err = setupDigest(binding)
 	if err != nil {
 		return LinkedSetupReview{}, err
+	}
+	if station != nil {
+		review.bindingRevision, err = setupDigest([]any{review.bindingRevision, station})
+		if err != nil {
+			return LinkedSetupReview{}, err
+		}
 	}
 	review.settingsDigest, err = setupDigest(settings)
 	if err != nil {

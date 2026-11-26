@@ -212,6 +212,7 @@ type Deps struct {
 	// FilingPermission reads only the stored grant, never a health probe.
 	// A missing reader or read error is unknown, not a missing permission.
 	FilingPermission func(workspaceID string) (bool, error)
+	StationAvailable func(owner, workspaceID string) bool
 	// Songs reads the Home's song-details consent for the offer to learn the
 	// songs. Nil makes no offer.
 	Songs Songs

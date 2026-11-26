@@ -33,6 +33,10 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await writeFile(join(root, 'estimate.txt'), 'Synthetic estimate for cabinet order PO-4387.', {
       mode: 0o600
     });
+  if (!empty) {
+    const old = new Date(Date.now() - 3600000);
+    await utimes(join(root, 'estimate.txt'), old, old);
+  }
   const fixtures = {
     'estimate.txt': 'Synthetic estimate for cabinet order PO-4387.',
     'packing-slip.txt': 'Kitchen remodel at Maple Street. Packing slip for cabinet order PO-4387.',
@@ -165,6 +169,55 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await savedReport.screenshot({ path: info.outputPath('empty-report.png') });
     await verifyBytes();
     expect(effects).toEqual([]);
+    return;
+  }
+  // New looks with a measured pile use one station build. A saved review is
+  // still reachable after a grant narrows (covered below for legacy reports).
+  if (!liveModel) {
+    const offer = savedReport.getByRole('region', { name: 'Filing station offer' });
+    await expect(offer).toContainText('1 loose file in Documents');
+    await expect(offer).toContainText('estimate.txt');
+    await offer.getByRole('button', { name: 'Not now' }).click();
+    await expect(offer.getByRole('button', { name: 'Build a Filing station' })).toHaveCount(0);
+    expect(await readdir(root)).toEqual(['estimate.txt']);
+    expect(
+      (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+    ).toBe(false);
+    await offer.getByRole('button', { name: 'Show Filing station offer' }).click();
+    const mapURL = new URL(page.url());
+    mapURL.searchParams.set('mode', 'map');
+    await page.goto(mapURL.toString());
+    await expect(page.locator('.filing-station-plot')).toHaveText('1');
+    const pileLine = page
+      .locator('.commander-balloon-line:visible')
+      .filter({ hasText: '1 loose file in Documents' });
+    if (!(await page.locator('.commander-balloon:visible .filing-station-offer').count()))
+      await pileLine.click();
+    const bubble = page.locator('.commander-balloon:visible .filing-station-offer');
+    await expect(bubble).toContainText('estimate.txt');
+    await page.screenshot({ path: info.outputPath('map-offer.png') });
+    await bubble.getByRole('button', { name: 'Build a Filing station' }).click();
+    const station = page.getByRole('dialog', { name: 'Filing', exact: true });
+    await expect(
+      station.getByRole('heading', { name: 'Build a Filing station for Documents' })
+    ).toBeVisible();
+    await expect(
+      station.getByRole('checkbox', { name: 'Also watch for new files and look once a day' })
+    ).not.toBeChecked();
+    await station.screenshot({ path: info.outputPath('build-card.png') });
+    const prepared = page.waitForResponse(
+      r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/prepare-review')
+    );
+    await station.getByRole('button', { name: 'Build the station', exact: true }).click();
+    const response = await prepared;
+    expect(response.status(), await response.text()).toBe(200);
+    const result = (await response.json()).preparation;
+    expect(result.result.outcome).toBe('batch');
+    expect(result.result.eligible_count).toBe(1);
+    expect(await readdir(root)).toEqual(['estimate.txt']);
+    await verifyBytes();
+    await expect(station.getByRole('tab', { name: 'History' })).toBeVisible();
+    await station.screenshot({ path: info.outputPath('station-built.png') });
     return;
   }
   await expect(suggestionButton).toBeVisible();

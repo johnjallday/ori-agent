@@ -401,6 +401,11 @@
     // companion, for instance — so the record it renders from is the one the
     // server now holds rather than the snapshot from page load.
     reload: () => load({ force: true }),
+    async reloadAfterStationBuild() {
+      await load({ force: true });
+      renderAll();
+      notifyChanged();
+    },
     // Test hooks.
     _reset: () => {
       workspaceId = '';

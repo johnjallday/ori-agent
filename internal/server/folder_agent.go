@@ -73,6 +73,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 		UndoFiling:             b.fileJanitorService.UndoFiling,
 		UndoFilingFile:         b.fileJanitorService.UndoPlacedFile,
 		FilingStanding:         b.fileJanitorService.DocumentsFilingStanding,
+		StationAvailable:       b.fileJanitorService.StationAvailable,
 		DocumentsAccess:        b.documentsOrganizationAccess,
 		SavedFilingAccess: func(owner, id, agent, link string) (folderagent.DocumentsAccess, error) {
 			if b.sessionHandler == nil {

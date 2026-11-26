@@ -179,6 +179,8 @@ type JanitorSettings struct {
 	// Always DefaultFilingRootName in version 1; stored so the value the user
 	// was shown at setup stays recorded rather than being re-derived.
 	FilingRootName string `json:"filing_root_name,omitempty"`
+	// Station setup grants metadata access without creating a destination.
+	DeferredDestination bool `json:"deferred_destination,omitempty"`
 	// DailyScanLocalTime is the daily catch-up time as "HH:MM" wall clock.
 	DailyScanLocalTime string `json:"daily_scan_local_time,omitempty"`
 	// Timezone is the IANA zone the daily time is interpreted in. Empty means

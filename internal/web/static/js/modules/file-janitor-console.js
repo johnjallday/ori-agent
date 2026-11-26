@@ -33,6 +33,8 @@
   let busy = false;
   let lastStatus = null;
   let setupReview = null;
+  let stationBuildWorkspace = '';
+  const stationBuildOpen = () => Boolean(stationBuildWorkspace && stationBuildWorkspace === wsId());
   let setupSelection = null;
   let setupReviewRequest = 0;
   let setupDraft = null;
@@ -5274,6 +5276,18 @@
       ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state) ||
       !isConfigured(status)
     ) {
+      if (stationBuildOpen() && !setupReview?.build_station && !setupReview?.operation_id) {
+        host.appendChild(
+          el(
+            'p',
+            'fj-sub',
+            statusLoadState === 'loading'
+              ? 'Checking the folder and the saved look…'
+              : 'This station offer is no longer current. Return to the map and check the folder.'
+          )
+        );
+        return;
+      }
       if (renderLinkedSetupReview(host)) {
         host.appendChild(errorRegion());
         return;
@@ -5658,7 +5672,8 @@
     // The check is against a status we have actually read: on a cold load
     // lastStatus is still null, and refusing then would make the first press
     // of a station do nothing (FR-93).
-    if (lastStatus && !lastStatus.applies && !downloadsReviewRequested()) return false;
+    if (lastStatus && !lastStatus.applies && !downloadsReviewRequested() && !stationBuildOpen())
+      return false;
     const host = consoleHost();
     if (!host) return false;
 
@@ -5753,6 +5768,11 @@
     discardProtectionApproval();
     lastResults = null;
     consoleOpen = false;
+    if (stationBuildOpen()) {
+      stationBuildWorkspace = '';
+      setupReview = null;
+      setupReviewRequest++;
+    }
     consoleVisit++;
     settingsOpen = false;
     // Read connections again on the next visit: the other workspace may have
@@ -6032,7 +6052,7 @@
       actions.appendChild(scan);
       actions.appendChild(pauseControl(settings));
     }
-    const backToMap = workspaceViewMode() === 'map' && currentPreview()?.batchId;
+    const backToMap = workspaceViewMode() === 'map';
     const closeButton = button(backToMap ? 'Back to map' : 'Close', 'fj-btn fj-btn-secondary', () =>
       close()
     );
@@ -6141,6 +6161,8 @@
     if (typeof window === 'undefined' || !window.history || !window.location) return;
     const url = new URL(window.location.href);
     const before = url.search;
+    if (stationBuildOpen() && consoleOpen) url.searchParams.set('station', 'build');
+    else url.searchParams.delete('station');
     if (consoleOpen) {
       url.searchParams.set('panel', CONSOLE_PANEL_PARAM);
       if (
@@ -6184,6 +6206,7 @@
       if (consoleOpen) close({ keepUrl: true });
       return;
     }
+    stationBuildWorkspace = params.get('station') === 'build' ? wsId() : '';
     const tab = validTab(params.get('tab'));
     const item = String(params.get('item') || '');
     const requestedBatch = params.get('batch_id') || '';
@@ -6313,7 +6336,7 @@
     const sequence = ++setupReviewRequest;
     try {
       const response = await fetch(
-        apiBase(id) + '/setup-review',
+        apiBase(id) + '/setup-review' + (stationBuildOpen() ? '?station=build' : ''),
         choice
           ? {
               method: 'POST',
@@ -6504,9 +6527,11 @@
           ? 'Preparation changed'
           : review.operation_id
             ? 'Finish preparing your review'
-            : selectedFolder
-              ? 'Allow filing in ' + safeName(selectedFolder.name)
-              : 'Choose which folder to file'
+            : review.build_station && selectedFolder
+              ? 'Build a Filing station for ' + safeName(selectedFolder.name)
+              : selectedFolder
+                ? 'Allow filing in ' + safeName(selectedFolder.name)
+                : 'Choose which folder to file'
       )
     );
     const candidate = selectedFolder || (review.candidates || [])[0];
@@ -6554,7 +6579,7 @@
       if (isVisibleFocusTarget(target)) target.focus();
       else host.querySelector('button')?.focus();
     };
-    if (!setupSelection && (review.candidates || []).length > 1) {
+    if (!review.build_station && !setupSelection && (review.candidates || []).length > 1) {
       const label = el('label', 'fj-label', 'Attached folder');
       const select = el('select', 'fj-input');
       select.id = 'fileJanitorReviewFolder';
@@ -6590,9 +6615,13 @@
     const terms = review.terms || {};
     const disclosure = el('ul', 'fj-disclosure');
     [
-      'Create or reuse Filed/ inside this folder. This changes the folder on disk.',
+      review.build_station
+        ? 'Filing is added to this workspace. Your manager explains suggestions. No folder is created.'
+        : 'Create or reuse Filed/ inside this folder. This changes the folder on disk.',
       'Scan top-level file names, types, sizes, and dates once. No file contents are opened.',
-      'Nothing is moved or sent to Trash in this preview. Both require separate approval.'
+      review.build_station
+        ? 'Nothing moves until you press File. You can undo a filing. Reading inside a file always needs separate approval.'
+        : 'Nothing is moved or sent to Trash in this preview. Both require separate approval.'
     ].forEach(line => disclosure.appendChild(el('li', 'fj-disclosure-item', line)));
     card.appendChild(disclosure);
     const monitorLabel = el('label', 'fj-setup-monitor');
@@ -6609,7 +6638,15 @@
       void repaint(choice, monitor);
     });
     monitorLabel.appendChild(monitor);
-    monitorLabel.appendChild(el('span', '', 'Also watch new arrivals and run a daily scan'));
+    monitorLabel.appendChild(
+      el(
+        'span',
+        '',
+        review.build_station
+          ? 'Also watch for new files and look once a day'
+          : 'Also watch new arrivals and run a daily scan'
+      )
+    );
     card.appendChild(monitorLabel);
     card.appendChild(
       el(
@@ -6641,7 +6678,9 @@
     const confirm = button(
       review.operation_id
         ? 'Retry preparation'
-        : 'Allow filing in ' + safeName(candidate?.name, 'folder'),
+        : review.build_station
+          ? 'Build the station'
+          : 'Allow filing in ' + safeName(candidate?.name, 'folder'),
       'fj-btn fj-btn-primary',
       async () => {
         if (
@@ -6673,16 +6712,19 @@
         else if (consoleOpen) renderConsole();
         notifySubscribers();
         try {
-          const response = await fetch(apiBase(intent.id) + '/prepare-review', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              reference_id: review.reference_id,
-              ...(token ? { selection_token: token } : {}),
-              monitoring: Boolean(review.monitoring),
-              review_revision: review.review_revision
-            })
-          });
+          const response = await fetch(
+            apiBase(intent.id) + '/prepare-review' + (review.build_station ? '?station=build' : ''),
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                reference_id: review.reference_id,
+                ...(token ? { selection_token: token } : {}),
+                monitoring: Boolean(review.monitoring),
+                review_revision: review.review_revision
+              })
+            }
+          );
           const body = await response.json().catch(() => ({}));
           if (!response.ok)
             throw new Error(
@@ -6697,6 +6739,10 @@
             throw new Error(
               'The initial result could not be confirmed. Reload this workspace to observe the accepted preparation; do not create again.'
             );
+          }
+          if (review.build_station && preparationCurrent(intent)) {
+            stationBuildWorkspace = '';
+            await window.WorkspaceCapabilities?.reloadAfterStationBuild?.();
           }
           if (preparationCurrent(intent))
             await landOnPreparedReview(body.preparation.result, intent, ctx);
@@ -6755,7 +6801,7 @@
       }
     });
     change.disabled = busy || Boolean(setupDraft) || Boolean(review.operation_id);
-    actions.appendChild(change);
+    if (!review.build_station) actions.appendChild(change);
     if (setupSelection) actions.appendChild(deferExpansionFolder(ctx));
     if (review.operation_id) {
       const stop = button('Stop here — keep saved setup', 'fj-btn fj-btn-secondary', async () => {
@@ -7313,7 +7359,7 @@
         throw new Error('invalid review status');
       if (
         !downloads &&
-        status?.applies &&
+        (stationBuildOpen() || status?.applies) &&
         (!isConfigured(status) || status.settings?.setup_preparation)
       ) {
         await loadSetupReview();
@@ -8040,6 +8086,12 @@
     subscribe,
     open,
     openLatestReview,
+    openStationBuild(id, trigger) {
+      if (!id || id !== wsId() || disposed) return false;
+      setupReview = null;
+      stationBuildWorkspace = id;
+      return open({ source: 'station-build', tab: 'review', trigger });
+    },
     close,
     focusSetup,
     isOpen: () => consoleOpen,
@@ -8121,6 +8173,7 @@
     // workspace — so a test that did not reset it would inherit the previous
     // test's tab and assert against a surface it never opened.
     _resetForTest: () => {
+      stationBuildWorkspace = '';
       consoleOpen = false;
       consoleTab = 'review';
       consoleItem = '';

@@ -7,6 +7,12 @@
 // 'ori:workspace-map-rendered' after each Map render, OriWorkspaceMap
 // 'ori:map-mounted' after each mount and 'ori:map-camera' on each camera move.
 
+import {
+  drawFilingPlot,
+  filingStationOffer,
+  stationDeferred,
+  stationPileLine
+} from './filing-station-offer.js';
 import { BALLOON_NARROW_PX, commanderBalloon } from './commander-balloon.js';
 import {
   commanderAutoOpen,
@@ -72,6 +78,9 @@ export function workspaceCommanderMap(
     balloon,
     narrow,
     filingStation: true,
+    plot(view) {
+      drawFilingPlot(workspaceCommanderAnchor(root()), view);
+    },
     // The owner is on the Map tab (FR10's "on this map").
     showing: () => doc?.body?.dataset?.workspaceViewMode === 'map',
     // The Map tab is showing and its map is on the page (FR13, FR14).
@@ -124,6 +133,8 @@ export function workspaceCommanderMap(
     onChange(fn) {
       const handler = () => fn();
       const events = [
+        'ori:filing-offer-changed',
+        'ori:capabilities-changed',
         WORKSPACE_MAP_RENDERED_EVENT,
         MAP_MOUNTED_EVENT,
         VIEW_MODE_EVENT,
@@ -684,11 +695,28 @@ export function commanderPresenter(
   const filingWait = () =>
     map.filingStation && map.showing?.() && commanderWaitingForFiling(last?.view);
 
+  const pileView = () =>
+    map.filingStation &&
+    map.showing?.() &&
+    last?.view?.filingPile &&
+    !globalThis.window?.WorkspaceCapabilities?.isInstalled?.('file-janitor')
+      ? last.view
+      : null;
   const queue = () => {
     // The report goes first among equals: a look or a setup run in progress
     // outranks the ticket line the same work produces ("Thinking it through…").
     const items = [];
     const speech = last && !filingWait() ? commanderSpeech(last.view) : null;
+    const pile = pileView();
+    if (pile && !stationDeferred(pile.workspaceID))
+      items.push({
+        kind: 'report',
+        agent: pile.agent,
+        line: stationPileLine(pile),
+        headline: stationPileLine(pile),
+        signature: `pile|${JSON.stringify(pile.filingPile)}`,
+        body: doc => filingStationOffer(doc, pile)
+      });
     if (speech) items.push({ kind: REPORT_KIND[speech.phase] || 'working', report: true, speech });
     // The folder agent's own look ticket is the report's work, narrated by
     // the report itself; its ticket line (often stuck at "On it.") stays out.
@@ -801,6 +829,7 @@ export function commanderPresenter(
   // draw: report says the folder agent's view is new (auto-open may apply).
   const draw = ({ report = false, refresh = false } = {}) => {
     const attached = map.attach({ onNarrow: revealHost });
+    map.plot?.(pileView());
     const held = chatHeld();
     // The plan moving between the chat box and the balloon redraws the balloon.
     if (report || refresh || held !== lastHeld || !map.balloon.content)

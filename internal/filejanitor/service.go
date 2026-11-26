@@ -199,7 +199,9 @@ type Service struct {
 	claimMu sync.Mutex
 	// prepareMu single-flights explicit setup confirmations. Setup is rare; a
 	// bounded service lock avoids a permanent per-workspace lock registry.
-	prepareMu sync.Mutex
+	prepareMu        sync.Mutex
+	stationLook      func(string, string) (StationLook, error)
+	stationInstaller StationInstaller
 }
 
 // NewService wires the Janitor service to its settings store and the workspace
@@ -698,8 +700,11 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 			return Status{}, setupErr(CodeFolderChanged, "The reviewed folder changed. Choose it again.", RepairChooseFolder, nil)
 		}
 	}
-	if err := ensureFilingRoot(filepath.Join(root, filingRootName)); err != nil {
-		return Status{}, err
+	station := operation != nil && operation.PreparationID != "" && current.SetupPreparation != nil && current.SetupPreparation.Station != nil
+	if !station && !current.DeferredDestination {
+		if err := ensureFilingRoot(filepath.Join(root, filingRootName)); err != nil {
+			return Status{}, err
+		}
 	}
 	var preparation *SetupPreparation
 	if operation != nil && operation.PreparationID != "" {
@@ -744,6 +749,7 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 		settings.RootID = rootID
 		settings.RootPath = root
 		settings.FilingRootName = filingRootName
+		settings.DeferredDestination = station || current.DeferredDestination
 		settings.DirectoryReferenceID = referenceID
 		settings.ApprovedReference = proof
 		settings.DailyScanLocalTime = dailyTime
@@ -1207,7 +1213,10 @@ func (s *Service) checkDirectoryAccess(settings JanitorSettings) ComponentCheck 
 func (s *Service) checkDestination(settings JanitorSettings) ComponentCheck {
 	check := ComponentCheck{Component: ComponentDestination, Status: ComponentOK}
 	path := settings.FilingRootPath()
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
+	if settings.DeferredDestination && os.IsNotExist(err) {
+		return check // A station is ready before anyone files by kind.
+	}
 	switch {
 	case err == nil && info.IsDir():
 		return check
