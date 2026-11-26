@@ -4623,6 +4623,7 @@
   function renderHistory() {
     const host = document.getElementById('fileJanitorHistoryHost');
     if (!host) return;
+    const saved = host.querySelector?.('[data-saved-document-reviews]');
     clear(host);
     if (!historyLoaded) return;
 
@@ -4640,6 +4641,17 @@
       onUndoAll: summary => void undoAll(summary.filing_id)
     });
     if (lastLine) panel.appendChild(lastLine);
+    // Use the original review's File and Undo controls, not a second plan.
+    // The component reads only saved reviews; an empty History is not a read offer.
+    const id = wsId();
+    if (id && window.FolderAgentCard?.savedReviews) {
+      const reviews =
+        saved?.dataset.savedDocumentReviews === id
+          ? saved
+          : window.FolderAgentCard.savedReviews(document, id);
+      reviews.dataset.savedDocumentReviews = id;
+      panel.appendChild(reviews);
+    }
 
     const bar = el('div', 'fj-filters');
     bar.setAttribute('role', 'group');

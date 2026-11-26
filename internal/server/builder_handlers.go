@@ -1051,6 +1051,10 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 	}
 	b.workspaceCapabilityService = service
 	if b.fileJanitorService != nil {
+		b.fileJanitorService.SetStationReadHost(func(id, lead string) (filejanitor.StationProcessor, filejanitor.StationChat) {
+			p, chat := b.documentsReviewModel(id, lead)
+			return filejanitor.StationProcessor{Provider: p.Name, Model: p.Model, Pin: p.Pin, OffDevice: chat != nil}, chat
+		}, func() []string { return []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)} })
 		b.fileJanitorService.SetStationHost(func(owner, id string) (filejanitor.StationLook, error) {
 			return b.folderAgentService.StationLook(owner, id)
 		}, service)

@@ -166,6 +166,11 @@ test('the manager offers a first look on Open; dismissal and return do not start
     (await (await request.get('/api/personal-assistant/folder-agent')).json()).folder_agents.filter(
       (r: { workspace_id: string }) => r.workspace_id === id
     );
+  const historical = process.env.ORI_STATION_SAVED_REVIEW === '1';
+  if (historical)
+    execFileSync('python3', ['tests/helpers/seed-saved-documents-review.py', base, id], {
+      input: JSON.stringify(folder)
+    });
   const observed = await records();
   expect(observed).toHaveLength(1);
   const ticket = observed[0].ticket_id;
@@ -278,6 +283,80 @@ test('the manager offers a first look on Open; dismissal and return do not start
     if (!(await station.isVisible())) await building.press('Enter');
     await expect(shelves).toContainText('8 ready to file · 5 stay loose');
     await expect(method).toHaveCount(0);
+    const readCard = shelves.getByRole('region', { name: 'Optional first-lines read' });
+    const ask = readCard.getByRole('button', { name: /Read the first lines of the 5 loose files/ });
+    await ask.press('Enter');
+    await expect(readCard).toContainText('No supported model');
+    await expect(readCard.getByRole('button', { name: 'Approve this read' })).toHaveCount(0);
+    await readCard.getByRole('button', { name: 'Back to picture' }).press('Enter');
+    await expect(ask).toBeFocused();
+    await verifyBytes();
+    if (historical) {
+      await station.getByRole('tab', { name: 'History', exact: true }).click();
+      const old = station.locator('[data-saved-document-reviews]');
+      await old.getByRole('button', { name: 'Earlier Documents reviews' }).press('Enter');
+      await expect(old).toContainText('Earlier trip notes');
+      await expect(old.getByRole('button', { name: 'Open original' })).toHaveCount(0);
+      await old.getByText('Review filing', { exact: true }).click();
+      await old.getByRole('checkbox', { name: 'note-4.txt', exact: true }).check();
+      await old.getByRole('button', { name: 'Check selected files' }).click();
+      await old.getByLabel('Folder in Documents').fill('Trips');
+      await old.getByRole('button', { name: 'Preview filing' }).click();
+      await verifyBytes();
+      await old.getByRole('button', { name: 'File 1 document into Trips' }).click();
+      await expect(old).toContainText('Filed 1 into Trips.');
+      expect(await readFile(join(root, 'Trips', 'note-4.txt'), 'utf8')).toBe(
+        stationFiles['note-4.txt']
+      );
+      await station.screenshot({ path: info.outputPath('history-earlier-review.png') });
+      await old.getByRole('button', { name: 'Put back', exact: true }).click();
+      await expect.poll(() => readdir(join(root, 'Trips'))).toEqual([]);
+      await verifyBytes();
+      return;
+    }
+    // A controlled processor card exercises disclosure and decline without a
+    // live account. Go tests separately run the actual one-use/version checks.
+    const pictureUrl = `/api/workspaces/${id}/file-janitor/batches/${result.result.batch_id}/picture`;
+    const picture = (await (await request.get(pictureUrl + '?layout=shelves')).json()).picture;
+    const estimate = picture.files.find((f: { name: string }) => f.name === 'estimate.txt');
+    const trips = picture.folders.find((f: { name: string }) => f.name === 'Trips');
+    let approvals = 0;
+    await page.route('**/picture/read-review', r =>
+      r.fulfill({
+        json: {
+          review: {
+            files: ['estimate.txt'],
+            folders: ['Trips'],
+            remaining: 4,
+            processor: { provider: 'Example cloud', model: 'Pinned model', off_device: true },
+            approval: 'test-card'
+          }
+        }
+      })
+    );
+    await page.route('**/picture/read-lines', r => {
+      approvals++;
+      return r.fulfill({
+        json: { result: { read: 1, remaining: 4, placements: { [estimate.id]: trips.key } } }
+      });
+    });
+    await ask.press('Enter');
+    await expect(readCard).toContainText('Example cloud · Pinned model');
+    await expect(readCard).toContainText('leave this device');
+    await expect(readCard).toContainText('4 loose files are outside this read');
+    await readCard.screenshot({ path: info.outputPath('first-lines-consent.png') });
+    await readCard.getByRole('button', { name: 'Not now' }).press('Enter');
+    expect(approvals).toBe(0);
+    await ask.press('Enter');
+    await readCard.getByRole('button', { name: 'Approve this read' }).press('Enter');
+    await expect(shelves).toContainText(
+      '1 read · 4 not read · 1 placed in the picture. Nothing moved.'
+    );
+    await verifyBytes();
+    expect(approvals).toBe(1);
+    await shelves.getByRole('button', { name: 'estimate.txt', exact: true }).press('Enter');
+    await shelves.getByRole('button', { name: 'Leave loose', exact: true }).press('Enter');
+    await expect(shelves).toContainText('8 ready to file · 5 stay loose');
     await shelves.getByRole('textbox', { name: /Existing folder name/ }).fill('Trips');
     await shelves.getByRole('button', { name: 'Add named shelf' }).press('Enter');
     await expect(shelves).toContainText('Trips is in the picture.');

@@ -203,6 +203,7 @@ type Service struct {
 	prepareMu        sync.Mutex
 	stationLook      func(string, string) (StationLook, error)
 	stationInstaller StationInstaller
+	stationRead      stationReadHost
 }
 
 // NewService wires the Janitor service to its settings store and the workspace

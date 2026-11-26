@@ -24,6 +24,7 @@
       busy = false,
       waiting = null,
       naming = null,
+      readReview = null,
       serial = 0;
     const headers = { 'Content-Type': 'application/json' };
     function draw(focus) {
@@ -53,7 +54,7 @@
         if (focus === 'title') title.focus();
         return;
       }
-      const active = () => current() && !busy && !waiting;
+      const active = () => current() && !busy && !waiting && !readReview;
       const grid = node('div', 'fj-shelves-grid');
       host.appendChild(grid);
       let focusTarget;
@@ -225,6 +226,67 @@
           )
         );
       const count = picture.files.filter(f => places.get(f.id)).length;
+      const loose = picture.files.filter(f => !places.get(f.id));
+      if (loose.length && !naming && !waiting) {
+        const box = node('section', 'fj-shelf-read');
+        box.setAttribute('aria-label', 'Optional first-lines read');
+        host.appendChild(box);
+        if (!readReview) {
+          const ask = button(
+            `Read the first lines of the ${loose.length} loose ${loose.length === 1 ? 'file' : 'files'} to suggest folders`,
+            () => void reviewRead(loose)
+          );
+          ask.disabled = busy;
+          box.appendChild(ask);
+          if (focus === 'read') focusTarget = ask;
+        } else {
+          const { files, folders, processor, remaining, reason, approval } = readReview;
+          const heading = node('h4', 'fj-shelf-title', 'Review what Ori may read');
+          heading.tabIndex = -1;
+          box.appendChild(heading);
+          if (focus === 'read-review') focusTarget = heading;
+          if (reason) box.appendChild(node('p', 'fj-sub', reason));
+          if (files.length)
+            box.appendChild(
+              node(
+                'p',
+                'fj-sub',
+                `${files.length} ${files.length === 1 ? 'document' : 'documents'}: ${files.join(' · ')}.`
+              )
+            );
+          if (remaining)
+            box.appendChild(
+              node(
+                'p',
+                'fj-sub',
+                `${remaining} loose ${remaining === 1 ? 'file is' : 'files are'} outside this read.`
+              )
+            );
+          if (approval && !reason) {
+            box.appendChild(
+              node(
+                'p',
+                'fj-sub',
+                `${processor.provider} · ${processor.model}. ${processor.off_device ? 'Excerpts and these folder names leave this device.' : 'The text stays on this device.'} Only the opening excerpt of each named document is shared. Folder choices: ${folders.join(' · ')}. No files will move.`
+              )
+            );
+            const allow = button(
+              'Approve this read',
+              () => void applyRead(),
+              'fj-btn fj-btn-primary'
+            );
+            allow.disabled = busy;
+            box.appendChild(allow);
+          }
+          const cancel = button(reason ? 'Back to picture' : 'Not now', () => {
+            readReview = null;
+            message = 'Nothing was read.';
+            draw('read');
+          });
+          cancel.disabled = busy;
+          box.appendChild(cancel);
+        }
+      }
       const footer = node('footer', 'fj-shelf-footer');
       host.appendChild(footer);
       footer.appendChild(
@@ -247,14 +309,100 @@
         () => void submit(),
         'fj-btn fj-btn-primary'
       );
-      file.disabled = busy || Boolean(naming) || !picture.supported || !count || count > 1000;
+      file.disabled =
+        busy ||
+        Boolean(readReview) ||
+        Boolean(naming) ||
+        !picture.supported ||
+        !count ||
+        count > 1000;
       footer.appendChild(file);
       const reset = button('Filing into my folders · Change', back, 'fj-link');
       reset.id = 'fileJanitorChangeMethod';
-      reset.disabled = busy || !!waiting;
+      reset.disabled = busy || !!waiting || !!readReview;
       footer.appendChild(reset);
       if (focus === 'title') title.focus();
       else focusTarget?.focus();
+    }
+    async function reviewRead(loose) {
+      if (busy || waiting || readReview || !current()) return;
+      busy = true;
+      message = 'Checking names and the processor. Nothing has been read.';
+      draw();
+      try {
+        const r = await fetch(base + '/picture/read-review', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ revision: picture.revision, files: loose.map(f => f.id) })
+        });
+        const { review } = await r.json();
+        if (!current()) return;
+        if (
+          !r.ok ||
+          !Array.isArray(review?.files) ||
+          !Array.isArray(review.folders) ||
+          !Number.isSafeInteger(review.remaining) ||
+          (!review.reason &&
+            (!review.approval ||
+              !review.processor?.provider ||
+              !review.processor.model ||
+              typeof review.processor.off_device !== 'boolean'))
+        )
+          throw Error('Could not verify this read. Nothing has been read.');
+        readReview = review;
+        message = 'Review the scope below. Nothing has been read.';
+      } catch (e) {
+        message = e.message;
+      } finally {
+        if (current()) {
+          busy = false;
+          draw(readReview ? 'read-review' : 'read');
+        }
+      }
+    }
+    async function applyRead() {
+      if (busy || !readReview?.approval || !current()) return;
+      const { approval } = readReview;
+      busy = true;
+      message = 'Reading the approved documents…';
+      draw();
+      try {
+        const r = await fetch(base + '/picture/read-lines', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ approval })
+        });
+        const { result } = await r.json();
+        if (!current()) return;
+        if (
+          !r.ok ||
+          !result ||
+          !Number.isSafeInteger(result.read) ||
+          !Number.isSafeInteger(result.remaining) ||
+          !result.placements
+        )
+          throw Error('No suggestions were applied. Review the folder and processor again.');
+        const next = Object.entries(result.placements);
+        if (
+          next.some(
+            ([id, k]) => !picture.files.some(f => f.id === id) || places.get(id) || !folders.has(k)
+          )
+        )
+          throw Error('The picture changed. No suggestions were applied.');
+        for (const [id, k] of next) {
+          places.set(id, k);
+          shown.add(k);
+        }
+        message = `${result.read} read · ${result.remaining} not read · ${next.length} placed in the picture. Nothing moved.`;
+      } catch (e) {
+        message = e.message;
+      } finally {
+        if (current()) {
+          readReview = null;
+          busy = false;
+          draw('title');
+        }
+      }
     }
     async function findShelf(name) {
       if (busy || waiting || !current()) return;
@@ -402,7 +550,7 @@
       }
     }
     async function submit() {
-      if (busy || naming || !picture?.supported || !current()) return;
+      if (busy || naming || readReview || !picture?.supported || !current()) return;
       const placements = picture.files
         .filter(f => places.get(f.id))
         .map(f => ({

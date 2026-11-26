@@ -7,7 +7,8 @@ export function documentsOrganizationOffer(
   base,
   fetchImpl,
   route = '',
-  label = 'Read documents and suggest groups'
+  label = 'Read documents and suggest groups',
+  historyOnly = false
 ) {
   const node = (tag, text, cls) => {
     const n = doc.createElement(tag);
@@ -92,12 +93,14 @@ export function documentsOrganizationOffer(
   };
   const history = reviews => {
     const ticket = start('Organizing reviews');
-    const filingOnly = reviews.some(r => r.filing_only);
+    const filingOnly = historyOnly || reviews.some(r => r.filing_only);
     if (filingOnly)
       panel.append(
         node(
           'p',
-          'Filing has access to names, not document contents. You can file from a saved view or put files back. New reads are unavailable.'
+          historyOnly
+            ? 'You can file from this saved view or put files back. Opening it does not read any document.'
+            : 'Filing has access to names, not document contents. You can file from a saved view or put files back. New reads are unavailable.'
         )
       );
     const sources = new Map();
@@ -317,8 +320,11 @@ export function documentsOrganizationOffer(
     try {
       const { reviews } = await read('organization-reviews');
       if (ticket !== generation) return;
-      if (reviews.length) history(reviews);
-      else await preview([], []);
+      if (reviews?.length) history(reviews);
+      else if (historyOnly) {
+        status.textContent = 'No earlier Documents reviews are available here.';
+        panel.append(dismiss());
+      } else await preview([], []);
     } catch {
       failed(ticket);
     }

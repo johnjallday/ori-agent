@@ -6,6 +6,7 @@
 
 import { filingStationOffer, stationPile } from './filing-station-offer.js';
 import { documentsOrganizationOffer } from './documents-organization.js';
+
 import { renderHireDraftEditor } from './folder-agent-hire-editor.js';
 import { publishFolderAgentChat } from './folder-agent-chat.js';
 import {
@@ -4077,6 +4078,15 @@ export async function mountFolderAgentChoice(
 
 if (typeof window !== 'undefined') {
   window.FolderAgentCard = {
+    savedReviews: (doc, id) =>
+      documentsOrganizationOffer(
+        doc,
+        `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(id)}`,
+        window.fetch.bind(window),
+        window.location.pathname,
+        'Earlier Documents reviews',
+        true
+      ),
     folderAgentReportView,
     folderAgentTileLine,
     listFolderAgents,
