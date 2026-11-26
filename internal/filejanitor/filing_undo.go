@@ -53,6 +53,8 @@ type FilingUndoResult struct {
 	Replayed bool   `json:"replayed,omitempty"`
 	// Interrupted means the run that owns this result stopped before it finished.
 	Interrupted bool `json:"interrupted,omitempty"`
+	// Undo restores files only; these confirmed creations are left alone.
+	RetainedFolders []string `json:"retained_folders,omitempty"`
 	// Back counts files that are back where they were; NotBack the ones that are not.
 	Back     int                 `json:"back"`
 	NotBack  int                 `json:"not_back"`
@@ -138,7 +140,7 @@ func locateAfterUndo(root string, action FileAction) (location, destination stri
 }
 
 func (s *Service) filingUndoResult(state ScanState, record FilingRecord, root string, replayed bool) FilingUndoResult {
-	result := FilingUndoResult{FilingID: record.ID, Replayed: replayed, Outcomes: undoOutcomes(state, record, root)}
+	result := FilingUndoResult{RetainedFolders: record.createdFolders(), FilingID: record.ID, Replayed: replayed, Outcomes: undoOutcomes(state, record, root)}
 	for _, outcome := range result.Outcomes {
 		if outcome.Result == UndoOutcomeUndone || outcome.Result == UndoOutcomeAlreadyUndone {
 			result.Back++

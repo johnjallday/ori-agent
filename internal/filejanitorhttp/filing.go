@@ -66,6 +66,37 @@ func (h *Handler) FileReviewPlan(w http.ResponseWriter, r *http.Request) {
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "filing": result})
 }
 
+// CheckShelfName is a metadata-only probe; the name is not stored, reserved,
+// or made by checking it. Never take the parent as a path.
+func (h *Handler) CheckShelfName(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	id, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	owner, err := h.currentOwner(r.Context())
+	if err != nil {
+		_ = orihttp.RespondForbidden(w, "Your workspace identity is unavailable.")
+		return
+	}
+	var b struct {
+		Revision string `json:"revision"`
+		Parent   string `json:"parent"`
+		Name     string `json:"name"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048))
+	dec.DisallowUnknownFields()
+	if dec.Decode(&b) != nil || dec.Decode(&struct{}{}) != io.EOF {
+		_ = orihttp.RespondBadRequest(w, "Send one folder name.")
+		return
+	}
+	if err = h.service.CheckShelfName(r.Context(), owner, id, r.PathValue("batchID"), b.Revision, b.Parent, b.Name); err != nil {
+		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("folder_unavailable", "That name is not available here. Choose a different name or reload the picture."))
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"available": true})
+}
+
 func (h *Handler) fileShelfPicture(w http.ResponseWriter, r *http.Request, id string) {
 	var body struct {
 		Revision   string                       `json:"revision"`

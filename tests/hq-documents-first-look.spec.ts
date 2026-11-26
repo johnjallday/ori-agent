@@ -42,6 +42,21 @@ test('the manager offers a first look on Open; dismissal and return do not start
     'packing-slip.txt': 'Kitchen remodel at Maple Street. Packing slip for cabinet order PO-4387.',
     'invoice.txt': 'Kitchen remodel at Maple Street. Invoice for cabinet order PO-4387.'
   };
+  // The station acceptance starts with four real shelves and thirteen loose
+  // files. Eight have unambiguous names; the others need a person's choice.
+  const stationFiles: Record<string, string> = { 'estimate.txt': fixtures['estimate.txt'] };
+  const stationFolders = ['Orders', 'Photos', 'Trips', 'Work'];
+  if (!empty && !liveModel) {
+    for (const folder of stationFolders) await mkdir(join(root, folder), { mode: 0o750 });
+    const old = new Date(Date.now() - 3600_000);
+    for (let i = 1; i <= 12; i++) {
+      const name = i <= 8 ? `order-${i}.txt` : `note-${i - 8}.txt`;
+      stationFiles[name] = `Synthetic ${name}`;
+      await writeFile(join(root, name), stationFiles[name], { mode: 0o600 });
+      await utimes(join(root, name), old, old);
+    }
+  }
+  const stationTree = [...Object.keys(stationFiles), ...stationFolders].sort();
   if (liveModel) {
     const configured = await request.post('/api/settings/system-model', {
       data: { provider: 'claude', model: liveModel }
@@ -94,9 +109,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
       expect(await readdir(root)).toEqual([]);
       return;
     }
-    for (const [name, body] of Object.entries(
-      liveModel ? fixtures : { 'estimate.txt': fixtures['estimate.txt'] }
-    ))
+    for (const [name, body] of Object.entries(liveModel ? fixtures : stationFiles))
       expect(await readFile(join(root, name), 'utf8')).toBe(body);
   };
   await verifyBytes();
@@ -175,11 +188,11 @@ test('the manager offers a first look on Open; dismissal and return do not start
   // still reachable after a grant narrows (covered below for legacy reports).
   if (!liveModel) {
     const offer = savedReport.getByRole('region', { name: 'Filing station offer' });
-    await expect(offer).toContainText('1 loose file in Documents');
-    await expect(offer).toContainText('estimate.txt');
+    await expect(offer).toContainText('13 loose files in Documents');
+    await expect(offer).toContainText('and 7 more');
     await offer.getByRole('button', { name: 'Not now' }).click();
     await expect(offer.getByRole('button', { name: 'Build a Filing station' })).toHaveCount(0);
-    expect(await readdir(root)).toEqual(['estimate.txt']);
+    expect((await readdir(root)).sort()).toEqual(stationTree);
     expect(
       (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
     ).toBe(false);
@@ -189,14 +202,14 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await page.goto(mapURL.toString());
     const closeReport = page.getByRole('button', { name: 'Close personal assistant' });
     if (await closeReport.isVisible()) await closeReport.click();
-    await expect(page.locator('.filing-station-plot')).toHaveText('1');
+    await expect(page.locator('.filing-station-plot')).toHaveText('13');
     const pileLine = page
       .locator('.commander-balloon-line:visible')
-      .filter({ hasText: '1 loose file in Documents' });
+      .filter({ hasText: '13 loose files in Documents' });
     if (!(await page.locator('.commander-balloon:visible .filing-station-offer').count()))
       await pileLine.click();
     const bubble = page.locator('.commander-balloon:visible .filing-station-offer');
-    await expect(bubble).toContainText('estimate.txt');
+    await expect(bubble).toContainText('and 7 more');
     await page.screenshot({ path: info.outputPath('map-offer.png') });
     await bubble.getByRole('button', { name: 'Build a Filing station' }).click();
     const station = page.getByRole('dialog', { name: 'Filing', exact: true });
@@ -234,11 +247,11 @@ test('the manager offers a first look on Open; dismissal and return do not start
     expect(response.status(), await response.text()).toBe(200);
     const result = (await response.json()).preparation;
     expect(result.result.outcome).toBe('batch');
-    expect(result.result.eligible_count).toBe(1);
-    expect(await readdir(root)).toEqual(['estimate.txt']);
+    expect(result.result.eligible_count).toBe(13);
+    expect((await readdir(root)).sort()).toEqual(stationTree);
     await verifyBytes();
     await expect.poll(() => builtParts).toEqual(['foundation', 'walls', 'roof']);
-    await expect(building).toContainText('Review 1 file');
+    await expect(building).toContainText('Review 13 files');
     if (await closeReport.isVisible()) await closeReport.click();
     const collapse = page.locator('.commander-balloon:visible .commander-balloon__close');
     if (await collapse.isVisible()) await collapse.click();
@@ -247,32 +260,68 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await expect(station.getByRole('tab', { name: 'History' })).toBeVisible();
     await page.screenshot({ path: info.outputPath('station-built.png') });
     await page.reload();
-    await expect(building).toContainText('Review 1 file');
+    await expect(building).toContainText('Review 13 files');
     await expect(building).not.toHaveAttribute('data-station-part', /foundation|walls|roof/);
     // A shelf is an existing folder the person chooses, not one created by
     // setup or by selecting a chip. Exercise the admitted File and Undo too.
-    await mkdir(join(root, 'Orders'), { mode: 0o750 });
+    expect((await readdir(root)).sort()).toEqual(stationTree);
     if (!(await station.isVisible())) await building.press('Enter');
     await station.getByRole('button', { name: 'Into my folders', exact: true }).press('Enter');
     const shelves = station.locator('.fj-shelves');
     const picker = shelves.getByRole('combobox', { name: 'Choose an existing folder' });
-    await picker.selectOption({ label: 'Orders' });
+    await expect(shelves).toContainText('8 ready to file · 5 stay loose');
+    await picker.selectOption({ label: 'Trips' });
     await shelves.getByRole('button', { name: 'Add shelf' }).press('Enter');
     await shelves.getByRole('button', { name: 'estimate.txt', exact: true }).press('Enter');
-    await shelves.getByRole('button', { name: 'Move here: Orders', exact: true }).press('Enter');
-    await expect(shelves).toContainText('1 ready to file · 0 stay loose');
+    await shelves.getByRole('button', { name: 'Move here: Trips', exact: true }).press('Enter');
+    await expect(shelves).toContainText('9 ready to file · 4 stay loose');
     await verifyBytes();
     await page.screenshot({ path: info.outputPath('own-shelves.png') });
-    await shelves.getByRole('button', { name: 'File 1 file', exact: true }).press('Enter');
+    await shelves.getByRole('button', { name: 'note-1.txt', exact: true }).press('Enter');
+    await shelves.getByRole('button', { name: 'Name a new folder' }).press('Enter');
+    await shelves.getByRole('textbox', { name: 'New folder name' }).fill('Orders');
+    await shelves.getByRole('button', { name: 'Use this folder name' }).press('Enter');
+    await expect(shelves).toContainText('That name is not available here');
+    await expect(shelves.getByRole('button', { name: 'File 9 files', exact: true })).toBeDisabled();
+    await shelves.getByRole('textbox', { name: 'New folder name' }).fill('Invoices');
+    await shelves.getByRole('button', { name: 'Use this folder name' }).press('Enter');
+    await expect(shelves).toContainText('No folder has been created');
+    expect((await readdir(root)).sort()).toEqual(stationTree);
+    await verifyBytes();
+    await expect(shelves).toContainText('10 ready to file · 3 stay loose');
+    await shelves.getByRole('button', { name: 'File 10 files', exact: true }).press('Enter');
     const undo = station.getByRole('button', { name: 'Undo all', exact: true });
     await expect(undo).toBeVisible();
-    expect(await readFile(join(root, 'Orders', 'estimate.txt'), 'utf8')).toBe(
-      fixtures['estimate.txt']
+    await expect(station.locator('#fileJanitorReceipt')).toContainText('Created “Invoices”');
+    await expect(station.locator('#fileJanitorReceipt')).toContainText('10 files filed.');
+    await expect(station.locator('#fileJanitorReceipt')).toContainText(
+      '3 files stay loose in Documents.'
     );
-    expect(await readdir(root)).toEqual(['Orders']);
-    await undo.press('Enter');
-    await expect.poll(() => readdir(join(root, 'Orders'))).toEqual([]);
+    expect(await readFile(join(root, 'Invoices', 'note-1.txt'), 'utf8')).toBe(
+      stationFiles['note-1.txt']
+    );
+    expect(await readFile(join(root, 'Trips', 'estimate.txt'), 'utf8')).toBe(
+      stationFiles['estimate.txt']
+    );
+    expect((await readdir(join(root, 'Orders'))).sort()).toEqual(
+      Object.keys(stationFiles)
+        .filter(n => n.startsWith('order-'))
+        .sort()
+    );
+    expect((await readdir(root)).sort()).toEqual(
+      [...stationFolders, 'Invoices', 'note-2.txt', 'note-3.txt', 'note-4.txt'].sort()
+    );
+    await station.screenshot({ path: info.outputPath('shelf-receipt.png') });
+    await station.locator('#fileJanitorReceiptDone').press('Enter');
+    await station.getByRole('tab', { name: 'History', exact: true }).click();
+    await station.locator('#fileJanitorLastFilingUndo').press('Enter');
+    await expect(station.locator('#fileJanitorUndone')).toContainText(
+      'Undo did not remove “Invoices”'
+    );
+    await expect.poll(() => readdir(join(root, 'Invoices'))).toEqual([]);
+    await page.screenshot({ path: info.outputPath('undo-retained-folder.png') });
     await verifyBytes();
+    expect((await readdir(root)).sort()).toEqual([...stationTree, 'Invoices'].sort());
     return;
   }
   await expect(suggestionButton).toBeVisible();

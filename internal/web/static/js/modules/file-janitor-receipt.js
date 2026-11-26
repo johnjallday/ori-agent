@@ -45,7 +45,8 @@ export function receiptWhere(model, ctx) {
     const here = (model.filed || 0) - sent;
     if (here > 0)
       parts.push((here === 1 ? '1 is in ' : here + ' are in ') + folder + '/' + filing + '.');
-  } else if ((model?.filed || 0) > 0) parts.push('They are in ' + folder + '/' + filing + '.');
+  } else if (!model?.shelfPicture && (model?.filed || 0) > 0)
+    parts.push('They are in ' + folder + '/' + filing + '.');
   if (typeof model?.looseNow === 'number') {
     const loose = model.looseNow;
     parts.push(
@@ -70,6 +71,8 @@ function directoryOf(destination) {
 export function receiptModelFromReceipt(receipt) {
   return {
     filingId: receipt.filing_id,
+    shelfPicture: Boolean(receipt.shelf_picture),
+    createdFolders: receipt.created_folders || [],
     state: receipt.state || 'done',
     filed: receipt.filed || 0,
     trashed: receipt.trashed || 0,
@@ -108,7 +111,7 @@ export function receiptModelFromResult(result) {
       // Sent to another workspace; the receipt read names which.
       filed += 1;
       sent += 1;
-    } else if (outcome.result === 'applied' && outcome.operation === 'move') {
+    } else if (outcome.result === 'applied' && ['move', 'place'].includes(outcome.operation)) {
       filed += 1;
       const folder = directoryOf(outcome.destination);
       if (folder) byDestination.set(folder, (byDestination.get(folder) || 0) + 1);
@@ -125,6 +128,8 @@ export function receiptModelFromResult(result) {
   }
   return {
     filingId: result?.filing_id || '',
+    shelfPicture: Boolean(result?.shelf_picture),
+    createdFolders: result?.created_folders || [],
     state: result?.interrupted ? 'interrupted' : 'done',
     replayed: Boolean(result?.replayed),
     filed,
@@ -191,6 +196,14 @@ export function renderReceipt(doc, model, ctx = {}) {
     );
   const where = receiptWhere(model, ctx);
   if (where) panel.appendChild(h('p', 'fj-receipt-where', where));
+  for (const name of model.createdFolders || [])
+    panel.appendChild(
+      h(
+        'p',
+        'fj-receipt-note',
+        `Created “${name}”. Undo all can put files back, but on this system Ori cannot safely remove just the folder it created.`
+      )
+    );
 
   // One row per receiving workspace, with Open <receiver>, above the Filed rows
   // (FR 31).
@@ -327,6 +340,14 @@ export function renderUndone(doc, result, ctx = {}) {
       h('p', 'fj-receipt-note', 'Ori stopped before it finished putting files back.')
     );
 
+  for (const name of result.retained_folders || [])
+    panel.appendChild(
+      h(
+        'p',
+        'fj-receipt-note',
+        `Undo did not remove “${name}”. On this system Ori cannot safely remove just the folder it created.`
+      )
+    );
   const notBack = (result.outcomes || []).filter(
     outcome => outcome.result === 'failed' || outcome.result === 'interrupted'
   );

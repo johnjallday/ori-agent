@@ -61,10 +61,12 @@ type ReceiptNotMoved struct {
 
 // FilingReceipt is one press's account. It carries no path, token or fingerprint.
 type FilingReceipt struct {
-	FilingID    string    `json:"filing_id"`
-	State       string    `json:"state"`
-	AdmittedAt  time.Time `json:"admitted_at"`
-	CompletedAt time.Time `json:"completed_at,omitzero"`
+	ShelfPicture   bool      `json:"shelf_picture,omitempty"`
+	CreatedFolders []string  `json:"created_folders,omitempty"`
+	FilingID       string    `json:"filing_id"`
+	State          string    `json:"state"`
+	AdmittedAt     time.Time `json:"admitted_at"`
+	CompletedAt    time.Time `json:"completed_at,omitzero"`
 	// Filed and Trashed count files that actually moved and were verified.
 	Filed   int `json:"filed"`
 	Trashed int `json:"trashed"`
@@ -169,6 +171,7 @@ func undoAvailableFor(record FilingRecord, actions []FileAction, currentRootID s
 // buildReceipt is the pure projection of one filing from saved state.
 func buildReceipt(state ScanState, record FilingRecord, currentRootID string, offset int) FilingReceipt {
 	receipt := FilingReceipt{
+		ShelfPicture: record.ShelfPicture, CreatedFolders: record.createdFolders(),
 		FilingID: record.ID, State: filingState(record), AdmittedAt: record.AdmittedAt, CompletedAt: record.CompletedAt,
 		ByDestination: []ReceiptDestination{}, NotMoved: []ReceiptNotMoved{},
 	}

@@ -31,6 +31,13 @@
   padding: 0.85rem;
   min-width: 0;
 }
+.fj-shelf-new {
+  border-style: dashed;
+}
+.fj-shelf-new :is(input, select) {
+  max-width: 100%;
+  min-width: 0;
+}
 .fj-shelf-loose {
   border-style: dashed;
 }

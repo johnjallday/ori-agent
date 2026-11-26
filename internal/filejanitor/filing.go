@@ -81,6 +81,8 @@ type FilingRecord struct {
 	// A station picture may have a different shelf for each file. The exact
 	// paths/identities live in each placement's existing journal entry.
 	ShelfPicture bool `json:"shelf_picture,omitempty"`
+	// Creation receipts are for reporting only. They are never operands for deletion.
+	NewShelves []FilingDestination `json:"new_shelves,omitempty"`
 	// DecisionID is the one organizing decision this filing belongs to, fixed at
 	// admission so the decision can be written after the move and backfilled.
 	DecisionID string `json:"decision_id,omitempty"`
@@ -107,6 +109,21 @@ func (f FilingRecord) validate() error {
 		f.PlannedMoves < 0 || f.PlannedTrash < 0 || f.PlannedMoves+f.PlannedTrash > PlanMaxOperations {
 		return fmt.Errorf("%w: invalid filing record", ErrInvalidCandidate)
 	}
+	if len(f.NewShelves) > f.PlannedMoves || (len(f.NewShelves) > 0 && !f.ShelfPicture) {
+		return fmt.Errorf("%w: invalid shelf count", ErrInvalidCandidate)
+	}
+	seen := map[string]bool{}
+	for _, d := range f.NewShelves {
+		if !d.Create || d.RootDirID == "" || d.ParentID == "" || (d.FolderID == "") != d.CreatedAt.IsZero() || !validRelPath(d.Folder) || d.Folder == "" || len(splitRel(d.Folder)) > 2 || seen[d.Folder] {
+			return fmt.Errorf("%w: invalid new shelf", ErrInvalidCandidate)
+		}
+		for _, name := range splitRel(d.Folder) {
+			if !safeShelfName(name) {
+				return fmt.Errorf("%w: invalid shelf name", ErrInvalidCandidate)
+			}
+		}
+		seen[d.Folder] = true
+	}
 	if f.ShelfPicture {
 		if f.Destination != nil || f.PlannedTrash != 0 || !managedRootGeneration.MatchString(f.DecisionID) {
 			return fmt.Errorf("%w: invalid shelf filing", ErrInvalidCandidate)
@@ -124,6 +141,17 @@ func (f FilingRecord) validate() error {
 		}
 	}
 	return nil
+}
+
+// createdFolders is historical evidence, not a claim about what is there now.
+func (f FilingRecord) createdFolders() []string {
+	var names []string
+	for _, d := range f.NewShelves {
+		if d.FolderID != "" && !d.CreatedAt.IsZero() {
+			names = append(names, d.Folder)
+		}
+	}
+	return names
 }
 
 // running reports whether this process is executing the filing right now.

@@ -23,6 +23,7 @@
       message = '',
       busy = false,
       waiting = null,
+      naming = null,
       serial = 0;
     const headers = { 'Content-Type': 'application/json' };
     function draw(focus) {
@@ -70,6 +71,10 @@
         const card = node('section', dest ? 'fj-shelf' : 'fj-shelf fj-shelf-loose');
         card.setAttribute('aria-label', name);
         grid.appendChild(card);
+        if (folders.get(dest)?.newName) {
+          card.classList.add('fj-shelf-new');
+          card.appendChild(node('small', 'fj-label', 'New folder · made only when filed'));
+        }
         card.appendChild(node('h4', 'fj-shelf-title', name));
         const files = node('div', 'fj-shelf-files');
         card.appendChild(files);
@@ -100,6 +105,63 @@
         if (f) shelf(k, f.name);
       }
       shelf('', `Still loose in ${picture.folder}`);
+      const newTarget = node('section', 'fj-shelf fj-shelf-new');
+      grid.appendChild(newTarget);
+      newTarget.appendChild(node('h4', 'fj-shelf-title', 'New folder'));
+      if (!naming) {
+        const start = button('Name a new folder', () => {
+          if (!active()) return;
+          naming = { name: '', parent: '' };
+          draw('new-name');
+        });
+        start.disabled = !active();
+        newTarget.appendChild(start);
+      } else {
+        const form = node('form', 'fj-shelf-tools');
+        newTarget.appendChild(form);
+        const parent = node('select', 'fj-select');
+        parent.setAttribute('aria-label', 'Create folder in');
+        const top = node('option', '', picture.folder);
+        top.value = '';
+        parent.appendChild(top);
+        for (const [k, f] of folders) {
+          if (f.parent || f.newName) continue;
+          const opt = node('option', '', f.name);
+          opt.value = k;
+          parent.appendChild(opt);
+        }
+        parent.value = naming.parent;
+        parent.disabled = busy;
+        parent.addEventListener('change', () => {
+          naming.parent = parent.value;
+        });
+        form.appendChild(parent);
+        const input = node('input', 'fj-input');
+        input.setAttribute('aria-label', 'New folder name');
+        input.maxLength = 255;
+        input.required = true;
+        input.value = naming.name;
+        input.disabled = busy;
+        input.addEventListener('input', () => {
+          naming.name = input.value;
+        });
+        form.appendChild(input);
+        const check = node('button', 'fj-btn fj-btn-secondary', 'Use this folder name');
+        check.type = 'submit';
+        check.disabled = busy;
+        form.appendChild(check);
+        form.addEventListener('submit', e => {
+          e.preventDefault();
+          void checkName();
+        });
+        const cancel = button('Cancel', () => {
+          naming = null;
+          draw(selected || 'title');
+        });
+        cancel.disabled = busy;
+        form.appendChild(cancel);
+        if (focus === 'new-name') focusTarget = input;
+      }
       const toolbar = node('div', 'fj-shelf-tools');
       host.appendChild(toolbar);
       const select = node('select', 'fj-select');
@@ -110,6 +172,7 @@
       placeholder.value = '';
       select.appendChild(placeholder);
       for (const [k, f] of folders) {
+        if (f.newName) continue;
         const option = node('option', '', f.name);
         option.value = k;
         select.appendChild(option);
@@ -156,13 +219,50 @@
         () => void submit(),
         'fj-btn fj-btn-primary'
       );
-      file.disabled = busy || !picture.supported || !count || count > 1000;
+      file.disabled = busy || Boolean(naming) || !picture.supported || !count || count > 1000;
       footer.appendChild(file);
       const reset = button('Back to By kind', back, 'fj-link');
       reset.disabled = busy || !!waiting;
       footer.appendChild(reset);
       if (focus === 'title') title.focus();
       else focusTarget?.focus();
+    }
+    async function checkName() {
+      if (!naming || busy || !current()) return;
+      const { name, parent } = naming;
+      busy = true;
+      message = 'Checking the folder name…';
+      draw();
+      let focus = 'new-name';
+      try {
+        const r = await fetch(base + '/picture/check-folder', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ name, parent, revision: picture.revision })
+        });
+        const b = await r.json();
+        if (!current()) return;
+        if (!r.ok || b.available !== true)
+          throw Error(b.message || b.error?.message || 'That folder name is not available.');
+        const k = 'new:' + JSON.stringify([parent, name]);
+        const display = parent ? folders.get(parent).name + '/' + name : name;
+        folders.set(k, { name: display, newName: name, parent });
+        shown.add(k);
+        if (selected) {
+          places.set(selected, k);
+          focus = selected;
+          selected = '';
+        } else focus = 'title';
+        naming = null;
+        message = display + ' is in the picture. No folder has been created.';
+      } catch (error) {
+        message = error.message;
+      } finally {
+        if (current()) {
+          busy = false;
+          draw(focus);
+        }
+      }
     }
     async function load(parentKey = '') {
       if (busy || !current()) return;
@@ -200,6 +300,7 @@
           folders.clear();
           shown.clear();
           places.clear();
+          naming = null;
           selected = '';
           waiting = null;
           for (const f of p.files) {
@@ -226,12 +327,14 @@
       }
     }
     async function submit() {
-      if (busy || !picture?.supported || !current()) return;
+      if (busy || naming || !picture?.supported || !current()) return;
       const placements = picture.files
         .filter(f => places.get(f.id))
         .map(f => ({
           file: f.id,
-          shelf: places.get(f.id),
+          ...(folders.get(places.get(f.id)).newName
+            ? { new_name: folders.get(places.get(f.id)).newName }
+            : { shelf: places.get(f.id) }),
           parent: folders.get(places.get(f.id)).parent
         }));
       if (!placements.length || placements.length > 1000) return;
@@ -253,7 +356,8 @@
             picture = null;
           }
           throw Error(
-            result.error?.message ||
+            result.message ||
+              result.error?.message ||
               'The result could not be confirmed. Check this same filing again.'
           );
         }
