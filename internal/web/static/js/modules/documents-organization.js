@@ -2,7 +2,13 @@ import { documentsFilingCheck, undoSummary } from './documents-filing-check.js';
 
 // Review is deliberately separate from chat submission and from Filing. A
 // redraw/revisit may load receipts, but only the approval button can send a POST.
-export function documentsOrganizationOffer(doc, base, fetchImpl, route = '') {
+export function documentsOrganizationOffer(
+  doc,
+  base,
+  fetchImpl,
+  route = '',
+  label = 'Read documents and suggest groups'
+) {
   const node = (tag, text, cls) => {
     const n = doc.createElement(tag);
     if (text) n.textContent = text;
@@ -24,11 +30,7 @@ export function documentsOrganizationOffer(doc, base, fetchImpl, route = '') {
   const status = node('p', null, 'folder-agent-card__note');
   status.setAttribute('role', 'status');
   status.tabIndex = -1;
-  const open = button(
-    'Read documents and suggest groups',
-    () => (expanded ? close() : showHistory()),
-    true
-  );
+  const open = button(label, () => (expanded ? close() : showHistory()), true);
   open.setAttribute('aria-expanded', 'false');
   let generation = 0,
     expanded = false;

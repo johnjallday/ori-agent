@@ -8,6 +8,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
+// GuidedDocumentsLinkPrefix distinguishes a local creation-receipt-bound look
+// from the existing Files link. The prefix alone never proves authority.
+const GuidedDocumentsLinkPrefix = "guided-documents:"
+
 // StartAssigned starts only the look, never workspace creation or hiring. The
 // durable record is the claim: a racing tab observes it before opening a ticket.
 func (s *Service) StartAssigned(ctx context.Context, owner, id, agent, link, brief string) error {

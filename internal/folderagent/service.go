@@ -597,7 +597,11 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	if witness != "" && rec.MapWitness != witness {
 		m = nil
 	}
+	var loose *LooseDocumentObservation
 	if m == nil {
+		if strings.HasPrefix(rec.AssignedLink, GuidedDocumentsLinkPrefix) {
+			loose, opts.ObserveRootFile = s.observeLooseDocuments(root)
+		}
 		m, err = foldermap.Walk(root, opts)
 	} else {
 		err = foldermap.Continue(root, m, first, opts)
@@ -669,6 +673,9 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 			r.MapWitness = witness
 		} else {
 			r.MapWitness = ""
+		}
+		if loose != nil {
+			r.LooseDocuments = loose
 		}
 		r.Map, r.Facts, r.Stage, r.Candidates, r.Turn = m, facts, stage, candidates, turn
 		r.Sections, r.AskFolders, r.Hint = sections, askFolders, ""

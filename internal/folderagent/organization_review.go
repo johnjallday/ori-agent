@@ -28,6 +28,9 @@ func (s *Service) organizationAccess(owner string, rec *Record) (DocumentsAccess
 	if a.Binding == "" || a.Lead == "" || a.Lead != rec.AgentName || ResolveRootIdentity(a.Root, s.deps.KnownFolderRoot).Policy != folderlook.RootDocuments {
 		return DocumentsAccess{}, ErrWrongState
 	}
+	if rec.AssignedLink != "" && !s.assignedRootCurrent(context.Background(), rec, a.Root) {
+		return DocumentsAccess{}, ErrWrongState
+	}
 	walked, ok := rec.Map.Folder("")
 	info, err := os.Lstat(a.Root) // #nosec G304 G703 -- current owned workspace anchor
 	if err != nil || !ok || walked.BranchWitness == "" || diridentity.Of(info) != walked.BranchWitness {

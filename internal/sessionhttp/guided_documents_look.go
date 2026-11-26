@@ -19,7 +19,7 @@ import (
 
 // The ordinary Files look keeps using its reference ID. This namespace selects
 // the stricter receipt-bound path on every use, including after a restart.
-const documentsLinkPrefix = "guided-documents:"
+const documentsLinkPrefix = folderagent.GuidedDocumentsLinkPrefix
 
 func (h *Handler) SetGuidedDocumentsLook(local func(*http.Request, string) bool, witness func(string, time.Time) string) {
 	h.guidedLookAllowed, h.documentsWitness = local, witness

@@ -201,9 +201,12 @@ func CleanRel(rel string) (string, error) {
 
 // Options tunes one walk. Zero values take the constants.
 type Options struct {
-	MemberWitness func(os.FileInfo) string
-	MaxEntries    int
-	Budget        time.Duration
+	// ObserveRootFile receives only kept, regular direct children from this
+	// walk. A caller can count reviewable documents without a second listing.
+	ObserveRootFile func(string)
+	MemberWitness   func(os.FileInfo) string
+	MaxEntries      int
+	Budget          time.Duration
 	// Now supplies the clock, for tests that exercise the time budget.
 	Now func() time.Time
 	// Progress, when set, is told after each folder what the walk has done
@@ -457,6 +460,9 @@ func (w *walker) list(rel string) (Folder, error) {
 		info, err := entry.Info()
 		if err != nil || !info.Mode().IsRegular() || folderdigest.IsDataless(info) {
 			continue
+		}
+		if rel == "" && w.opts.ObserveRootFile != nil {
+			w.opts.ObserveRootFile(name)
 		}
 		f.Files++
 		extensions[strings.ToLower(filepath.Ext(name))] = true

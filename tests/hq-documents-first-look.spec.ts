@@ -85,7 +85,16 @@ test('the manager offers a first look on Open; dismissal and return do not start
   await page.setViewportSize({ width: 1280, height: 900 });
   await card.screenshot({ path: info.outputPath('desktop-return.png') });
   await report.click();
-  await expect(page.locator('.folder-agent-card--report:visible')).toBeVisible();
+  const savedReport = page.locator('.folder-agent-card--report:visible');
+  await expect(savedReport).toBeVisible();
+  const suggestionButton = savedReport.getByRole('button', { name: 'Review filing suggestions' });
+  await expect(suggestionButton).toBeVisible();
+  await savedReport.screenshot({ path: info.outputPath('filing-recommendation.png') });
+  await suggestionButton.click();
+  const scope = savedReport.locator('.folder-agent-card__organization');
+  await expect(scope).toContainText('Nothing has been read or sent.');
+  await expect(scope.getByRole('checkbox', { name: 'estimate.txt' })).toBeChecked();
+  await scope.screenshot({ path: info.outputPath('filing-read-boundary.png') });
   expect(starts).toHaveLength(1);
   expect(effects).toEqual([]);
   const after = await choiceInventory(request, data);

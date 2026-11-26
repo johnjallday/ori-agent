@@ -233,7 +233,8 @@ type PremiseAnswer struct {
 
 // Record is one folder workspace's state.
 type Record struct {
-	AssignedLink string `json:"assigned_link,omitempty"` // existing workspace; recheck before a walk
+	LooseDocuments *LooseDocumentObservation `json:"loose_documents,omitempty"`
+	AssignedLink   string                    `json:"assigned_link,omitempty"` // existing workspace; recheck before a walk
 	// Current trusted identity is projected at runtime, never persisted.
 	RootPolicy    folderlook.RootPolicy `json:"-"`
 	PolicyBinding string                `json:"-"`
