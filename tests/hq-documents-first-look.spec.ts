@@ -187,6 +187,8 @@ test('the manager offers a first look on Open; dismissal and return do not start
     const mapURL = new URL(page.url());
     mapURL.searchParams.set('mode', 'map');
     await page.goto(mapURL.toString());
+    const closeReport = page.getByRole('button', { name: 'Close personal assistant' });
+    if (await closeReport.isVisible()) await closeReport.click();
     await expect(page.locator('.filing-station-plot')).toHaveText('1');
     const pileLine = page
       .locator('.commander-balloon-line:visible')
@@ -205,6 +207,25 @@ test('the manager offers a first look on Open; dismissal and return do not start
       station.getByRole('checkbox', { name: 'Also watch for new files and look once a day' })
     ).not.toBeChecked();
     await station.screenshot({ path: info.outputPath('build-card.png') });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const building = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
+    const builtParts: string[] = [];
+    await page.exposeFunction('observeBuildPart', (part: string) => {
+      if (!builtParts.includes(part)) builtParts.push(part);
+    });
+    await page.evaluate(() => {
+      new MutationObserver(() => {
+        const part = document
+          .querySelector('[data-cmd-hq-station="file-janitor"]')
+          ?.getAttribute('data-station-part');
+        if (part) void (window as any).observeBuildPart(part);
+      }).observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['data-station-part']
+      });
+    });
     const prepared = page.waitForResponse(
       r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/prepare-review')
     );
@@ -216,8 +237,18 @@ test('the manager offers a first look on Open; dismissal and return do not start
     expect(result.result.eligible_count).toBe(1);
     expect(await readdir(root)).toEqual(['estimate.txt']);
     await verifyBytes();
+    await expect.poll(() => builtParts).toEqual(['foundation', 'walls', 'roof']);
+    await expect(building).toContainText('Review 1 file');
+    if (await closeReport.isVisible()) await closeReport.click();
+    const collapse = page.locator('.commander-balloon:visible .commander-balloon__close');
+    if (await collapse.isVisible()) await collapse.click();
+    await building.screenshot({ path: info.outputPath('depot-open.png') });
+    await building.click();
     await expect(station.getByRole('tab', { name: 'History' })).toBeVisible();
-    await station.screenshot({ path: info.outputPath('station-built.png') });
+    await page.screenshot({ path: info.outputPath('station-built.png') });
+    await page.reload();
+    await expect(building).toContainText('Review 1 file');
+    await expect(building).not.toHaveAttribute('data-station-part', /foundation|walls|roof/);
     return;
   }
   await expect(suggestionButton).toBeVisible();

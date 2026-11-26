@@ -139,6 +139,10 @@ func (s *Scanner) ResolveRoot(settings JanitorSettings) (string, error) {
 // result becomes a batch (a manual or automatic scan) or is only reported (a
 // test scan).
 func (s *Scanner) Scan(settings JanitorSettings, state ScanState, source ScanSource) (ScanResult, error) {
+	return s.scan(settings, state, source, nil)
+}
+
+func (s *Scanner) scan(settings JanitorSettings, state ScanState, source ScanSource, progress func(int, int) error) (ScanResult, error) {
 	root, err := s.ResolveRoot(settings)
 	if err != nil {
 		return ScanResult{}, err
@@ -162,10 +166,33 @@ func (s *Scanner) Scan(settings JanitorSettings, state ScanState, source ScanSou
 		filingRoot = DefaultFilingRootName
 	}
 	active := state.ActiveFingerprints()
-
+	// Count only loose regular entries from this listing, not shelves. The
+	// eligibility decision still happens exactly once per entry below.
+	loose := func(e os.DirEntry) bool {
+		return e.Type().IsRegular() && !filewatcher.ShouldIgnoreFile(e.Name()) && !strings.EqualFold(e.Name(), filingRoot)
+	}
+	total, checked := 0, 0
+	if progress != nil {
+		for _, e := range entries {
+			if loose(e) {
+				total++
+			}
+		}
+		if err := progress(0, total); err != nil {
+			return ScanResult{}, err
+		}
+	}
 	for _, entry := range entries {
 		name := entry.Name()
 		candidate, reason, ok := s.evaluate(root, filingRoot, name, state, active, source, now)
+		if progress != nil {
+			if loose(entry) {
+				checked++
+			}
+			if err := progress(checked, total); err != nil {
+				return ScanResult{}, err
+			}
+		}
 		if !ok {
 			result.Ineligible = append(result.Ineligible, IneligibleObservation{Name: safeName(name), Reason: reason})
 			continue

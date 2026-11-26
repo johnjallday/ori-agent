@@ -34,6 +34,30 @@
   let lastStatus = null;
   let setupReview = null;
   let stationBuildWorkspace = '';
+  let buildProgress = null;
+  const buildObserver = window.FilingStationBuild?.observer({
+    reduced: () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+    async read(id) {
+      const r = await fetch(apiBase(id) + '/setup-review?station=progress', { cache: 'no-store' });
+      if (!r.ok) throw Error();
+      const b = (await r.json()).build;
+      if (id !== wsId() || disposed) throw Error();
+      return { ...b, id };
+    },
+    paint(b) {
+      const previous = buildProgress;
+      buildProgress = b;
+      notifySubscribers();
+      document.dispatchEvent(new CustomEvent('ori:filing-build-progress'));
+      if (consoleOpen) {
+        const line = document.getElementById('fileJanitorBuildProgress');
+        if (line && b.running && previous?.running && b.operation_id === previous.operation_id)
+          line.textContent = b.line;
+        else if (preparation || previous?.running || b.running) renderConsole();
+      }
+      if (!preparation && previous?.running && !b.running) void refresh();
+    }
+  });
   const stationBuildOpen = () => Boolean(stationBuildWorkspace && stationBuildWorkspace === wsId());
   let setupSelection = null;
   let setupReviewRequest = 0;
@@ -282,6 +306,8 @@
   // Page teardown invalidates asynchronous callbacks, not operations already sent.
   function dispose() {
     disposed = true;
+    buildObserver?.reset();
+    buildProgress = null;
     preparation = null;
     close({ keepUrl: true });
     invalidateFolderState();
@@ -5266,10 +5292,24 @@
       }
       return;
     }
-    if (preparation && consoleTab === 'review') {
-      const progress = el('p', 'fj-sub', 'Preparing your preview…');
+    const build = buildProgress?.id === wsId() ? buildProgress : null;
+    if ((preparation || build?.running) && consoleTab === 'review') {
+      const progress = el('p', 'fj-sub', build?.line || 'Preparing your preview…');
+      progress.id = 'fileJanitorBuildProgress';
       progress.setAttribute('role', 'status');
       host.appendChild(progress);
+      if (build?.operation_id && build.running)
+        host.appendChild(
+          button('Stop preparation', 'fj-btn fj-btn-secondary', async e => {
+            e.currentTarget.disabled = true;
+            try {
+              await requestStopBuild(build.operation_id);
+              await refresh();
+            } catch {
+              showError('Could not confirm the stop. Check setup again.');
+            }
+          })
+        );
       return;
     }
     if (
@@ -5672,7 +5712,13 @@
     // The check is against a status we have actually read: on a cold load
     // lastStatus is still null, and refusing then would make the first press
     // of a station do nothing (FR-93).
-    if (lastStatus && !lastStatus.applies && !downloadsReviewRequested() && !stationBuildOpen())
+    if (
+      lastStatus &&
+      !lastStatus.applies &&
+      !downloadsReviewRequested() &&
+      !stationBuildOpen() &&
+      !(buildProgress?.id === id && buildProgress?.running)
+    )
       return false;
     const host = consoleHost();
     if (!host) return false;
@@ -6495,6 +6541,14 @@
     window.history.replaceState({ fileJanitor: consoleOpen }, '', url.toString());
   }
 
+  async function requestStopBuild(operation_id) {
+    const r = await fetch(apiBase(wsId()) + '/stop-preparation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation_id })
+    });
+    if (!r.ok) throw Error();
+  }
   function renderLinkedSetupReview(host, ctx) {
     const review = setupReview;
     if (
@@ -6705,6 +6759,10 @@
         const token = !review.operation_id ? setupSelection : '';
         setupSelection = null;
         preparation = intent;
+        if (review.build_station && mode === 'map' && !ctx) close();
+        void buildObserver?.watch(intent.id, !review.operation_id, () =>
+          preparationCurrent(intent)
+        );
         confirm.disabled = true;
         monitor.disabled = true;
         showError('');
@@ -7355,6 +7413,17 @@
       const status = body.status;
       if (!current()) return;
       if (typeof status?.applies !== 'boolean') throw new Error('invalid status');
+      if (!preparation && !buildProgress?.revealing && !buildProgress?.running) {
+        if (
+          status.settings?.setup_preparation &&
+          !status.settings.setup_preparation.scan_receipt_digest
+        )
+          void buildObserver?.watch(id, false, () => false);
+        else if (buildProgress?.repair) {
+          buildObserver?.reset();
+          buildProgress = null;
+        }
+      }
       if (downloads && !['install', 'access', 'ready'].includes(status.downloads_review))
         throw new Error('invalid review status');
       if (
@@ -7606,11 +7675,36 @@
   }
 
   function stationState() {
+    const b = buildProgress?.id === wsId() ? buildProgress : null;
+    if (
+      b &&
+      b.operation_id &&
+      b.part !== 'open' &&
+      b.part !== 'plot' &&
+      (preparation || b.running || b.repair || b.revealing)
+    )
+      return {
+        applies: true,
+        buildPart: b.part,
+        value: b.line,
+        description: b.repair ? 'Open Filing to repair this step.' : 'Nothing moves.',
+        tone: b.repair ? 'attention' : 'idle'
+      };
     if (!lastStatus || !lastStatus.applies) return { applies: false };
     const readiness = lastStatus.readiness || {};
     const settings = lastStatus.settings || {};
     const privacy = lastStatus.privacy || {};
 
+    if (settings.stopped_station_part)
+      return {
+        applies: true,
+        value: 'Preparation stopped',
+        buildPart: settings.stopped_station_part,
+        description: isConfigured(lastStatus)
+          ? 'Open Filing to scan again.'
+          : 'Open Filing to continue setup.',
+        tone: 'attention'
+      };
     if (readiness.state === 'needs_attention') {
       return {
         applies: true,
@@ -7631,7 +7725,11 @@
     if (preview) {
       return {
         applies: true,
-        value: preview.count ? reviewCountLabel(preview.count) : 'No eligible files',
+        value: preview.count
+          ? reviewCountLabel(preview.count)
+          : settings.deferred_destination
+            ? 'Nothing to file yet'
+            : 'No eligible files',
         reviewCount: preview.count,
         reviewBatchId: preview.batchId,
         actionTab: 'review',
@@ -7662,6 +7760,7 @@
       return {
         applies: true,
         value: 'Setup needed',
+        buildPart: 'foundation',
         description: reviewedFolderName()
           ? 'Waiting for folder access'
           : 'waiting for you to choose a folder to file',
@@ -7691,6 +7790,13 @@
       };
     }
     const folder = settings.root_path ? safeName(settings.root_path) : '';
+    if (settings.deferred_destination && batchLoadState === 'loaded' && !pending)
+      return {
+        applies: true,
+        value: 'Nothing to file yet',
+        description: 'Open Filing to look again.',
+        tone: 'idle'
+      };
     if (manualScansOnly(settings)) {
       return { applies: true, value: 'Ready', description: 'Manual scans only', tone: 'idle' };
     }
@@ -8086,6 +8192,7 @@
     subscribe,
     open,
     openLatestReview,
+    buildProgress: () => (buildProgress?.id === wsId() ? buildProgress : null),
     openStationBuild(id, trigger) {
       if (!id || id !== wsId() || disposed) return false;
       setupReview = null;
@@ -8174,6 +8281,8 @@
     // test's tab and assert against a surface it never opened.
     _resetForTest: () => {
       stationBuildWorkspace = '';
+      buildObserver?.reset();
+      buildProgress = null;
       consoleOpen = false;
       consoleTab = 'review';
       consoleItem = '';
@@ -8290,8 +8399,13 @@
         const catalog = window.WorkspaceCapabilities;
         const item =
           catalog && typeof catalog.find === 'function' ? catalog.find('file-janitor') : null;
-        if (!item || !item.installed || item.available === false) return null;
-        const status = item.status || {};
+        const underway =
+          buildProgress?.id === wsId() &&
+          buildProgress.operation_id &&
+          buildProgress.part !== 'plot' &&
+          (buildProgress.running || buildProgress.revealing);
+        if ((!item?.installed && !underway) || item?.available === false) return null;
+        const status = item?.status || {};
         const folder =
           lastStatus?.applies && isConfigured(lastStatus)
             ? compactFolderName(lastStatus.settings.root_path)
@@ -8308,6 +8422,7 @@
             if (derived && derived.applies) return derived;
             return {
               applies: true,
+              ...(status.state === 'setup_required' ? { buildPart: 'foundation' } : {}),
               value: status.detail || '',
               description: status.detail || '',
               tone: status.state === 'needs_attention' ? 'degraded' : ''

@@ -181,6 +181,8 @@ type JanitorSettings struct {
 	FilingRootName string `json:"filing_root_name,omitempty"`
 	// Station setup grants metadata access without creating a destination.
 	DeferredDestination bool `json:"deferred_destination,omitempty"`
+	// A stopped build keeps its completed part; this note grants nothing.
+	StoppedStationPart string `json:"stopped_station_part,omitempty"`
 	// DailyScanLocalTime is the daily catch-up time as "HH:MM" wall clock.
 	DailyScanLocalTime string `json:"daily_scan_local_time,omitempty"`
 	// Timezone is the IANA zone the daily time is interpreted in. Empty means
@@ -297,6 +299,11 @@ func (s JanitorSettings) Normalize() JanitorSettings {
 		out.SetupDecision = nil
 		out.SetupPreparation = nil
 		out.SendsTo = nil
+	}
+	switch out.StoppedStationPart {
+	case "plot", "foundation", "walls", "roof":
+	default:
+		out.StoppedStationPart = ""
 	}
 	out.SchemaVersion = SettingsSchemaVersion
 	out.WorkspaceID = strings.TrimSpace(out.WorkspaceID)

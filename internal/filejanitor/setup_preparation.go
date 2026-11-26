@@ -130,6 +130,9 @@ func (s *Service) PrepareLinkedSetup(request LinkedPreparationRequest, automatio
 		(request.SelectedPath != "" && !preparation.FromSelection) {
 		return result, setupErr(CodeFolderChanged, "Another folder setup was accepted. Open the current workspace settings.", RepairRetry, nil)
 	}
+	ctx, finish := s.buildActivity.start(request.Context, request.OwnerUserID, request.WorkspaceID, preparation.ID)
+	defer finish()
+	request.Context = ctx
 	if preparation.Station != nil {
 		result.Stage, result.OperationID = "station", preparation.ID
 		if err := s.installStation(request.WorkspaceID, *preparation); err != nil {
@@ -200,6 +203,7 @@ func (s *Service) PrepareLinkedSetup(request LinkedPreparationRequest, automatio
 			RunID: preparation.ID, OperationID: preparation.ID + ":monitoring", PreparationID: preparation.ID,
 			ReviewRevision: preparation.ReviewRevision, AuthorityRevision: preparation.BindingRevision,
 		},
+		ScanContext:      request.Context,
 		ScanOperationID:  preparation.ID + ":scan",
 		FreshScanAttempt: func() bool { return freshScanAttempt },
 		BeforeScan: func() error {
@@ -280,6 +284,7 @@ func (s *Service) acceptLinkedPreparation(workspaceID string, review LinkedSetup
 		if digest != review.settingsDigest || current.SetupPreparation != nil || (pending != nil && current.PendingFolderGrant != nil) {
 			return setupErr(CodeFolderChanged, "Folder setup changed before confirmation. Review it again.", RepairRetry, nil)
 		}
+		current.StoppedStationPart = ""
 		current.SetupPreparation = preparation
 		if pending != nil {
 			current.PendingFolderGrant = pending
@@ -317,6 +322,11 @@ func invalidateSetupPreparation(settings *JanitorSettings) {
 // It waits for an already-started stage, pauses monitoring, and releases its
 // uncompleted grant claim. Saved access/resources/results are never deleted.
 func (s *Service) StopLinkedPreparation(workspaceID, owner, operationID string) (Status, error) {
+	// Check both current ownership and the active request tuple before
+	// interrupting a scan. Recheck ownership after waiting for it below.
+	if ws, err := s.workspaces.Get(workspaceID); err == nil && progressWorkspace(ws, owner) {
+		s.buildActivity.stop(owner, workspaceID, operationID)
+	}
 	s.prepareMu.Lock()
 	defer s.prepareMu.Unlock()
 	s.claimMu.Lock()
@@ -335,6 +345,13 @@ func (s *Service) StopLinkedPreparation(workspaceID, owner, operationID string) 
 			return setupErr(CodeFolderChanged, "Preparation changed. Open the workspace's current settings.", RepairRetry, nil)
 		}
 		settings.Paused = true
+		part, err := s.StationProgress(owner, workspaceID)
+		if err != nil {
+			return err
+		}
+		if part.Part != "open" {
+			settings.StoppedStationPart = part.Part
+		}
 		invalidateSetupPreparation(settings)
 		settings.LastAssistedAutomation = nil
 		return nil

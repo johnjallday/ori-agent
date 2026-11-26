@@ -41,6 +41,15 @@ func (h *Handler) SetupReview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if r.Method == http.MethodGet && r.URL.Query().Get("station") == "progress" {
+		p, err := h.service.StationProgress(owner, workspaceID)
+		if err != nil {
+			respondReviewedSetupError(w, err, "progress_unavailable", "The station's progress could not be confirmed.")
+			return
+		}
+		_ = orihttp.RespondSuccess(w, map[string]any{"build": p})
+		return
+	}
 	var review filejanitor.LinkedSetupReview
 	if r.URL.Query().Get("station") == "build" {
 		if request.SelectionToken != "" {

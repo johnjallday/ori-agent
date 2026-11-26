@@ -133,6 +133,7 @@ export function workspaceCommanderMap(
     onChange(fn) {
       const handler = () => fn();
       const events = [
+        'ori:filing-build-progress',
         'ori:filing-offer-changed',
         'ori:capabilities-changed',
         WORKSPACE_MAP_RENDERED_EVENT,
@@ -707,8 +708,35 @@ export function commanderPresenter(
     // outranks the ticket line the same work produces ("Thinking it through…").
     const items = [];
     const speech = last && !filingWait() ? commanderSpeech(last.view) : null;
+    const build =
+      map.filingStation &&
+      map.showing?.() &&
+      globalThis.window?.FileJanitorConsole?.buildProgress?.();
+    const buildVisible = build?.operation_id && (build.running || build.revealing || build.repair);
+    if (buildVisible)
+      items.push({
+        kind: 'live',
+        agent: last?.view?.agent || 'Manager',
+        line: build.line,
+        headline: build.line,
+        signature: `station|${build.operation_id}|${build.line}`,
+        body: doc => {
+          const p = doc.createElement('p');
+          if (build.repair || build.running) {
+            const action = doc.createElement('button');
+            action.type = 'button';
+            action.className = 'btn btn-sm btn-outline-secondary';
+            action.textContent = build.repair ? 'Review setup' : 'View preparation';
+            action.addEventListener('click', () =>
+              globalThis.window?.FileJanitorConsole?.openStationBuild?.(build.id, action)
+            );
+            p.appendChild(action);
+          } else p.textContent = 'Nothing moves.';
+          return p;
+        }
+      });
     const pile = pileView();
-    if (pile && !stationDeferred(pile.workspaceID))
+    if (!buildVisible && pile && !stationDeferred(pile.workspaceID))
       items.push({
         kind: 'report',
         agent: pile.agent,

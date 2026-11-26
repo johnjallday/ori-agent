@@ -8,6 +8,16 @@
   display: none;
 }
 
+/* Stages are evidence, not a clock. Reduced motion keeps the whole building
+   visible and each completed step in text. Only the workspace depot is staged. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-station-part="foundation"] [data-depot-part]:not([data-depot-part="foundation"]),
+  [data-station-part="walls"] :is([data-depot-part="roof"], [data-depot-part="open"]),
+  [data-station-part="roof"] [data-depot-part="open"] {
+    visibility: hidden;
+  }
+}
+
 .filing-station-offer {
   display: flex;
   flex-wrap: wrap;

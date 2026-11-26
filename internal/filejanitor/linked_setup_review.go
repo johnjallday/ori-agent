@@ -175,6 +175,11 @@ func (s *Service) reviewSetup(workspaceID, ownerUserID, referenceID, selectedPat
 		return review, err
 	}
 	for _, path := range []string{settingsPath, scanPath} {
+		// A fresh station offer checked by StationAvailable may contain the
+		// exact pre-install stop note. Never ignore a scan or a legacy record.
+		if station != nil && path == settingsPath && settings.StoppedStationPart == "plot" {
+			continue
+		}
 		if _, err := os.Stat(path); err == nil && !continuing {
 			review.State = "repair_required"
 			return review, nil

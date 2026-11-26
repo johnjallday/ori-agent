@@ -9514,6 +9514,7 @@ export class WorkspaceCommandView {
           (state.tone ? ' is-' + escapeHtml(state.tone) : '') +
           '" data-cmd-hq-station="' +
           escapeHtml(station.key) +
+          (state.buildPart ? '" data-station-part="' + escapeHtml(state.buildPart) : '') +
           (visualMarkup ? '" data-station-visual="' + escapeHtml(visualVariant) : '') +
           '" style="--station-x:' +
           (pos.x * 100).toFixed(2) +

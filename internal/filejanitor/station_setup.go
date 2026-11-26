@@ -45,16 +45,24 @@ func (s *Service) StationAvailable(owner, id string) bool {
 	if err != nil || !stationWorkspace(ws, owner) || ws.HasInstalledCapability(workspace.CapabilityFileJanitor) || ws.CapabilityWasRemoved(workspace.CapabilityFileJanitor) {
 		return false
 	}
-	for _, pathFor := range []func(string) (string, error){s.store.settingsPath, s.store.scanStatePath} {
-		path, err := pathFor(id)
-		if err != nil {
-			return false
-		}
-		if _, err = os.Lstat(path); !os.IsNotExist(err) {
-			return false
-		}
+	scan, err := s.store.scanStatePath(id)
+	if err != nil {
+		return false
 	}
-	return true
+	if _, err := os.Lstat(scan); !os.IsNotExist(err) { // #nosec G703 -- server workspace path, fixed scan-state filename
+		return false
+	}
+	settingsPath, err := s.store.settingsPath(id)
+	if err != nil {
+		return false
+	}
+	if _, err := os.Lstat(settingsPath); os.IsNotExist(err) { // #nosec G703 -- server workspace path, fixed settings filename
+		return true
+	}
+	// An exact stop before the install wrote an inert note but no access
+	// or scan. Only this known state can bring back a fresh build review.
+	v, err := s.store.LoadSettings(id)
+	return err == nil && v.StoppedStationPart == "plot" && v.SetupPreparation == nil && v.RootID == "" && v.RootPath == "" && v.AccessRevokedAt.IsZero() && v.PendingFolderGrant == nil && v.LastFolderGrant == nil
 }
 func stationWorkspace(ws *workspace.Workspace, owner string) bool {
 	return ws != nil && linkedSetupOwned(ws, owner) && ws.IsAnchored() && ws.GetStatus() == workspace.StatusActive && ws.Kind != "group" && ws.GetAssistantProgramState() == nil

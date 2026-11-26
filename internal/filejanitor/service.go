@@ -199,6 +199,7 @@ type Service struct {
 	claimMu sync.Mutex
 	// prepareMu single-flights explicit setup confirmations. Setup is rare; a
 	// bounded service lock avoids a permanent per-workspace lock registry.
+	buildActivity    buildActivity
 	prepareMu        sync.Mutex
 	stationLook      func(string, string) (StationLook, error)
 	stationInstaller StationInstaller
