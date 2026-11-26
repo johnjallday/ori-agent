@@ -164,7 +164,8 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, agentName string, 
 	if h.fileStore != nil {
 		wtp.SetFileStore(h.fileStore)
 	}
-	if h.userProfileStore != nil {
+	wtp.filingHistory = h.filingHistory
+	if h.userProfileStore != nil || h.userProvider != nil {
 		wtp.SetUserProfileDeps(h.userProfileStore, h.userProvider)
 	}
 	if h.templatesRootResolver != nil {

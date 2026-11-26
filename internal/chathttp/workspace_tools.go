@@ -87,6 +87,7 @@ type WorkspaceToolProvider struct {
 	// agents' memory. Only the chat handler sets it, and only for the personal
 	// assistant's own turns (external_memory.go); task runs never do.
 	externalRecall ExternalMemoryReader
+	filingHistory  filingHistoryReader
 }
 
 // HQVisibilityDeps supplies the read-only inputs shared by Personal HQ
@@ -215,6 +216,10 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		p.readSessionDetailTool(),
 		p.readFilesTool(),
 		p.readDirectoriesTool(),
+	}
+
+	if p.canRecallFiling() {
+		tools = append(tools, p.filingHistoryTool())
 	}
 
 	// The current lead can discuss a saved assessment without starting a

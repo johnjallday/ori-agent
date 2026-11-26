@@ -959,6 +959,7 @@ func (b *ServerBuilder) wireFileJanitor() {
 	})
 	if b.chatHandler != nil {
 		b.chatHandler.SetFileCuratorWelcomeReader(service)
+		b.chatHandler.SetFilingHistoryReader(service)
 	}
 	// "Ask <agent> what to send" reaches the Filing agent's own tool-capable
 	// model, resolved when the person asks (send_suggestion.go). The turn offers

@@ -183,6 +183,9 @@
   let historyReceivers = {};
   let historyLoaded = false;
   let historyFilter = '';
+  let historyQuery = '';
+  let historyQueryInput = '';
+  let historyLookup = null;
   // The last undo outcome, kept so the history reload that follows an undo does
   // not wipe the explanation the user needs to read.
   let historyStatusMessage = '';
@@ -264,6 +267,8 @@
     historyActions = [];
     historyLoaded = false;
     historyFilter = '';
+    historyQuery = historyQueryInput = '';
+    historyLookup = null;
     historyLoadState = 'loading';
     historyListLoadState = 'loading';
     latestReceipt = null;
@@ -4462,6 +4467,57 @@
     });
     if (lastLine) panel.appendChild(lastLine);
 
+    const form = el('form', 'fj-filters');
+    form.setAttribute('role', 'search');
+    const search = el('input', 'fj-input');
+    search.type = 'search';
+    search.placeholder = 'Search by filename';
+    search.setAttribute('aria-label', 'Search Filing history by filename');
+    search.maxLength = 255;
+    search.value = historyQueryInput;
+    search.addEventListener('input', () => {
+      historyQueryInput = search.value;
+    });
+    const submit = el('button', 'fj-btn fj-btn-secondary', 'Search history');
+    submit.type = 'submit';
+    form.appendChild(search);
+    form.appendChild(submit);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      historyQuery = historyQueryInput = search.value.trim();
+      historyLookup = null;
+      void loadHistory({ refreshReceipt: false });
+    });
+    panel.appendChild(form);
+    if (historyQuery) {
+      form.appendChild(
+        button('Clear search', 'fj-btn fj-btn-quiet', () => {
+          historyQuery = historyQueryInput = '';
+          void loadHistory({ refreshReceipt: false });
+        })
+      );
+      const note =
+        historyListLoadState === 'unavailable'
+          ? 'Search unavailable. Try again.'
+          : historyLookup?.note || 'Searching retained history…';
+      const status = el('p', 'fj-muted', note);
+      status.setAttribute('role', 'status');
+      panel.appendChild(status);
+      const results = el('ul', 'fj-history-list');
+      for (const match of historyLookup?.matches || []) {
+        results.appendChild(
+          el(
+            'li',
+            'fj-history-item',
+            `${match.name} · ${new Date(match.when).toLocaleString()} — ${match.outcome}`
+          )
+        );
+      }
+      panel.appendChild(results);
+      host.appendChild(panel);
+      return;
+    }
+
     const bar = el('div', 'fj-filters');
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Filter history');
@@ -4589,8 +4645,13 @@
     const sequence = ++historyRequest;
     const current = () => scopeCurrent(scope) && sequence === historyRequest;
     const option = HISTORY_FILTERS.find(entry => entry.id === historyFilter);
-    const query = option && option.query ? '?' + option.query : '';
+    const query = historyQuery
+      ? '?filename=' + encodeURIComponent(historyQuery)
+      : option && option.query
+        ? '?' + option.query
+        : '';
     historyListLoadState = 'loading';
+    if (historyQuery) renderHistory();
     const read = async () => {
       const response = await fetch(apiBase(scope.id) + '/history' + query);
       if (!response.ok) throw new Error('history failed');
@@ -4605,6 +4666,7 @@
     try {
       const body = await listRead;
       if (!current()) return;
+      historyLookup = historyQuery ? body : null;
       historyActions = Array.isArray(body.actions) ? body.actions : [];
       historyReceivers =
         body.receivers && typeof body.receivers === 'object' ? { ...body.receivers } : {};
@@ -4620,6 +4682,7 @@
     } catch (_) {
       if (!current()) return;
       historyListLoadState = 'unavailable';
+      historyLookup = null;
       historyStatusMessage =
         'History unavailable. Showing last known records; retry to check current results.';
       historyLoaded = true;
@@ -5672,6 +5735,8 @@
       pageOffset = 0;
     }
     if (consoleTab === 'history' && consoleItem) {
+      historyQuery = historyQueryInput = '';
+      historyLookup = null;
       // A result link names an actual receipt, not whichever filter was last used.
       historyFilter = '';
       historyLoaded = false;
