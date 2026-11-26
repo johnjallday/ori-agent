@@ -40,7 +40,7 @@ func (s *Service) observeLooseDocuments(root string) (*LooseDocumentObservation,
 }
 
 func (s *Service) looseDocumentHint(rec *Record) string {
-	access, err := s.organizationAccess(rec.OwnerUserID, rec)
+	access, err := s.savedReviewAccess(rec.OwnerUserID, rec)
 	if err != nil {
 		return "unavailable"
 	}

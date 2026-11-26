@@ -74,6 +74,47 @@ func newFilingHarness(t *testing.T) *filingHarness {
 	return f
 }
 
+func TestGuidedSavedViewAfterFilingNarrowsGrant(t *testing.T) {
+	f := newFilingHarness(t)
+	s := f.h.svc
+	rec, err := s.deps.Store.Update(f.id, func(r *Record) error { r.AssignedLink = GuidedDocumentsLinkPrefix + "original"; return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.deps.AssignedRoot = func(context.Context, string, string, string, string) (string, string, bool) { return f.root, "", true }
+	s.deps.DocumentsAccess = nil // no content grant
+	binding := "binding"
+	s.deps.SavedFilingAccess = func(owner, id, agent, link string) (DocumentsAccess, error) {
+		if owner != "u1" || id != f.id || agent != rec.AgentName || link != rec.AssignedLink {
+			return DocumentsAccess{}, ErrWrongState
+		}
+		return DocumentsAccess{f.root, agent, binding}, nil
+	}
+	results, err := s.OrganizationResults("u1", f.id)
+	if err != nil || len(results) != 1 || !results[0].FilingOnly {
+		t.Fatalf("expected saved filing-only review, got %v", err)
+	}
+	if _, err := s.CheckOrganizationFiling(t.Context(), "u1", f.id, f.req); err != nil || f.matches != 1 {
+		t.Fatal("saved view could not check its selection", err)
+	}
+	if _, err := s.OrganizationPreview("u1", f.id); err == nil {
+		t.Fatal("Filing could preview a new content read")
+	}
+	if _, err := s.ApproveOrganization(t.Context(), "u1", f.id, fmt.Sprintf("%064d", 1), ReviewSelection{}); err == nil {
+		t.Fatal("Filing could approve a read")
+	}
+	if err := s.InspectOrganizationSource(t.Context(), "u1", f.id, "review", "r1"); err == nil {
+		t.Fatal("Filing could open an original")
+	}
+	if _, err := s.OrganizationResults("other", f.id); err == nil {
+		t.Fatal("different owner read history")
+	}
+	binding = "replacement"
+	if _, err := s.CheckOrganizationFiling(t.Context(), "u1", f.id, f.req); err == nil || f.matches != 1 {
+		t.Fatal("stale authority reached Filing")
+	}
+}
+
 func (f *filingHarness) view() ReviewResult {
 	f.t.Helper()
 	record, err := f.h.svc.deps.Store.Read(f.id)

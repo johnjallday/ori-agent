@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/filesearch"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -41,6 +42,7 @@ type Handler struct {
 	folderSearchAllowed     func(*http.Request, string) bool
 	guidedLookAllowed       func(*http.Request, string) bool
 	documentsWitness        func(string, time.Time) string
+	managedFilingRoot       func(string, string) (filejanitor.ManagedRoot, error)
 	hireConversationAllowed func(context.Context, string, string) bool
 	store                   session.HybridStore
 	workspaceStore          *workspace.FileStore // optional folder-based workspace store

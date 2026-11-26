@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/filesearch"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -85,6 +86,31 @@ func TestDocumentsManagerVerifiedLook(t *testing.T) {
 		if _, ok := h.guidedDocumentsLook(t.Context(), &changed); ok {
 			t.Fatal("changed workspace provided authority")
 		}
+	}
+	// A narrowed alias alone cannot adopt a grant. The active, independently
+	// owned Filing root must identify the very same binding, reference and path.
+	grant, ref := ws.MCPBindings[0], ws.DirectoryReferences[0]
+	if err := h.workspaceStore.Update(id, func(w *workspace.Workspace) error {
+		w.MCPBindings[0].Alias = filejanitor.LegacyBindingAlias
+		w.MCPBindings[0].AllowedTools = filejanitor.JanitorReadTools
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	filing := filejanitor.ManagedRoot{Owner: "local", WorkspaceID: id, Path: root, DirectoryReferenceID: ref.ID, BindingID: grant.ID, Generation: "generation"}
+	if _, err := h.GuidedFilingAccess("local", id, "Documents Manager", link); err == nil {
+		t.Fatal("accepted alias without Filing")
+	}
+	h.SetGuidedFilingRoot(func(string, string) (filejanitor.ManagedRoot, error) { return filing, nil })
+	if _, err := h.GuidedFilingAccess("local", id, "Documents Manager", link); err != nil {
+		t.Fatal(err)
+	}
+	filing.BindingID = "different"
+	if _, err := h.GuidedFilingAccess("local", id, "Documents Manager", link); err == nil {
+		t.Fatal("accepted replacement grant")
+	}
+	if err := h.workspaceStore.Update(id, func(w *workspace.Workspace) error { w.MCPBindings[0] = grant; return nil }); err != nil {
+		t.Fatal(err)
 	}
 	// Simulate an actual pre-update local creation receipt (not a forged
 	// portable workspace). Arrival cannot adopt its current directory.

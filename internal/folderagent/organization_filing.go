@@ -82,7 +82,7 @@ func (s *Service) UndoOrganizationFiling(ctx context.Context, owner, id string, 
 	if s.deps.UndoFiling == nil || s.deps.UndoFilingFile == nil {
 		return filejanitor.FilingUndoResult{}, ErrUnavailable
 	}
-	if _, _, err := s.latestReview(owner, id); err != nil {
+	if _, _, err := s.latestFilingReview(owner, id); err != nil {
 		return filejanitor.FilingUndoResult{}, err
 	}
 	if req.Filing == "" {
@@ -131,7 +131,7 @@ func (s *Service) matchOrganizationFiling(ctx context.Context, owner, id string,
 	if len(req.Sources) == 0 || len(req.Sources) > reviewBatchSize || s.deps.MatchFiling == nil {
 		return empty, ErrWrongState
 	}
-	rec, auth, err := s.latestReview(owner, id)
+	rec, auth, err := s.latestFilingReview(owner, id)
 	if err != nil {
 		return empty, err
 	}
@@ -174,7 +174,7 @@ func (s *Service) matchOrganizationFiling(ctx context.Context, owner, id string,
 		selected = append(selected, filejanitor.ReviewedLooseFile{Name: f.Path, Version: f.Version})
 	}
 	root, _ := rec.Map.Folder("")
-	access, err := s.organizationAccess(owner, rec)
+	access, err := s.savedReviewAccess(owner, rec)
 	if err != nil {
 		return empty, err
 	}
@@ -191,7 +191,7 @@ func (s *Service) matchOrganizationFiling(ctx context.Context, owner, id string,
 	if err != nil {
 		return empty, ErrWrongState
 	}
-	again, actual, err := s.latestReview(owner, id)
+	again, actual, err := s.latestFilingReview(owner, id)
 	if err != nil || again.Revision != rec.Revision || actual != auth || ctx.Err() != nil {
 		return empty, ErrWrongState
 	}
@@ -267,11 +267,11 @@ func (s *Service) FileOrganizationSelection(ctx context.Context, owner, id strin
 	if s.deps.FileFiling == nil || s.deps.MatchFiling == nil {
 		return FilingResult{}, ErrUnavailable
 	}
-	rec, _, err := s.latestReview(owner, id)
+	rec, _, err := s.latestFilingReview(owner, id)
 	if err != nil {
 		return FilingResult{}, err
 	}
-	access, err := s.organizationAccess(owner, rec)
+	access, err := s.savedReviewAccess(owner, rec)
 	if err != nil {
 		return FilingResult{}, err
 	}
@@ -301,7 +301,7 @@ func (s *Service) FileOrganizationSelection(ctx context.Context, owner, id strin
 // key backfills a decision that a crash or a full view left unwritten.
 func (s *Service) recordFilingDecision(owner, id string, req FilingRequest, decisionID string, result filejanitor.DocumentsFilingResult) error {
 	_, err := s.deps.Store.Update(id, func(r *Record) error {
-		a, err := s.organizationAccess(owner, r)
+		a, err := s.savedReviewAccess(owner, r)
 		if err != nil {
 			return err
 		}

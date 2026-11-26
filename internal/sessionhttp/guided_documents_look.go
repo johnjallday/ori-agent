@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -25,8 +26,14 @@ func (h *Handler) SetGuidedDocumentsLook(local func(*http.Request, string) bool,
 	h.guidedLookAllowed, h.documentsWitness = local, witness
 }
 
+// SetGuidedFilingRoot resolves Filing's independently approved, current grant.
+func (h *Handler) SetGuidedFilingRoot(resolve func(string, string) (filejanitor.ManagedRoot, error)) {
+	h.managedFilingRoot = resolve
+}
+
 type guidedLook struct {
 	op, root, agent, link, witness, verification string
+	filingBinding                                string // populated only for the metadata-only Filing conversion
 }
 
 // Inspect only the anchor directory and local authority records. No listing,
@@ -75,8 +82,23 @@ func (h *Handler) guidedDocumentsLook(ctx context.Context, ws *workspace.Workspa
 	original := receipt.Folder
 	if !slices.ContainsFunc(original.Agents, func(a workspace.AgentInstance) bool {
 		return a.ID == lead.ID && a.EntryPoint && a.RoleID == blankManagerRoleID
-	}) || len(original.Refs) != 1 || original.Refs[0].ID != ref.ID || original.Refs[0].Path != ref.Path || len(original.Grants) != 1 || !guidedListingAllowed(ws, lead.ID, original.Grants[0].ID, ref.Path) {
+	}) || len(original.Refs) != 1 || original.Refs[0].ID != ref.ID || original.Refs[0].Path != ref.Path || len(original.Grants) != 1 {
 		return no, false
+	}
+	grant := original.Grants[0].ID
+	filingBinding := ""
+	if !guidedListingAllowed(ws, lead.ID, grant, ref.Path, workspace.AnchorFolderMCPAlias) {
+		// Filing setup intentionally narrows the *same* binding to listing. A
+		// different binding, an alias edit alone, or an unverified old receipt
+		// cannot stand in for the independently approved Filing root.
+		if !saved.Valid || h.managedFilingRoot == nil || !guidedListingAllowed(ws, lead.ID, grant, ref.Path, filejanitor.LegacyBindingAlias) {
+			return no, false
+		}
+		managed, err := h.managedFilingRoot(ws.OwnerUserID, ws.ID)
+		if err != nil || managed.Owner != ws.OwnerUserID || managed.WorkspaceID != ws.ID || managed.Path != ref.Path || managed.DirectoryReferenceID != ref.ID || managed.BindingID != grant || managed.Generation == "" {
+			return no, false
+		}
+		filingBinding = strings.Join([]string{lead.ID, ref.ID, grant}, "\x00")
 	}
 	at := time.Time{}
 	if !saved.Valid {
@@ -89,7 +111,7 @@ func (h *Handler) guidedDocumentsLook(ctx context.Context, ws *workspace.Workspa
 	if current == "" || (saved.Valid && current != saved.String) || (filesWitness.Valid && current != filesWitness.String) {
 		return no, false
 	}
-	result := guidedLook{op: op, root: ref.Path, agent: lead.Name, link: documentsLinkPrefix + ref.ID, witness: current}
+	result := guidedLook{op: op, root: ref.Path, agent: lead.Name, link: documentsLinkPrefix + ref.ID, witness: current, filingBinding: filingBinding}
 	if !saved.Valid {
 		hash := sha256.Sum256([]byte(strings.Join([]string{op, ref.ID, lead.ID, original.Grants[0].ID, current}, "\x00")))
 		result.verification = hex.EncodeToString(hash[:])
@@ -97,14 +119,30 @@ func (h *Handler) guidedDocumentsLook(ctx context.Context, ws *workspace.Workspa
 	return result, true
 }
 
-func guidedListingAllowed(ws *workspace.Workspace, instance, binding, root string) bool {
+// GuidedFilingAccess identifies the original review after Filing narrows its
+// grant. Its callers may project saved results or hand them to Filing, never
+// read a source, open an original or approve a new review with this proof.
+func (h *Handler) GuidedFilingAccess(owner, id, agent, link string) (folderagent.DocumentsAccess, error) {
+	if h.workspaceStore != nil && owner != "" && strings.HasPrefix(link, documentsLinkPrefix) {
+		ws, err := h.workspaceStore.Get(id)
+		if err == nil && ws != nil && ws.ID == id && ws.OwnerUserID == owner {
+			look, ok := h.guidedDocumentsLook(context.Background(), ws)
+			if ok && look.agent == agent && look.link == link && look.filingBinding != "" {
+				return folderagent.DocumentsAccess{Root: look.root, Lead: agent, Binding: look.filingBinding}, nil
+			}
+		}
+	}
+	return folderagent.DocumentsAccess{}, folderagent.ErrWrongState
+}
+
+func guidedListingAllowed(ws *workspace.Workspace, instance, binding, root, alias string) bool {
 	if binding == "" {
 		return false
 	}
 	grants := ws.GetMCPBindings()
 	var found bool
 	for _, b := range grants {
-		if b.Alias != workspace.AnchorFolderMCPAlias {
+		if b.Alias != alias {
 			continue
 		}
 		if found || b.ID != binding || b.ServerName != "filesystem" || !b.Enabled || b.DefaultSideEffect != workspace.SideEffectRead || !slices.Contains(b.AllowedTools, "list_directory") {

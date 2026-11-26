@@ -92,6 +92,14 @@ export function documentsOrganizationOffer(
   };
   const history = reviews => {
     const ticket = start('Organizing reviews');
+    const filingOnly = reviews.some(r => r.filing_only);
+    if (filingOnly)
+      panel.append(
+        node(
+          'p',
+          'Filing has access to names, not document contents. You can file from a saved view or put files back. New reads are unavailable.'
+        )
+      );
     const sources = new Map();
     for (const review of reviews)
       for (const file of review.files) sources.set(file.source.ref, { review, file });
@@ -119,7 +127,7 @@ export function documentsOrganizationOffer(
             `Suggested for ${f.source.path}: ${f.placement.destination} (${f.placement.convention ? 'from your Documents convention' : 'based on your confirmed placements'}).`
           )
         );
-        if (f.placement.convention) continue;
+        if (f.placement.convention || filingOnly) continue;
         details.append(button('Remember for Documents', () => preview([], [], null, true)));
         const proof = node('details');
         proof.append(node('summary', 'Show those decisions'));
@@ -153,13 +161,13 @@ export function documentsOrganizationOffer(
             failed(n);
           }
         };
-        if (!group.kept)
+        if (!group.kept && !filingOnly)
           details.append(
             button('Keep as a view', () => change('keep')),
             button('Not now — dismiss group', () => change('not_now'))
           );
-        else {
-          details.append(node('p', 'Saved view · no files moved'));
+        if (group.kept) details.append(node('p', 'Saved view · no files moved'));
+        if (group.kept && !filingOnly) {
           const name = node('input');
           name.value = group.title;
           name.maxLength = 50;
@@ -175,19 +183,20 @@ export function documentsOrganizationOffer(
           if (!origin) continue;
           const f = origin.file;
           const row = node('li', `${f.source.path} — ${group.reasons[ref]}`);
-          row.append(
-            button('Open original', async () => {
-              try {
-                await post('organization-source', { review: origin.review.id, source: ref });
-                if (generation === ticket) status.textContent = 'Opened in the system viewer.';
-              } catch {
-                if (generation === ticket)
-                  status.textContent =
-                    'The original could not be opened. It may have changed, or the desktop viewer is unavailable.';
-              }
-            })
-          );
-          if (group.kept) {
+          if (!filingOnly)
+            row.append(
+              button('Open original', async () => {
+                try {
+                  await post('organization-source', { review: origin.review.id, source: ref });
+                  if (generation === ticket) status.textContent = 'Opened in the system viewer.';
+                } catch {
+                  if (generation === ticket)
+                    status.textContent =
+                      'The original could not be opened. It may have changed, or the desktop viewer is unavailable.';
+                }
+              })
+            );
+          if (group.kept && !filingOnly) {
             row.append(button('Leave loose', () => change('loose', { source: ref })));
             for (const target of reviews)
               for (const dest of (target.groups || []).filter(
@@ -283,21 +292,24 @@ export function documentsOrganizationOffer(
               failed(n);
             }
           };
-          if (observed && !d.intentional && !d.exception)
+          if (!filingOnly && observed && !d.intentional && !d.exception)
             row.append(button('I placed this intentionally', () => mark('confirm_observation')));
-          if (!d.exception) row.append(button('This was an exception', () => mark('exception')));
+          if (!filingOnly && !d.exception)
+            row.append(button('This was an exception', () => mark('exception')));
           log.append(row);
         }
         details.append(log);
       }
       panel.append(details);
     }
-    panel.append(
-      button(reviews.at(-1)?.status === 'reading' ? 'Check status' : 'Preview another batch', () =>
-        reviews.at(-1)?.status === 'reading' ? showHistory() : preview([], [])
-      ),
-      dismiss()
-    );
+    if (!filingOnly)
+      panel.append(
+        button(
+          reviews.at(-1)?.status === 'reading' ? 'Check status' : 'Preview another batch',
+          () => (reviews.at(-1)?.status === 'reading' ? showHistory() : preview([], []))
+        )
+      );
+    panel.append(dismiss());
     return ticket;
   };
   async function showHistory() {

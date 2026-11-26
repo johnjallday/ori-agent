@@ -223,8 +223,11 @@ type Deps struct {
 	OnReported func(ctx context.Context, userID, workspaceID string)
 	Now        func() time.Time
 	// KnownFolderRoot shares the chooser's trusted configured-home resolver.
-	KnownFolderRoot        func(string) (string, error)
-	DocumentsAccess        func(owner, workspaceID string) (DocumentsAccess, error)
+	KnownFolderRoot func(string) (string, error)
+	DocumentsAccess func(owner, workspaceID string) (DocumentsAccess, error)
+	// SavedFilingAccess proves the original review identity after explicit Filing
+	// setup narrows the grant. Never used by content reads or native open.
+	SavedFilingAccess      func(owner, workspaceID, agent, link string) (DocumentsAccess, error)
 	DocumentsProtected     func() []string
 	OrganizationMemory     ReviewMemory
 	MatchFiling            MatchDocumentsFiling

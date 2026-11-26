@@ -26,18 +26,19 @@ type ReviewedDocument struct {
 	Truncated     bool                 `json:"truncated,omitempty"`
 }
 type ReviewResult struct {
-	Revision  int                  `json:"revision"`
-	Decisions []OrganizingDecision `json:"decisions,omitempty"`
-	ID        string               `json:"id"`
-	Status    string               `json:"status"`
-	Processor ReviewProcessor      `json:"processor"`
-	Created   time.Time            `json:"created"`
-	Files     []ReviewedDocument   `json:"files"`
-	Read      int                  `json:"read"`
-	Skipped   int                  `json:"skipped"`
-	Remaining int                  `json:"remaining"`
-	Partial   bool                 `json:"partial"`
-	Groups    []DocumentGroup      `json:"groups,omitempty"`
+	FilingOnly bool                 `json:"filing_only,omitempty"` // display-only: the original content grant was narrowed
+	Revision   int                  `json:"revision"`
+	Decisions  []OrganizingDecision `json:"decisions,omitempty"`
+	ID         string               `json:"id"`
+	Status     string               `json:"status"`
+	Processor  ReviewProcessor      `json:"processor"`
+	Created    time.Time            `json:"created"`
+	Files      []ReviewedDocument   `json:"files"`
+	Read       int                  `json:"read"`
+	Skipped    int                  `json:"skipped"`
+	Remaining  int                  `json:"remaining"`
+	Partial    bool                 `json:"partial"`
+	Groups     []DocumentGroup      `json:"groups,omitempty"`
 }
 
 func hasRunningReview(r *Record) bool {
@@ -57,21 +58,37 @@ type reviewExcerpt struct {
 }
 
 func (s *Service) latestReview(owner, id string) (*Record, string, error) {
+	return s.currentReview(owner, id, s.organizationAccess)
+}
+
+func (s *Service) latestFilingReview(owner, id string) (*Record, string, error) {
+	return s.currentReview(owner, id, s.savedReviewAccess)
+}
+
+func reviewAuthority(rec *Record, a DocumentsAccess) string {
+	root, _ := rec.Map.Folder("")
+	return documentsRef(rec.OwnerUserID, rec.WorkspaceID, a.Root, root.BranchWitness, a.Lead, a.Binding)
+}
+
+func (s *Service) currentReview(owner, id string, access func(string, *Record) (DocumentsAccess, error)) (*Record, string, error) {
 	rec, err := s.deps.Store.Read(id)
 	if err != nil {
 		return nil, "", err
 	}
-	a, err := s.organizationAccess(owner, rec)
+	a, err := access(owner, rec)
 	if err != nil {
 		return nil, "", err
 	}
-	root, _ := rec.Map.Folder("")
-	return rec, documentsRef(owner, id, a.Root, root.BranchWitness, a.Lead, a.Binding), nil
+	return rec, reviewAuthority(rec, a), nil
 }
 func (s *Service) OrganizationResults(owner, id string) ([]ReviewResult, error) {
 	rec, auth, err := s.latestReview(owner, id)
-	if err != nil {
-		return nil, err
+	filingOnly := err != nil
+	if filingOnly {
+		rec, auth, err = s.latestFilingReview(owner, id)
+		if err != nil {
+			return nil, err
+		}
 	}
 	root, _ := rec.Map.Folder("")
 	convention, _, err := s.convention(id, conventionMarker(owner, id, root.BranchWitness))
@@ -82,6 +99,7 @@ func (s *Service) OrganizationResults(owner, id string) ([]ReviewResult, error) 
 	for _, run := range rec.OrganizationRuns {
 		if run.Authority == auth {
 			v := s.withFilingStanding(owner, id, run.Result)
+			v.FilingOnly = filingOnly
 			for i := range v.Files {
 				v.Files[i].Placement = placementFor(rec, auth, v.Files[i], convention)
 			}
