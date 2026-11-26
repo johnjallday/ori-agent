@@ -47,7 +47,7 @@ func (s *Service) LookupFilingHistory(ctx context.Context, owner, workspaceID, q
 	out := FilingHistoryLookup{Matches: []FilingHistoryMatch{}, Note: "Retained Filing history only. This does not check where a file is now."}
 	for i := len(state.Actions) - 1; i >= 0; i-- {
 		a := state.Actions[i]
-		if a.WorkspaceID != workspaceID || a.Operation == OperationTrash || !a.Result.Terminal() || a.CompletedAt.IsZero() {
+		if a.WorkspaceID != workspaceID || a.ApprovedBy != owner || a.Operation == OperationTrash || !a.Result.Terminal() || a.CompletedAt.IsZero() {
 			continue
 		}
 		name := strings.ToLower(a.SourceName)

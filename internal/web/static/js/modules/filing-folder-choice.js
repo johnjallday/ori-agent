@@ -45,7 +45,10 @@ export function openFolderChoice({ workspace, endpoint, selection, current, onFi
     });
     const reply = await res.json();
     if (!res.ok)
-      throw new Error(reply.error?.message || 'The review changed. Close and try again.');
+      throw new Error(
+        (typeof reply.error === 'string' ? reply.error : reply.error?.message) ||
+          'The review changed. Close and try again.'
+      );
     return reply;
   };
   let working = false;
@@ -69,7 +72,7 @@ export function openFolderChoice({ workspace, endpoint, selection, current, onFi
   };
   const preview = async target => {
     const args = { selection, ...target };
-    const { preview } = await post(endpoint, args);
+    const { preview, destination, warning_note: warning } = await post(endpoint, args);
     if (!live()) return;
     if (!preview?.digest || preview.state !== 'ready')
       throw new Error(
@@ -82,6 +85,8 @@ export function openFolderChoice({ workspace, endpoint, selection, current, onFi
     for (const item of preview.items) list.append(make('li', item.name));
     const key = crypto.randomUUID();
     body.replaceChildren(
+      make('p', destination, 'fj-destination-path'),
+      ...(warning ? [make('p', warning)] : []),
       list,
       make('p', 'Files keep their names. An occupied name is never replaced.'),
       button(

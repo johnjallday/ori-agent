@@ -12,14 +12,16 @@ func TestLookupFilingHistorySearchesRetainedJournalNotTheFolder(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	_, err := s.store.UpdateScanState(ws.ID, func(st *ScanState) error {
 		for i, result := range []ActionResult{ResultApplied, ResultFailed, ResultStale, ResultApplying, ResultApplied} {
-			a := FileAction{WorkspaceID: ws.ID, SourceName: "hotel-receipt.pdf", Operation: OperationMove, DestinationRelative: "Filed/Documents/hotel-receipt.pdf", CompletedAt: now.Add(time.Duration(i) * time.Hour), Result: result, Undo: UndoDone}
+			a := FileAction{WorkspaceID: ws.ID, ApprovedBy: "local", SourceName: "hotel-receipt.pdf", Operation: OperationMove, DestinationRelative: "Filed/Documents/hotel-receipt.pdf", CompletedAt: now.Add(time.Duration(i) * time.Hour), Result: result, Undo: UndoDone}
 			if i == 4 {
 				a.SourceName = "hotel-receipt-may.pdf"
 				a.Undo = UndoFailed
 			}
 			st.Actions = append(st.Actions, a)
 		}
-		st.Actions = append(st.Actions, FileAction{WorkspaceID: "other", CompletedAt: now, SourceName: "hotel-receipt-other.pdf", Operation: OperationMove, Result: ResultApplied, DestinationRelative: "Filed/other.pdf"})
+		for _, scope := range []struct{ workspace, owner string }{{"other", "local"}, {ws.ID, "former-owner"}} {
+			st.Actions = append(st.Actions, FileAction{WorkspaceID: scope.workspace, ApprovedBy: scope.owner, CompletedAt: now, SourceName: "hotel-receipt-other.pdf", Operation: OperationMove, Result: ResultApplied, DestinationRelative: "Filed/other.pdf"})
+		}
 		return nil
 	})
 	if err != nil {

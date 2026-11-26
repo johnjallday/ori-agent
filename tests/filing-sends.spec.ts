@@ -1,4 +1,5 @@
-import { test, expect, type APIRequestContext, type Page, type Locator } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
+import { filingWorkspace } from './helpers/filing-workspace';
 import {
   existsSync,
   mkdtempSync,
@@ -34,36 +35,6 @@ function syntheticFolder(name: string, files: string[]) {
   return root;
 }
 
-async function filingWorkspace(request: APIRequestContext, label: string, root: string) {
-  const created = await request.post('/api/workspaces', {
-    data: { name: `${label} ${Date.now()} ${Math.random().toString(36).slice(2, 6)}` }
-  });
-  expect(created.ok(), await created.text()).toBeTruthy();
-  const body = await created.json();
-  const folder = body.folder || body.workspace;
-  const id = folder.id as string;
-  const install = await request.post(`/api/workspaces/${id}/capabilities/file-janitor/install`, {
-    data: { source: 'in-place' }
-  });
-  expect(install.ok(), await install.text()).toBeTruthy();
-  const link = await request.post(`/api/workspaces/${id}/directories`, {
-    data: { name: `${label} folder`, path: root }
-  });
-  expect(link.ok(), await link.text()).toBeTruthy();
-  const ref = (await link.json()).directory.id;
-  const base = `/api/workspaces/${id}/file-janitor`;
-  const review = await request.post(`${base}/setup-review`, {
-    data: { reference_id: ref, monitoring: false }
-  });
-  expect(review.ok(), await review.text()).toBeTruthy();
-  const revision = (await review.json()).review.review_revision;
-  const prepare = await request.post(`${base}/prepare-review`, {
-    data: { reference_id: ref, monitoring: false, review_revision: revision }
-  });
-  expect(prepare.ok(), await prepare.text()).toBeTruthy();
-  return { id, slug: folder.folder_slug as string, base, root, name: folder.name as string };
-}
-
 async function openFiling(page: Page, slug: string, tab: 'review' | 'settings') {
   await page.route('**/api/onboarding/status', route =>
     route.fulfill({
@@ -88,9 +59,10 @@ async function openFiling(page: Page, slug: string, tab: 'review' | 'settings') 
 
 // At least 44 px tall (FR 52).
 async function tallEnough(control: Locator) {
-  const box = await control.boundingBox();
-  expect(box, 'the control is laid out').not.toBeNull();
-  expect(box!.height).toBeGreaterThanOrEqual(43.5);
+  // Loading the plan replaces the first picture; measure the settled control.
+  await expect
+    .poll(async () => (await control.boundingBox())?.height ?? 0)
+    .toBeGreaterThanOrEqual(43.5);
 }
 
 const BANNED =

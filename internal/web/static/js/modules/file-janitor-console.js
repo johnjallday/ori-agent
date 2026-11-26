@@ -5394,6 +5394,10 @@
       }
       return;
     }
+    if (!status) {
+      host.appendChild(el('p', 'fj-sub', 'Loading Filing…'));
+      return;
+    }
     if (preparation && consoleTab === 'review') {
       const progress = el('p', 'fj-sub', 'Preparing your preview…');
       progress.setAttribute('role', 'status');

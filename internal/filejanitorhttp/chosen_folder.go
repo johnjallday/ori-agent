@@ -66,7 +66,9 @@ func (h *Handler) ChosenFolder(w http.ResponseWriter, r *http.Request) {
 			h.respondPictureError(w, err)
 			return
 		}
-		_ = orihttp.RespondSuccess(w, map[string]any{"preview": preview})
+		// The person confirming the preview sees the exact destination. Its
+		// private locator is not a directory reference or part of the chat result.
+		_ = orihttp.RespondSuccess(w, map[string]any{"preview": preview, "destination": checked.Path, "warning_note": folderpath.WarningNote(checked.Warning)})
 		return
 	}
 	result, err := h.service.FileChosenFolder(r.Context(), owner, id, b, checked.Path, req.Selection, req.Digest, req.Key)
