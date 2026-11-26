@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -275,6 +276,21 @@ func readContainedFile(root, relativePath string, maxBytes int64, rootID string,
 // skips hidden entries and Ori's own record files. It reads names, sizes and
 // times only; no file is opened.
 func ListContainedEntries(root, relativePath string, depth int) (DirectoryListing, error) {
+	return listContainedEntries(root, relativePath, depth, false)
+}
+
+// listContainedPage bounds the directory read itself, including names that are
+// later excluded. Do not enumerate the rest just to sort or count the folder.
+func listContainedPage(root, relativePath string) (DirectoryListing, error) {
+	if relativePath != "" {
+		if clean, err := ContainedRelativePath(relativePath); err != nil || clean != relativePath {
+			return DirectoryListing{}, ErrSourceExcluded
+		}
+	}
+	return listContainedEntries(root, relativePath, 1, true)
+}
+
+func listContainedEntries(root, relativePath string, depth int, page bool) (DirectoryListing, error) {
 	start := "."
 	if strings.TrimSpace(relativePath) != "" && strings.TrimSpace(relativePath) != "." {
 		rel, err := ContainedRelativePath(relativePath)
@@ -321,7 +337,13 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 	var listing DirectoryListing
 	var walk func(current *os.Root, dir string, level int) error
 	walk = func(current *os.Root, dir string, level int) error {
-		entries, err := fs.ReadDir(current.FS(), ".")
+		var entries []fs.DirEntry
+		var err error
+		if page {
+			entries, listing.Truncated, err = readDirectoryPage(current)
+		} else {
+			entries, err = fs.ReadDir(current.FS(), ".")
+		}
 		if err != nil {
 			// An unreadable subfolder is skipped; the starting folder's error surfaces.
 			if level == 1 {
@@ -378,7 +400,7 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 				if below != nil {
 					return below
 				}
-				if listing.Truncated {
+				if !page && listing.Truncated {
 					return nil
 				}
 			}
@@ -389,6 +411,24 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 		return DirectoryListing{}, err
 	}
 	return listing, nil
+}
+
+func readDirectoryPage(root *os.Root) ([]fs.DirEntry, bool, error) {
+	dir, err := root.Open(".")
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(DirectoryListMaxEntries + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, false, err
+	}
+	partial := len(entries) > DirectoryListMaxEntries
+	if partial {
+		entries = entries[:DirectoryListMaxEntries]
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	return entries, partial, nil
 }
 
 // AttachmentSourcePath is the workspace-relative path of an attachment's own

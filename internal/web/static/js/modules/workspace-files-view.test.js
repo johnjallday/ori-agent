@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { previewHTML, readPreview, WorkspaceFilesView } from './workspace-files-view.js';
-import { filesToRows, FILE_PREVIEW_LIMIT, loadWorkspaceContents } from './home-tree-sources.js';
+import {
+  filesToRows,
+  FILE_PREVIEW_LIMIT,
+  loadWorkspaceContents,
+  loadLinkedPage
+} from './home-tree-sources.js';
 
 const text = body => async () => new Response(body);
 const note = {
@@ -27,6 +32,61 @@ test('the full workspace listing keeps nested, empty and beyond-cap entries in p
   assert.deepEqual(rows[0].children, []);
   assert.equal(rows.at(-1).id, 'album/f/Samples/Take 109.txt');
   assert.equal(listing.rows.length, 1);
+});
+
+test('sources and same-named nested files stay qualified and load one folder at a time', async () => {
+  const urls = [];
+  const fetchImpl = async url => {
+    urls.push(url);
+    const payload = url.includes('linked_sources=1')
+      ? {
+          linked_sources: [{ id: 'ref', name: 'Project' }],
+          files: [{ relative_path: 'Notes.txt' }]
+        }
+      : url.includes('?path=')
+        ? {
+            entries: [{ kind: 'file', path: 'Sessions/Song.RPP', name: 'Song.RPP' }],
+            partial: true
+          }
+        : { entries: [{ kind: 'folder', path: 'Sessions', name: 'Sessions' }] };
+    return new Response(JSON.stringify(payload));
+  };
+  for (const owner of ['track-1', 'track-2']) {
+    const [stored, root] = (await loadWorkspaceContents(owner, 'files', { fetchImpl })).rows;
+    assert.equal(stored.label, 'Stored in Ori');
+    assert.equal(urls.at(-1), `/api/workspaces/${owner}/files/tree?linked_sources=1`);
+    const [folder] = (await loadLinkedPage(root, { fetchImpl })).rows;
+    const [song, partial] = (await loadLinkedPage(folder, { fetchImpl })).rows;
+    assert.equal(song.id, `${owner}/lf/ref/Sessions/Song.RPP`);
+    assert.match(partial.label, /Partial listing/);
+    assert.equal((await readPreview(song, { fetchImpl })).kind, 'none');
+    assert.deepEqual(urls.splice(0), [
+      `/api/workspaces/${owner}/files/tree?linked_sources=1`,
+      `/api/workspaces/${owner}/directories/ref/entries`,
+      `/api/workspaces/${owner}/directories/ref/entries?path=Sessions`
+    ]);
+  }
+});
+
+test('an invalidated linked-folder listing cannot repopulate the reader', async () => {
+  const view = new WorkspaceFilesView({}, { id: 'track' });
+  view.controller = new AbortController();
+  view.paintTree = view.syncExpanded = () => {};
+  let finish;
+  view.scopedFetch = () => () =>
+    new Promise(resolve => {
+      finish = resolve;
+    });
+  const pending = view.load({
+    id: 'track/l/ref',
+    workspaceId: 'track',
+    kind: 'linked',
+    meta: { dirId: 'ref' }
+  });
+  view.refreshLinks('track');
+  finish(new Response(JSON.stringify({ entries: [] })));
+  await pending;
+  assert.equal(view.sections.size, 0);
 });
 
 test('the reader uses only qualified reads, rejects moved notes and shows failed reads', async () => {

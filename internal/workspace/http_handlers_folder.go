@@ -339,10 +339,12 @@ func (h *HTTPHandler) GetWorkspaceFilesTree(w http.ResponseWriter, r *http.Reque
 
 	h.publishFileSyncEvents(workspaceID, syncEvents)
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"files":     files,
-		"workspace": workspaceID,
-	})
+	response := map[string]any{"files": files, "workspace": workspaceID}
+	if r.URL.Query().Get("linked_sources") == "1" {
+		w.Header().Set("Cache-Control", "no-store")
+		h.addLinkedFileSources(workspaceID, response)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // publishFileSyncEvents emits a "file.moved" event for each attachment that

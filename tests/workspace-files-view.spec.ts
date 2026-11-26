@@ -1,5 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
@@ -67,6 +75,16 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(evidence, `${name}.png`), animations: 'disabled' });
 }
 
+const linkedEvidence = 'tasks/evidence-workspace-linked-project-files';
+
+async function linkedFixture(page: Page, owner: string, name: string, path: string) {
+  const res = await page.request.post(`/api/workspaces/${owner}/directories`, {
+    data: { name, path }
+  });
+  expect(res.ok(), await res.text()).toBe(true);
+  return (await res.json()).directory.id as string;
+}
+
 const keyed = (page: Page, key: string) => reader(page).locator(`[data-key="${key}"]`);
 const mode = (page: Page, name: string) => page.locator(`[data-cmd-view-mode="${name}"]`);
 async function ready(page: Page) {
@@ -87,6 +105,53 @@ async function musicGroup(page: Page) {
   }
   return { home, demo, albums };
 }
+
+test('linked Track-2 reveals its original only on disclosure and distinguishes an unavailable folder', async ({
+  page
+}) => {
+  const home = await workspace(page, 'Music Production Home', '', true);
+  const demo = await workspace(page, 'Ori Music Demo', home.id, true);
+  const track = await workspace(page, 'Track-2', demo.id);
+  await files(page, track.id); // verify this server belongs to the supplied sandbox
+  const fixtures = mkdtempSync(join(realpathSync(process.env.ORI_SANDBOX!), 'linked-'));
+  execFileSync('./scripts/folder-agent-fixtures.sh', [fixtures]);
+  const project = join(fixtures, 'Ori Music Demo', 'Picker Songs', track.name);
+  const ref = await linkedFixture(page, track.id, 'Project', project);
+  const absent = join(fixtures, 'Filed');
+  mkdirSync(absent);
+  const missing = await linkedFixture(page, track.id, 'Archive', absent);
+  renameSync(absent, `${absent}-offline`);
+  await page.goto(`/workspaces/${home.folder_slug}?mode=files`);
+  await ready(page);
+  const reads: string[] = [];
+  page.on('request', r => {
+    const path = new URL(r.url()).pathname;
+    if (
+      path.includes('/directories/') ||
+      (path.endsWith('/open') && !path.endsWith('/lead-conversation/open'))
+    )
+      reads.push(`${r.method()} ${path}`);
+  });
+  await row(page, 'Linked workspaces').click();
+  await row(page, demo.name).click();
+  await row(page, track.name).click();
+  await keyed(page, `${track.id}/s/files`).click();
+  await expect(row(page, 'Project Linked folder')).toBeVisible();
+  expect(reads).toEqual([]);
+  await row(page, 'Project Linked folder').click();
+  await row(page, 'Song.rpp').press('Enter');
+  await expect(reader(page).locator('.wf-crumb')).toHaveText(
+    'Track-2 / Files / Project / Song.rpp'
+  );
+  await expect(page.locator('.ws-cmd-title h2')).toHaveText(home.name);
+  await page.screenshot({ path: join(linkedEvidence, 'track-2.png') });
+  await row(page, 'Archive Linked folder').click();
+  await expect(row(page, 'Folder unavailable. Retry')).toBeVisible();
+  await page.screenshot({ path: join(linkedEvidence, 'unavailable.png') });
+  expect(reads).toEqual(
+    [ref, missing].map(id => `GET /api/workspaces/${track.id}/directories/${id}/entries`)
+  );
+});
 
 test('group keeps its identity while reading same-named files in linked albums', async ({
   page

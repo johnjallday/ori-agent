@@ -2,6 +2,7 @@
 // adapters, not its editor, menus, tab persistence or cross-workspace index.
 import {
   loadFilePreview,
+  loadLinkedPage,
   loadNote,
   loadWorkspaceContents,
   sectionKey
@@ -21,7 +22,11 @@ const sections = [
   ['notes', 'Notes']
 ];
 
+const linkedBranch = row => row.kind === 'linked' || row.kind === 'linkedFolder';
+const loadable = row => row.kind === 'section' || linkedBranch(row);
+
 export async function readPreview(row, options = {}) {
+  if (row.kind === 'linkedFile') return { kind: 'none' };
   if (row.kind === 'file')
     return loadFilePreview(row.workspaceId, row.meta.path, { ...options, size: row.meta.size });
   if (row.kind !== 'note') throw new Error('Unsupported item');
@@ -119,7 +124,7 @@ export class WorkspaceFilesView {
     for (const row of this.rows) {
       if (!this.expanded.has(row.id)) continue;
       if (row.kind === 'members' && !this.membershipStatus) void this.loadMembers();
-      if (row.kind === 'section' && !this.sections.has(row.id)) void this.load(row);
+      if (loadable(row) && !this.sections.has(row.id)) void this.load(row);
     }
     this.restoreSelection();
   }
@@ -166,6 +171,7 @@ export class WorkspaceFilesView {
         showPreview: this.showPreview
       };
     }
+    this.stopWatchingLink();
     this.controller.abort();
     this.controller = null;
     this.membershipVersion++;
@@ -191,6 +197,7 @@ export class WorkspaceFilesView {
       const owner = key.split('/')[0];
       return owner === rootId || this.members.has(owner);
     };
+    if (this.watchedOwner && !allowed(this.watchedOwner)) this.stopWatchingLink();
     for (const key of this.sections.keys()) if (!allowed(key)) this.sections.delete(key);
     for (const key of this.expanded) if (!allowed(key)) this.expanded.delete(key);
     if (this.selected && !allowed(this.selected.id)) {
@@ -261,7 +268,7 @@ export class WorkspaceFilesView {
                   ? 'No linked workspaces'
                   : 'Loading…'
           });
-      } else if (row.kind === 'section') {
+      } else if (loadable(row)) {
         const state = this.sections.get(row.id);
         if (state?.rows?.length) state.rows.forEach(child);
         else
@@ -269,9 +276,13 @@ export class WorkspaceFilesView {
             id: `${row.id}/status`,
             kind: state?.error ? 'retry' : 'status',
             label: state?.error
-              ? `Could not load ${row.label.toLowerCase()}. Retry`
+              ? linkedBranch(row)
+                ? 'Folder unavailable. Retry'
+                : `Could not load ${row.label.toLowerCase()}. Retry`
               : state?.rows
-                ? `No ${row.label.toLowerCase()} yet`
+                ? linkedBranch(row)
+                  ? 'Empty folder'
+                  : `No ${row.label.toLowerCase()} yet`
                 : 'Loading…'
           });
       } else row.children?.forEach(child);
@@ -294,9 +305,11 @@ export class WorkspaceFilesView {
     if (!this.rows.some(r => r.id === this.focusKey)) this.focusKey = this.root.id;
     this.tree.innerHTML = this.rows
       .map((r, i) => {
-        const branch = ['workspace', 'group', 'section', 'members', 'folder'].includes(r.kind);
+        const branch =
+          linkedBranch(r) ||
+          ['workspace', 'group', 'section', 'members', 'folder'].includes(r.kind);
         const expanded = this.expanded.has(r.id);
-        return `<div role="treeitem" tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" data-key="${esc(r.id)}" aria-level="${r.level}" aria-selected="${(this.selected?.id || this.branchSelection) === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(r.kind === 'members' ? 'linkedFolders' : rowIconName(r))}<span>${esc(r.label)}</span></div>`;
+        return `<div role="treeitem" tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" data-key="${esc(r.id)}" aria-level="${r.level}" aria-selected="${(this.selected?.id || this.branchSelection) === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(r.kind === 'members' ? 'linkedFolders' : rowIconName(r))}<span>${esc(r.label)}</span>${r.kind === 'linked' ? '<small class="wf-source-label">Linked folder</small>' : ''}</div>`;
       })
       .join('');
     if (focused) this.focusRow(this.focusKey);
@@ -373,7 +386,7 @@ export class WorkspaceFilesView {
 
   activate(row) {
     this.saved = null;
-    if (row.kind === 'file' || row.kind === 'note') {
+    if (row.kind === 'file' || row.kind === 'note' || row.kind === 'linkedFile') {
       void this.select(row);
       return;
     }
@@ -384,6 +397,14 @@ export class WorkspaceFilesView {
     }
     if (row.kind === 'status') return;
     if (this.expanded.has(row.id)) {
+      // Never reuse a cached link or its children on a new disclosure.
+      if (loadable(row)) {
+        const descendants = new Set([row.id]);
+        for (const visible of this.rows) {
+          if (descendants.has(visible.parent)) descendants.add(visible.id);
+        }
+        for (const key of descendants) this.sections.delete(key);
+      }
       this.expanded.delete(row.id);
       if (this.selected && !this.visibleRows().some(r => r.id === this.selected.id)) {
         ++this.previewVersion;
@@ -398,22 +419,62 @@ export class WorkspaceFilesView {
     this.syncExpanded();
   }
 
+  stopWatchingLink() {
+    this.unwatch?.();
+    this.unwatch = this.watchedOwner = null;
+  }
+
+  // Share the existing stream for the active owner. A directory update revokes
+  // even in-flight listings before the source summary is requested again.
+  watchLink(owner) {
+    if (this.watchedOwner === owner) return;
+    this.stopWatchingLink();
+    this.watchedOwner = owner;
+    this.unwatch = globalThis.window?.workspaceRealtime?.subscribeToWorkspace(owner, event => {
+      const data = event.data?.data || event.data;
+      if (event.type === 'workspace.updated' && data?.action?.startsWith('directory_'))
+        this.refreshLinks(owner);
+    });
+  }
+
+  refreshLinks(owner) {
+    if (!this.controller) return;
+    for (const key of this.sections.keys()) {
+      if (
+        key === sectionKey(owner, 'files') ||
+        key.startsWith(`${owner}/l/`) ||
+        key.startsWith(`${owner}/ld/`)
+      )
+        this.sections.delete(key);
+    }
+    if (this.selected?.kind === 'linkedFile' && this.selected.workspaceId === owner) {
+      ++this.previewVersion;
+      this.selected = this.value = this.error = null;
+      this.focusKey = sectionKey(owner, 'files');
+      this.paintPreview();
+    }
+    this.paintTree();
+    this.syncExpanded();
+  }
+
   async load(row) {
     const pending = {};
     this.sections.set(row.id, pending);
     this.paintTree();
     let result;
     try {
-      result = await loadWorkspaceContents(row.workspaceId, row.section, {
-        fetchImpl: this.scopedFetch()
-      });
+      const options = { fetchImpl: this.scopedFetch() };
+      if (linkedBranch(row)) this.watchLink(row.workspaceId);
+      result = linkedBranch(row)
+        ? await loadLinkedPage(row, options)
+        : await loadWorkspaceContents(row.workspaceId, row.section, options);
     } catch (error) {
       result = { error };
     }
     if (this.sections.get(row.id) !== pending) return;
     this.sections.set(row.id, result);
     this.paintTree();
-    this.restoreSelection();
+    this.syncExpanded();
   }
 
   scopedFetch() {
@@ -424,6 +485,7 @@ export class WorkspaceFilesView {
   async select(row, { restore = false } = {}) {
     const version = ++this.previewVersion;
     this.selected = row;
+    if (row.kind === 'linkedFile') this.watchLink(row.workspaceId);
     this.branchSelection = null;
     if (!restore) {
       this.previewScroll = this.tree?.scrollTop || 0;
@@ -453,7 +515,14 @@ export class WorkspaceFilesView {
     const owner =
       row?.workspaceId === this.root.id ? this.root.name : this.members.get(row?.workspaceId)?.name;
     this.article.querySelector('.wf-crumb').textContent = row
-      ? [owner, row.kind === 'note' ? 'Notes' : 'Files', row.meta.path || row.label].join(' / ')
+      ? [
+          owner,
+          row.kind === 'note' ? 'Notes' : 'Files',
+          row.meta.dirName,
+          row.meta.path || row.label
+        ]
+          .filter(Boolean)
+          .join(' / ')
       : '';
     this.article.querySelector('h2').textContent = row?.label || 'Select a file or note';
     this.article.querySelector('.wf-body').innerHTML = !row
