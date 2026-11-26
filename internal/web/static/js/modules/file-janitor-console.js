@@ -3030,6 +3030,7 @@
                 });
               }
             : null,
+        onForgetExample: example => void editFolderExample(example, 'forget', binding.scope),
         onReviewAgain: kept => void reviewKeptAgain(kept, binding),
         onRetry: file =>
           void submitReviewEdit('retry_files', { candidate_ids: [file.id] }, null, binding),
@@ -4763,6 +4764,37 @@
   // renderResults reports what happened per file. Operation evidence comes
   // from each authoritative outcome: an applied Trash is never called "filed",
   // and an older response without operation data gets neutral wording.
+  async function editFolderExample(example, choice, scope, filingId) {
+    if (!scopeCurrent(scope) || receiptBusy) return;
+    receiptBusy = true;
+    try {
+      const res = await fetch(
+        apiBase(scope.id) + '/history/' + encodeURIComponent(example.action_id) + '/example',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ choice })
+        }
+      );
+      if (!res.ok) throw new Error('The example changed or is unavailable. Review it again.');
+      if (!scopeCurrent(scope)) return;
+      await loadReviewPicture();
+      if (filingId && scopeCurrent(scope) && lastResults?.filingId === filingId)
+        await showReceipt(scope, { filing_id: filingId });
+      if (scopeCurrent(scope))
+        announce(
+          choice === 'forget'
+            ? 'Suggestion forgotten. No files moved.'
+            : 'Example saved. Similar files will need your review.'
+        );
+    } catch (e) {
+      if (scopeCurrent(scope)) showError(e.message);
+    } finally {
+      receiptBusy = false;
+      if (scopeCurrent(scope) && lastResults) renderResults(lastResults, { focus: false });
+    }
+  }
+
   function renderResults(view, { focus = true } = {}) {
     // Kept so a redraw of the console (a status refresh that lands after the press)
     // shows the same account again instead of wiping it.
@@ -4773,7 +4805,10 @@
     const drawing = window.FileJanitorReceipt;
     if (!drawing || !view) return;
 
+    const receiptScope = requestScope();
     const ctx = {
+      onRemember: example =>
+        void editFolderExample(example, 'remember', receiptScope, view.filingId),
       folderName: compactFolderName(lastStatus?.settings?.root_path),
       filingRoot: lastStatus?.settings?.filing_root_name || 'Filed',
       busy: receiptBusy,

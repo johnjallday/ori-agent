@@ -89,7 +89,8 @@ type FilingReceipt struct {
 	Undo *FilingUndoSummary `json:"undo,omitempty"`
 	// HistoryTrimmed says older journal entries of this filing were pruned, so the
 	// receipt cannot account for every planned file.
-	HistoryTrimmed bool `json:"history_trimmed,omitempty"`
+	HistoryTrimmed bool            `json:"history_trimmed,omitempty"`
+	ExampleOffers  []FilingExample `json:"example_offers,omitempty"`
 }
 
 // FilingUndoSummary is the state of a filing's Undo all.
@@ -321,6 +322,7 @@ func (s *Service) ReadFiling(ctx context.Context, owner, workspaceID, filingID s
 		return FilingReceipt{}, err
 	}
 	receipt := buildReceipt(state, record, settings.RootID, offset)
+	receipt.ExampleOffers = s.receiptExamples(owner, workspaceID, state, record)
 	// Names are read now, so a renamed workspace reads as it is called today.
 	for i := range receipt.Sends {
 		id := receipt.Sends[i].ReceiverWorkspaceID

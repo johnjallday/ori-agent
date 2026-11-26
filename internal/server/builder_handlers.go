@@ -952,6 +952,7 @@ func (b *ServerBuilder) wireFileJanitor() {
 		return
 	}
 	service := filejanitor.NewService(filejanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
+	service.SetExampleMemory(workspace.NewMemoryStore(b.workspaceFileStore))
 	b.fileJanitorService = service
 	b.fileJanitorHandler = filejanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 	b.fileJanitorHandler.SetDownloadsRoot(func(owner, workspaceID string) (string, error) {

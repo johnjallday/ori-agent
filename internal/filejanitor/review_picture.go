@@ -193,7 +193,8 @@ type ReviewPicture struct {
 	// Suggestion is the Filing agent's kept suggestion for this review, drawn
 	// above Leaving with its cards unticked (FR 47, 48). Absent with no model,
 	// no connection, or no suggestion.
-	Suggestion *PictureSuggestion `json:"suggestion,omitempty"`
+	Suggestion        *PictureSuggestion `json:"suggestion,omitempty"`
+	FolderSuggestions []FolderSuggestion `json:"folder_suggestions,omitempty"`
 }
 
 // PictureFilesQuery names one list to page: the section, and the folder category
@@ -777,6 +778,7 @@ func (s *Service) ReadReviewPicture(ctx context.Context, owner, workspaceID, bat
 		}, nil
 	}
 	picture := buildReviewPicture(snapshot.groups, snapshot.view, snapshot.candidates)
+	picture.FolderSuggestions = s.folderSuggestions(owner, workspaceID, snapshot)
 	if len(snapshot.view.routes) > 0 {
 		if settings, err := s.store.LoadSettings(workspaceID); err == nil {
 			picture.Suggestion = pictureSuggestion(snapshot.state, settings, snapshot.view, snapshot.batchID)

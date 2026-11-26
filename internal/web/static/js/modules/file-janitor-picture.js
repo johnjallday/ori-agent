@@ -603,6 +603,37 @@ export function renderPicture(doc, picture, ctx) {
   lead.id = 'fileJanitorLead';
   root.appendChild(lead);
 
+  if (picture.folder_suggestions?.length && ctx.onChooseFolder) {
+    const section = h('section', 'fj-frame');
+    section.appendChild(h('h3', 'fj-frame-title', 'Suggested destinations'));
+    section.appendChild(
+      h(
+        'p',
+        'fj-sub',
+        'From your confirmed examples. Nothing moves until you review and press File.'
+      )
+    );
+    for (const match of picture.folder_suggestions) {
+      const row = h('div', 'fj-decision-summary');
+      row.appendChild(h('strong', '', match.candidate_name));
+      row.appendChild(h('p', 'fj-sub', 'You filed ' + match.name + ' to ' + match.folder + '.'));
+      for (const [label, fn] of [
+        [
+          'Review suggestion',
+          () => ctx.onChooseFolder({ candidate_id: match.candidate_id }, match.action_id)
+        ],
+        ['Change folder', () => ctx.onChooseFolder({ candidate_id: match.candidate_id })],
+        ['Forget example', () => ctx.onForgetExample(match)]
+      ]) {
+        const b = h('button', 'fj-btn fj-btn-secondary', label);
+        b.type = 'button';
+        b.addEventListener('click', fn);
+        row.appendChild(b);
+      }
+      section.appendChild(row);
+    }
+    root.appendChild(section);
+  }
   const leaving = Array.isArray(picture.leaving) && picture.leaving.length > 0;
   // The agent's suggestion, above Leaving (FR 43, 47, 48). With no model the
   // console passes no agent and the server sends no suggestion: nothing is drawn.

@@ -21,7 +21,8 @@ type DocumentsSelection struct {
 	RootDirID string `json:"-"`
 	// Key is opaque to this package: the caller (the Documents review) sets it to
 	// bind a preview to its view revision, kept group and chosen sources.
-	Key string `json:"-"`
+	Key     string `json:"-"`
+	example string // reviewed external suggestion, rechecked in the admission transaction
 }
 type ReviewedLooseFile struct {
 	Name    string

@@ -71,6 +71,7 @@ function directoryOf(destination) {
 export function receiptModelFromReceipt(receipt) {
   return {
     filingId: receipt.filing_id,
+    ...(receipt.example_offers?.length ? { examples: receipt.example_offers } : {}),
     state: receipt.state || 'done',
     filed: receipt.filed || 0,
     trashed: receipt.trashed || 0,
@@ -180,6 +181,15 @@ export function renderReceipt(doc, model, ctx = {}) {
   const title = h('h3', 'fj-results-summary', receiptTitle(model) + '.');
   title.id = 'fileJanitorResultsSummary';
   panel.appendChild(title);
+  for (const example of model.examples || []) {
+    const line = h('p', 'fj-receipt-note', example.name + ' → ' + example.folder + ' ');
+    const save = h('button', 'fj-btn fj-btn-secondary', 'Suggest this folder for similar files');
+    save.type = 'button';
+    save.disabled = ctx.busy;
+    save.addEventListener('click', () => ctx.onRemember?.(example));
+    line.appendChild(save);
+    panel.appendChild(line);
+  }
   if (model.replayed)
     panel.appendChild(
       h('p', 'fj-results-replayed', 'Already completed earlier; nothing ran again.')

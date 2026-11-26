@@ -93,5 +93,6 @@ func (h *Handler) registerUnder(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+base+"/preview", h.PreviewMoves)
 	mux.HandleFunc("POST "+base+"/apply", h.ConfirmMoves)
 	mux.HandleFunc("GET "+base+"/history", h.History)
+	mux.HandleFunc("POST "+base+"/history/{actionID}/example", h.EditExample)
 	mux.HandleFunc("POST "+base+"/history/{actionID}/undo", h.Undo)
 }

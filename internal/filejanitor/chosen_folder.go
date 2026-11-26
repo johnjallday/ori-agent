@@ -40,6 +40,7 @@ type ChosenSelection struct {
 	CandidateID   string `json:"candidate_id,omitempty"`
 	Section       string `json:"section,omitempty"`
 	Key           string `json:"key,omitempty"`
+	Example       string `json:"-"` // set only for an accepted remembered destination
 }
 
 func (s *Service) chosenSelection(ctx context.Context, owner, id, batch string, req ChosenSelection) (DocumentsSelection, error) {
@@ -64,6 +65,7 @@ func (s *Service) chosenSelection(ctx context.Context, owner, id, batch string, 
 	}
 	out := DocumentsSelection{State: "matched", Batch: batch, RootDirID: directoryid.Witness(st)}
 	out.Key, _ = setupDigest(req)
+	out.example = req.Example
 	var ids []string
 	if req.CandidateID != "" && req.Section == "" && req.Key == "" {
 		ids = []string{req.CandidateID}
@@ -126,6 +128,15 @@ func (s *Service) planChosenFolder(owner, id string, sel DocumentsSelection, pat
 	d := &DeliveredTo{Key: deliveryKey(id, root.Generation, path, sel.RootDirID, dirID), RootDirID: sel.RootDirID, FolderID: dirID, path: path}
 	if !d.valid() {
 		return refuse("destination")
+	}
+	if sel.example != "" {
+		if len(sel.CandidateIDs) != 1 {
+			return refuse("changed")
+		}
+		p, key, e := s.resolveExample(root, state, sel.CandidateIDs[0], sel.example)
+		if e != nil || key != d.Key || p != path {
+			return refuse("changed")
+		}
 	}
 	plan := documentsPlan{rootDirID: sel.RootDirID, scope: scope, folder: DirRef{Rel: label, ID: dirID}, preview: DocumentsPreview{State: documentsPreviewReady, Folder: label}}
 	for i, cid := range sel.CandidateIDs {

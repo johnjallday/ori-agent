@@ -2,10 +2,11 @@ package filejanitorhttp
 
 import (
 	"errors"
+	"net/http"
+
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderpath"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
-	"net/http"
 )
 
 // Both phases require the trusted, workspace-scoped selection. Unlike setup,
@@ -21,6 +22,7 @@ func (h *Handler) ChosenFolder(w http.ResponseWriter, r *http.Request) {
 		Token     string                      `json:"selection_token"`
 		Digest    string                      `json:"plan_digest"`
 		Key       string                      `json:"client_key"`
+		Example   string                      `json:"example"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -30,14 +32,24 @@ func (h *Handler) ChosenFolder(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondForbidden(w, "Access unavailable.")
 		return
 	}
-	resolver, ok := h.pathSelections.(interface {
-		ResolveFor(string, string) (string, error)
-	})
-	if !ok {
-		_ = orihttp.RespondServiceUnavailable(w, "Folder selection is unavailable.")
-		return
+	var p string
+	if req.Example != "" {
+		if req.Token != "" || req.Selection.CandidateID == "" {
+			_ = orihttp.RespondBadRequest(w, "Choose one destination.")
+			return
+		}
+		req.Selection.Example = req.Example
+		p, err = h.service.ResolveExamplePath(owner, id, req.Selection.CandidateID, req.Example)
+	} else {
+		resolver, ok := h.pathSelections.(interface {
+			ResolveFor(string, string) (string, error)
+		})
+		if !ok {
+			_ = orihttp.RespondServiceUnavailable(w, "Folder selection is unavailable.")
+			return
+		}
+		p, err = resolver.ResolveFor(req.Token, id)
 	}
-	p, err := resolver.ResolveFor(req.Token, id)
 	if err != nil {
 		_ = orihttp.RespondBadRequest(w, "Choose the destination folder again.")
 		return
