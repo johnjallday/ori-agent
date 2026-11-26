@@ -14,6 +14,9 @@
 .ws-cmd-modal-panel.is-note-inventory {
   --inv-gold: var(--ws-keeper);
   --inv-gold-deep: var(--ws-keeper-deep);
+  /* Gold that carries small text; the light theme needs a darker one to keep
+     4.5:1 across the panel's gradient. */
+  --inv-gold-text: var(--inv-gold);
   --inv-cut: 18px;
 
   max-width: min(1040px, 96vw);
@@ -81,9 +84,13 @@
   flex: 1;
 }
 
+[data-bs-theme="light"] .ws-cmd-modal-panel.is-note-inventory {
+  --inv-gold-text: #7d4f12;
+}
+
 .hq-note-inventory__eyebrow {
   margin: 0 0 2px;
-  color: var(--inv-gold);
+  color: var(--inv-gold-text);
   font-family: var(--ws-font-mono);
   font-size: 11px;
   letter-spacing: 2.2px;
@@ -290,7 +297,7 @@
 }
 
 .hq-note-inventory__inspector > .hq-note-inventory__eyebrow-row {
-  color: var(--inv-gold);
+  color: var(--inv-gold-text);
 }
 
 .hq-note-inventory__notice {
@@ -630,7 +637,7 @@
 }
 
 .hq-note-inventory__open:hover {
-  color: var(--inv-gold);
+  color: var(--inv-gold-text);
 }
 
 /* ---- Quick note and the reader link ----------------------------------------- */
@@ -817,6 +824,39 @@
 
   .hq-note-inventory__slot {
     min-height: 132px;
+  }
+}
+
+/* A short window (a laptop at 200% zoom, a phone on its side): the shared
+   modal keeps clear of the navbar, which leaves little height. The panel then
+   scrolls as one instead of squeezing the slots and inspector between a fixed
+   head, tabs and footer. */
+@media (max-height: 560px) {
+  .ws-cmd-modal-panel.is-note-inventory {
+    overflow-y: auto;
+  }
+
+  .hq-note-inventory,
+  .hq-note-inventory__body,
+  .hq-note-inventory__body:has(> .hq-note-inventory__layout),
+  .hq-note-inventory__layout {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .hq-note-inventory__slots,
+  .hq-note-inventory__inspector {
+    overflow: visible;
+  }
+
+  .hq-note-inventory__head {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .hq-note-inventory__emblem {
+    width: 36px;
+    height: 36px;
   }
 }
 
