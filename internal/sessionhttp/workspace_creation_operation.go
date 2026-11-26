@@ -111,6 +111,15 @@ func (h *Handler) handleWorkspaceCreationOperations(w http.ResponseWriter, r *ht
 	}
 	op, err := h.readWorkspaceCreationOperation(r.Context(), owner, parts[0])
 	if err != nil {
+		// Only an owner-scoped status lookup can identify a stale browser
+		// reference. A missing route, failed write or unavailable store cannot.
+		if method == http.MethodGet && errors.Is(err, sql.ErrNoRows) {
+			_ = orihttp.RespondAPIError(w, http.StatusNotFound, &orihttp.APIError{
+				Code: "creation_record_missing", Message: "No record of this creation request in the current profile.",
+				Details: map[string]string{"operation_id": parts[0]},
+			})
+			return
+		}
 		h.respondCreationOperationReadError(w, err)
 		return
 	}

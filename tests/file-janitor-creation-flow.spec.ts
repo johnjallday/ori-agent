@@ -351,7 +351,7 @@ test.describe('attached creation with a scripted local model', () => {
       await page.locator('#cockpitCreateWorkspaceBtn').click();
       await page
         .locator('#workspaceBuildPane')
-        .getByRole('button', { name: 'Resume', exact: true })
+        .getByRole('button', { name: 'Continue draft', exact: true })
         .click();
       await expect(page.locator('#folderNameInput')).toHaveValue('Keep my manual name');
       await expect(page.locator('#workspaceBuildComposerInput')).toHaveValue('');

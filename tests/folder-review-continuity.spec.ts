@@ -685,7 +685,8 @@ test('the build pane reopens its own folder and name after restart', async ({ pa
   const initial = await opened.json();
   const pane = page.locator('#workspaceBuildPane');
   await expect(pane).toBeVisible();
-  if (initial.resumed) await pane.getByRole('button', { name: 'Resume', exact: true }).click();
+  if (initial.resumed)
+    await pane.getByRole('button', { name: 'Continue draft', exact: true }).click();
   if (phase === 'build-seed') {
     if (initial.session.folder) await page.locator('#workspaceBuildFolderChange').click();
     else await page.locator('[data-build-control="add-folder"]').click();

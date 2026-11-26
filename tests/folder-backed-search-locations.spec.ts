@@ -379,8 +379,8 @@ test('Home chat inspects an attachment or hands it to the real New Workspace but
   expect(wizardConfirmations).toBe(0);
   await creation.getByRole('button', { name: 'Use automatic placement' }).click();
   await creation.locator('[data-placement-action="confirm"]').click();
-  await expect(creation.getByRole('heading', { name: 'Workspace created' })).toBeVisible();
-  await creation.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  await page.locator('#toastContainer').getByRole('button', { name: 'Open workspace' }).click();
   await expect(page.locator('body')).toHaveAttribute('data-workspace-id', /.+/);
   await expect
     .poll(async () => (await inventory()).workspaces.length)

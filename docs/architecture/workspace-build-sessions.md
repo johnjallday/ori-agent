@@ -338,7 +338,9 @@ schemas are refused conservatively. One sidecar file per HQ: `<HQ folder>/.ori/w
 Personal Assistant knowledge store (locked, atomic replace, a Windows variant). Bounds:
 
 - at most **one open or preparing build** per user; creating while one exists
-  returns it (`resumed`); preparing claims are frozen and do not expire as open drafts;
+  reuses its ID. An untouched build opens like new (including a new first message);
+  only a build with saved progress or outstanding work returns `resumed: true`.
+  Preparing claims are frozen and do not expire as open drafts;
 - the transcript keeps the last **40 entries / 32 KiB**;
 - an open build untouched for **7 days** is read as abandoned;
 - at most **8 builds** are kept, and a created or abandoned one is settled to its id,
@@ -392,10 +394,12 @@ and cannot be bypassed through ordinary create.
   selections (its default after a reset or a catalog load) carry `programmatic: true` on
   `workspace-template-selected`, are never treated as the user's edit, and put the
   assistant's blueprint back if the late load reset it.
-- **Resume**: an open build found on open asks "Resume building <name>?". Until the user
+- **Continue draft**: an unfinished build identifies the saved draft by name, folder,
+  link or a short excerpt of the request when available. Merely opening and closing
+  the creator, including synchronization of form defaults, does not prompt. Until the user
   answers, nothing on the form is written to the paused draft, and the dialog's create
   request does not name the build (a workspace made by hand meanwhile is not tied to it).
-  Resume restores the draft, the team state, the step, and the transcript; Start over
+  Continue draft restores the draft, the team state, the step, and the transcript; Start over
   abandons and begins again.
 - **Fallbacks**: not hired or no model → the manual wizard, and no build request beyond
   the two reads (`GET /api/personal-assistant`, `GET …/availability`). A build that becomes

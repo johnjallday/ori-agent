@@ -7,6 +7,7 @@ import { mkdtempSync, writeFileSync, readFileSync, readdirSync, realpathSync } f
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { goToFiles } from './helpers/home-destination';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 // Real server acceptance. No successful create/receipt/layout response is
 // fabricated. Run only against the isolated branch demo via scripts/e2e.sh.
@@ -305,9 +306,8 @@ test.describe('ordinary blueprint review with a local catalog-only model fixture
     expect(await resources(request)).toEqual(before);
     await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
     await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
-    await expect(
-      review.getByRole('heading', { name: 'Workspace created', exact: true })
-    ).toBeVisible();
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    await expect(page.locator('#toastContainer')).toContainText('created.');
     const after = await resources(request);
     expect(after.workspaces).toHaveLength(before.workspaces.length + 1);
     expect(after.agents).toEqual(before.agents);
@@ -594,7 +594,8 @@ async function reviewBlank(request: APIRequestContext) {
   return { id, digest: body.operation.review_digest as string };
 }
 
-async function openBlankReview(page: Page, name: string, recovery = false) {
+async function openBlankReview(page: Page, name: string) {
+  await installLocalCdn(page);
   await page.request.post('/api/onboarding/skip');
   await page.goto('/');
   await page.locator('#cockpitCreateWorkspaceBtn').click();
@@ -606,10 +607,9 @@ async function openBlankReview(page: Page, name: string, recovery = false) {
   await page.locator('#wizardNextBtn').click();
   const review = page.locator('#workspaceCreationReviewPanel');
   await expect(review).toBeVisible();
-  if (!recovery)
-    await expect(
-      review.getByRole('button', { name: 'Use automatic placement', exact: true })
-    ).toBeVisible();
+  await expect(
+    review.getByRole('button', { name: 'Use automatic placement', exact: true })
+  ).toBeVisible();
   return review;
 }
 
@@ -710,15 +710,16 @@ test('Blank automatic confirmation works without a mounted map and cancellation 
     fullPage: true
   });
   await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
-  await expect(
-    review.getByRole('heading', { name: 'Workspace created', exact: true })
-  ).toBeVisible();
+  await expect(page.locator('#toastContainer')).toContainText('created.');
+  await expect(page.locator('#addFolderModal')).toBeHidden();
   await expect(page.locator('#createFolderBtn')).toBeHidden();
   await expect(page.locator('#workspaceCreatorKindChoice')).toBeHidden();
   const after = await resources(request);
   expect(after.workspaces).toHaveLength(before.workspaces.length + 1);
   expect(after.agents).toEqual(before.agents);
-  await page.evaluate(() => (window as any).sessionManager.createFolder());
+  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  await expect(page.locator('#wizardStep1')).toBeVisible();
+  await expect(review).toBeHidden();
   expect(await resources(request)).toEqual(after);
   await page.screenshot({
     path: 'tasks/evidence-unified-workspace-placement/group-1/blank-automatic-result.png',
@@ -749,11 +750,9 @@ test('Blank Escape and automatic fallback preserve edits but clear a manual cand
   ).toBeNull();
   expect(await resources(request)).toEqual(before);
   await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
-  await expect(
-    review.getByRole('heading', { name: 'Workspace created', exact: true })
-  ).toBeVisible();
-  const id = await page.evaluate(
-    () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
+  await expect(page.locator('#toastContainer')).toContainText(`${name} created.`);
+  const [id] = (await resources(request)).workspaces.filter(
+    (id: string) => !before.workspaces.includes(id)
   );
   const layout = await (await request.get('/api/workspace-map/layout')).json();
   expect(layout.layout.positions[id]).toBeUndefined();
@@ -763,12 +762,16 @@ test('Blank Escape and automatic fallback preserve edits but clear a manual cand
   });
 });
 
-test('Blank UI observes lost confirmation delivery and reloads the original result instead of resubmitting', async ({
+test('New Workspace checks an interrupted confirmation after reload and starts fresh when it has completed', async ({
   page,
   request
 }) => {
   const before = await resources(request);
   const review = await openBlankReview(page, `Recovered notebook ${randomUUID().slice(0, 8)}`);
+  const statusRoute = '**/api/workspaces/create-operations/*';
+  await page.route(statusRoute, route =>
+    route.request().method() === 'GET' ? route.abort() : route.continue()
+  );
   let id = '',
     posts = 0;
   await page.route('**/api/workspaces/create-operations/*/confirm', async route => {
@@ -780,13 +783,19 @@ test('Blank UI observes lost confirmation delivery and reloads the original resu
   });
   await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
-  await expect(
-    review.getByRole('heading', { name: 'Workspace created', exact: true })
-  ).toBeVisible();
-  await openBlankReview(page, `Never created ${randomUUID().slice(0, 8)}`, true);
-  await expect(
-    review.getByRole('heading', { name: 'Workspace created', exact: true })
-  ).toBeVisible();
+  await expect(review.getByRole('button', { name: 'Check status' })).toBeVisible();
+  await page.reload();
+  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  await expect(review.getByRole('button', { name: 'Check status' })).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  await page.unroute(statusRoute);
+  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  await expect(page.locator('#wizardStep1')).toBeVisible();
+  await expect(review).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('ori.workspaceCreationOperation.v1')))
+    .toBeNull();
   expect(posts).toBe(1);
   expect(await resources(request)).toEqual({
     workspaces: [...before.workspaces, id].sort(),

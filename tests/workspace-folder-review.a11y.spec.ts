@@ -384,7 +384,7 @@ for (const stage of ['attachment', 'permissions']) {
       release.release();
       await returned.promise;
       await page.locator('#cockpitCreateWorkspaceBtn').click();
-      await page.getByRole('button', { name: 'Resume', exact: true }).click();
+      await page.getByRole('button', { name: 'Continue draft', exact: true }).click();
       await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
       if (stage === 'permissions') {
         await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeEnabled();

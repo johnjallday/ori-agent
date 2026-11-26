@@ -170,11 +170,8 @@ async function confirmReviewedCreation(page: Page, keyboard = false) {
   const confirm = review.locator('[data-placement-action="confirm"]');
   if (keyboard) await confirm.press('Enter');
   else await confirm.click();
-  // Automatic placement ends at the real receipt, not manual map placement.
   // The caller inspects canonical run state before choosing Open workspace.
-  await expect(
-    page.getByRole('region', { name: 'Workspace creation result', exact: true }).getByRole('status')
-  ).toContainText('No run or scan was started by placement.');
+  await expect(page.getByRole('button', { name: 'Open workspace', exact: true })).toBeVisible();
 }
 
 async function createdWorkspace(request: APIRequestContext, name: string) {

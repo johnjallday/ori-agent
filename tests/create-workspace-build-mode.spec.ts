@@ -463,7 +463,7 @@ async function resumeRetainedFolderReview(page: Page, fake: FakeBuild) {
   await expect(page.locator('#addFolderModal')).toBeHidden();
   fake.session!.folder = { observation: { ...FAKE_OBSERVATION } };
   await page.locator('#cockpitCreateWorkspaceBtn').click();
-  await pane(page).getByRole('button', { name: 'Resume', exact: true }).click();
+  await pane(page).getByRole('button', { name: 'Continue draft', exact: true }).click();
   const returned = page.locator('#workspaceBuildReturnToReview');
   const review = page.locator('#workspaceBuildFolderReview');
   await expect(
@@ -1012,7 +1012,10 @@ for (const interrupted of [false, true]) {
     await activateByTab(page, page.getByRole('button', { name: 'Close create workspace' }));
     await expect(pane(page)).toBeHidden();
     await activateByTab(page, page.locator('#cockpitCreateWorkspaceBtn'));
-    await activateByTab(page, pane(page).getByRole('button', { name: 'Resume', exact: true }));
+    await activateByTab(
+      page,
+      pane(page).getByRole('button', { name: 'Continue draft', exact: true })
+    );
     await expect(composer(page)).toBeFocused();
     await expect(summary).toContainText(name);
     await expect(summary).toContainText(`Will assign ${lead}`);
@@ -1061,8 +1064,10 @@ for (const interrupted of [false, true]) {
     });
     await confirm.dblclick();
     await lost.promise;
-    await expect(review).toContainText('Creation outcome not verified');
-    await expect(review).toContainText('Work may already exist. Closing is not undo.');
+    await expect(
+      review.getByRole('heading', { name: 'Workspace status unavailable' })
+    ).toBeVisible();
+    await expect(review.getByRole('button', { name: 'Check status' })).toBeVisible();
     await expect(page.locator('#workspaceBuildWithBtn')).toBeHidden();
     await expect(review.getByRole('button', { name: `Open ${name}` })).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath('compact-uncertain.png') });
@@ -1094,12 +1099,12 @@ for (const interrupted of [false, true]) {
     const calls = catalogModel.calls();
     await page.reload();
     await activateByTab(page, page.locator('#cockpitCreateWorkspaceBtn'));
-    await expect(review.getByRole('button', { name: 'Read saved status' })).toBeVisible();
+    await expect(review.getByRole('button', { name: 'Check status' })).toBeVisible();
     await expect(pane(page)).toBeHidden();
     await expect(page.locator('#createFolderBtn')).toBeHidden();
     await expect(review).not.toContainText(`${name} created`);
     unreadable = false;
-    await activateByTab(page, review.getByRole('button', { name: 'Read saved status' }));
+    await activateByTab(page, review.getByRole('button', { name: 'Check status' }));
     await expect(review).toContainText(`${name} created`);
     await expect(review).toContainText('Standalone workspace');
     await expect(review).toContainText(lead);
@@ -1427,13 +1432,40 @@ test('clearing a proposed role updates the draft and survives Resume', async ({ 
   await page.getByRole('button', { name: 'Close create workspace' }).click();
   await expect(pane(page)).toBeHidden();
   await page.locator('#cockpitCreateWorkspaceBtn').click();
-  await pane(page).getByRole('button', { name: 'Resume', exact: true }).click();
+  await pane(page).getByRole('button', { name: 'Continue draft', exact: true }).click();
   await expect(team).toContainText('Content Lead: Required · choose an agent');
   await expect(team).not.toContainText('Proposed Lead');
   await expect(page.locator('#workspaceBuildDraftChange')).toBeHidden();
 });
 
-test('closing mid-build and reopening offers Resume, which restores the form and the step', async ({
+test('reopening an untouched assistant build skips the draft prompt', async ({ page }) => {
+  await page.unroute(/\/api\/personal-assistant$/);
+  await abandonOpenBuild(page.request);
+  const openBuild = () =>
+    page.waitForResponse(
+      r => r.request().method() === 'POST' && r.url().endsWith('/api/workspaces/build-sessions')
+    );
+  const first = openBuild();
+  const defaultsSaved = page.waitForResponse(
+    r => r.request().method() === 'PATCH' && /\/build-sessions\/[^/]+\/draft$/.test(r.url())
+  );
+  await openFromHome(page);
+  const { session } = await (await first).json();
+  expect((await defaultsSaved).ok()).toBe(true);
+  const calls = catalogModel.totalCalls();
+  await page.getByRole('button', { name: 'Close create workspace' }).click();
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  const again = openBuild();
+  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  const reopened = await (await again).json();
+  expect(reopened.session.id).toBe(session.id);
+  expect(reopened.resumed).not.toBe(true);
+  await expect(composer(page)).toBeEnabled();
+  await expect(pane(page).getByRole('button', { name: 'Continue draft' })).toHaveCount(0);
+  expect(catalogModel.totalCalls()).toBe(calls);
+});
+
+test('closing mid-build and reopening offers Continue draft, which restores the form and the step', async ({
   page
 }) => {
   const name = `Course Notes ${Date.now().toString(36)}`;
@@ -1457,10 +1489,10 @@ test('closing mid-build and reopening offers Resume, which restores the form and
 
   await page.locator('#cockpitCreateWorkspaceBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
-  await expect(pane(page)).toContainText(`Resume building ${name}?`);
+  await expect(pane(page)).toContainText(`Continue the draft for “${name}”?`);
   expect(fake.creates.at(-1)).toMatchObject({ entry_point: 'home_cockpit_create' });
 
-  await pane(page).getByRole('button', { name: 'Resume' }).click();
+  await pane(page).getByRole('button', { name: 'Continue draft' }).click();
   await expect(page.locator('#folderNameInput')).toHaveValue(name);
   await expect(page.locator(`#wizardStep${step}`)).toBeHidden();
   await expect.poll(() => currentStep(page)).toBe(step);

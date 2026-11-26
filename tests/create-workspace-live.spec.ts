@@ -113,8 +113,8 @@ test('live guided creation preserves the draft, resumes, and creates the reviewe
     .click();
   await expect(page.locator('#addFolderModal')).toBeHidden();
   await page.locator('#cockpitCreateWorkspaceBtn').click();
-  await expect(pane).toContainText(`Resume building ${name}?`);
-  await pane.getByRole('button', { name: 'Resume', exact: true }).click();
+  await expect(pane).toContainText(`Continue the draft for “${name}”?`);
+  await pane.getByRole('button', { name: 'Continue draft', exact: true }).click();
   await expect(page.locator('#folderNameInput')).toHaveValue(name);
   await expect.poll(() => page.evaluate(() => (window as any).sessionManager.wizardStep)).toBe(4);
   const createdResponse = page.waitForResponse(

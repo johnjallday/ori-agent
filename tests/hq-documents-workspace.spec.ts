@@ -121,7 +121,8 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
   const result = await confirmed;
   expect(result.ok(), await result.text()).toBe(true);
   const { id: existingId, folder_slug: slug } = (await result.json()).folder;
-  await review.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  await expect(modal).toBeHidden();
+  await page.locator('#toastContainer').getByRole('button', { name: 'Open workspace' }).click();
   const current = async () => (await request.get(`/api/workspaces/${existingId}`)).json();
   const ws = await current();
   expect(ws.name).toBe('Document shelves');
@@ -176,7 +177,7 @@ async function assertVisited(page: Page, id: string, info: TestInfo) {
 }
 
 for (const staffed of [false, true]) {
-  test(`guided ${staffed ? 'staffed' : 'agentless'} creation recovers the reviewed replacement folder`, async ({
+  test(`guided ${staffed ? 'staffed' : 'agentless'} creation offers the reviewed replacement folder without blocking New Workspace`, async ({
     page,
     request
   }, info) => {
@@ -252,12 +253,13 @@ for (const staffed of [false, true]) {
       staffed ? 'Letters Archivist' : 'No agents will be created or attached.'
     );
     await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
-    await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
-    const open = review.getByRole('button', { name: 'Open workspace', exact: true });
-    await expect(open).toBeVisible();
-    const id = await page.evaluate(
-      () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
+    const confirmation = page.waitForResponse(
+      r => r.request().method() === 'POST' && r.url().endsWith('/confirm')
     );
+    await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
+    const id = (await (await confirmation).json()).folder.id;
+    const open = page.locator('#toastContainer').getByRole('button', { name: 'Open workspace' });
+    await expect(open).toBeVisible();
     const ws = await (await request.get(`/api/workspaces/${id}`)).json();
     expect(ws.anchor.path).toBe(other);
     const bindings = ws.agent_instances || [];
@@ -274,9 +276,11 @@ for (const staffed of [false, true]) {
         Object.keys(localStorage).some(k => k.startsWith('ori.hq.workspaceVisit.'))
       )
     ).toBe(false);
-    // Recover this exact confirmed operation, without submitting a second create.
-    await page.reload();
+    // A second creation starts at Blueprint, not at the Documents receipt.
     await button.click();
+    await expect(page.locator('#wizardStep1')).toBeVisible();
+    await expect(review).toBeHidden();
+    await page.keyboard.press('Escape');
     await open.click();
     await assertVisited(page, id, info);
     expect(implicit).toEqual([]);

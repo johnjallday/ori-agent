@@ -108,8 +108,12 @@ export function creationRecoveryTitle(state) {
       return 'Creation was refused';
     case 'abandoned':
       return 'Creation was not accepted';
+    case 'missing':
+      return 'Previous request not found';
+    case 'uncertain':
+      return 'Workspace status unavailable';
     default:
-      return 'Creation outcome not verified';
+      return 'Check your previous workspace request';
   }
 }
 
@@ -118,18 +122,30 @@ export async function observeCreationOperation(fetcher, reference) {
   try {
     const response = await fetcher(endpoint(reference), { cache: 'no-store' });
     const body = await response.json();
+    if (
+      response.status === 404 &&
+      body?.code === 'creation_record_missing' &&
+      body.details?.operation_id === reference.id
+    )
+      return {
+        state: 'missing',
+        message:
+          'This profile has no record of that request. Check your workspaces, then choose New Workspace if you still need one.'
+      };
     return (
       (response.ok && operationView(body, reference)) || {
         state: 'uncertain',
         message:
-          'The original creation outcome could not be verified. Read saved status; do not create again.'
+          response.status === 403 && body?.code === 'local_folder_only'
+            ? 'Check the status on the Mac where you chose the folder.'
+            : 'Ori couldn’t verify your last request. Check its status before trying to create another workspace.'
       }
     );
   } catch {
     return {
       state: 'uncertain',
       message:
-        'The original creation outcome is unreadable. Read saved status; do not create again.'
+        'Ori couldn’t read your last request. Check your connection and try checking its status again.'
     };
   }
 }
@@ -173,7 +189,7 @@ export async function confirmCreationOperation(fetcher, storage, reference) {
   const observed = await observeCreationOperation(fetcher, reference);
   // A read that still sees reviewed may race an in-flight validator. It is
   // not proof that the dispatched request cannot subsequently accept effects.
-  return observed.state === 'reviewed'
+  return observed.state === 'reviewed' || observed.state === 'missing'
     ? {
         state: 'uncertain',
         message:
