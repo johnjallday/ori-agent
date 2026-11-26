@@ -1458,7 +1458,9 @@
             ? { provider: text(fill.mode === FILL_ASSIGN ? saved?.provider : fill.provider) }
             : {}),
           appearance:
-            fill.mode === FILL_ASSIGN ? saved?.appearance || null : fill.appearance || null
+            fill.mode === FILL_ASSIGN
+              ? saved?.appearance || null
+              : fill.appearance || role.proposed?.appearance || null
         };
         // A filled role has nothing left to propose.
         delete item.proposed;

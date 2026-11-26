@@ -44,6 +44,7 @@ export function creationTeamReviewRows(view = {}, roleRows = [], effects = null)
     return [
       ...scoped.map(row => ({
         label: row.label,
+        agent: row.state === 'filled' ? row.agent : null,
         value:
           effects?.roles.find(role => role.id === row.roleId)?.value ||
           [
@@ -112,7 +113,7 @@ export function creationReviewSlotsHTML(rows = [], { locked = false, selectedCar
         row,
         index
       ) => `<section aria-label="${escapeReviewText(row.ariaLabel || row.label)}" class="assisted-placement__slot"${row.slot ? ` data-placement-slot="${escapeReviewText(row.slot)}"` : ''}>
-        <span class="assisted-placement__number" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>
+        <span class="assisted-placement__number" aria-hidden="true">${(row.agent && globalThis.WorkspaceRoleRoster?.avatarMarkup?.(row.agent)) || String(index + 1).padStart(2, '0')}</span>
         <div><h3>${escapeReviewText(row.label)}</h3><p>${escapeReviewText(row.value)}</p>${row.detail ? `<small>${escapeReviewText(row.detail)}</small>` : ''}</div>
         ${
           row.action

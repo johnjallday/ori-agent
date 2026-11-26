@@ -11,6 +11,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 func readBlankManagerPlan(t *testing.T, h *Handler, workspaceName, purpose string) templateAgentPlan {
@@ -44,7 +47,7 @@ func TestDocumentsManagerCreate_ReviewedIdentityAndConfigurationSurviveReadback(
 		}
 		if i == 2 {
 			holder, prompt = "Archivist", "Help me summarize my letters."
-			material["role_staffing"] = []map[string]string{{"role_id": "manager", "mode": "create", "name": holder, "system_prompt": prompt, "provider": "anthropic", "model": "reviewed-model"}}
+			material["role_staffing"] = []map[string]any{{"role_id": "manager", "mode": "create", "name": holder, "system_prompt": prompt, "provider": "anthropic", "model": "reviewed-model", "appearance": map[string]string{"mode": "generated"}}}
 		}
 		id, digest := reviewCreationOperation(t, h, material)
 		w, result := creationOperationRequest(t, h, http.MethodPost, "/"+id+"/confirm", map[string]any{"review_digest": digest})
@@ -72,6 +75,42 @@ func TestDocumentsManagerCreate_ReviewedIdentityAndConfigurationSurviveReadback(
 		profile, ok := h.agentStore.GetAgent(holder)
 		if !ok || !profile.WorkspaceManager.ManagesWorkspace(wsID) || profile.Settings.SystemPrompt != prompt || (i == 2 && (profile.Settings.Provider != "anthropic" || profile.Settings.Model != "reviewed-model")) {
 			t.Fatalf("%q did not retain its reviewed settings or provenance", holder)
+		}
+		if profile.Appearance == nil || (i < 2 && (profile.Appearance.Mode != "character" || profile.Appearance.CharacterCatalogID() != "research-archivist" || profile.Appearance.Character.CatalogVersion != plan.Agents[0].Appearance.Character.CatalogVersion)) || (i == 2 && profile.Appearance.Mode != "generated") {
+			t.Fatalf("%q did not retain the reviewed face: %#v", holder, profile.Appearance)
+		}
+	}
+}
+
+func TestDocumentsManagerConfirm_AssignOrSkipDoesNotApplyAppearance(t *testing.T) {
+	h, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	face := types.NewAgentAppearance()
+	face.SetGeneratedColor("#abcdef")
+	if err := h.agentStore.CreateAgent("Mira", &store.CreateAgentConfig{Appearance: face, SystemPrompt: "My prompt"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"staffed", "agentless"} {
+		material, plan := documentsCreationMaterial(t, h, mode, canonicalAnchorTestDir(t))
+		material["role_staffing"] = []map[string]string{{"role_id": "manager", "mode": "assign", "name": "Mira"}}
+		if mode == "agentless" {
+			material["role_staffing"] = []any{}
+			material["team_intent"] = map[string]any{"version": 1, "mode": mode, "plan_revision": plan.Revision}
+		}
+		id, digest := reviewCreationOperation(t, h, material)
+		for range 2 {
+			w, result := creationOperationRequest(t, h, http.MethodPost, "/"+id+"/confirm", map[string]any{"review_digest": digest})
+			if w.Code != http.StatusCreated {
+				t.Fatalf("%s: %d %s", mode, w.Code, w.Body)
+			}
+			ws, err := h.workspaceStore.Get(result["folder"].(map[string]any)["id"].(string))
+			if err != nil || (mode == "agentless" && len(ws.AgentInstances) != 0) || (mode == "staffed" && ws.EntryAgentName() != "Mira") {
+				t.Fatalf("%s: unexpected team", mode)
+			}
+		}
+		profile, ok := h.agentStore.GetAgent("Mira")
+		if !ok || len(h.agentStore.ListAgents()) != 1 || profile.Settings.SystemPrompt != "My prompt" || profile.Appearance.Mode != "generated" || profile.Appearance.Generated.Color != "#abcdef" {
+			t.Fatal("changed the saved agent or created a manager")
 		}
 	}
 }
@@ -142,6 +181,9 @@ func TestDocumentsManagerPlan_OnlyExplicitPurposeChangesManagerDefaults(t *testi
 		t.Fatalf("purpose not isolated from display name: %#v %#v %#v", plain, guided, renamed)
 	}
 	a := guided.Agents[0]
+	if plain.Agents[0].Appearance.CharacterCatalogID() != "" || a.Appearance.CharacterCatalogID() != "research-archivist" || a.Appearance.Character.CatalogVersion <= 0 {
+		t.Fatalf("unexpected guided vs ordinary appearance: %#v / %#v", a.Appearance, plain.Agents[0].Appearance)
+	}
 	if a.RoleID != plain.Agents[0].RoleID || a.RoleLabel != "Documents Manager" || plain.Agents[0].RoleLabel != "Manager" || a.Action != "create" || a.SystemPrompt == plain.Agents[0].SystemPrompt || !strings.Contains(a.SystemPrompt, "only with this workspace") {
 		t.Fatalf("unexpected guided manager: %#v", a)
 	}

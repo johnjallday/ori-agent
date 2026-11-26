@@ -686,6 +686,7 @@
       FILLED: BUCKET_FILLED,
       OPTIONAL_EMPTY: BUCKET_OPTIONAL_EMPTY
     },
+    avatarMarkup: avatarMarkup,
     rowsFrom: rowsFrom,
     headerCount: headerCount,
     requiredProgress: requiredProgress,

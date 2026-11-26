@@ -81,9 +81,13 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
   await page.locator('#wizardNextBtn').click();
   const role = modal.locator('#workspaceRoleRoster [data-role-id="manager"]');
   await expect(role.locator('.ws-role-row__label')).toHaveText('Documents Manager');
+  const archivist = 'img[src*="/research-archivist/"]';
+  await expect(role.locator(archivist)).toBeVisible();
+  await page.screenshot({ path: info.outputPath('documents-team.png'), animations: 'disabled' });
   await page.locator('#wizardNextBtn').click();
   const review = modal.locator('#workspaceCreationReviewPanel');
   await expect(review).toContainText('Documents Manager');
+  await expect(review.locator(archivist)).toBeVisible();
   await expect(review).toContainText(docs);
   await page.screenshot({ path: info.outputPath('documents-review.png'), animations: 'disabled' });
   await review.getByRole('button', { name: 'Edit team' }).click();
@@ -133,6 +137,7 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
   await expect(page.locator('body')).toHaveAttribute('data-workspace-id', existingId);
   await page.locator('#personalAssistantLauncher').click();
   await expect(page.locator('#personalAssistantPanelTitle')).toHaveText('Documents Manager');
+  await expect(page.locator('#personalAssistantPanelAvatar').locator(archivist)).toBeVisible();
   await expect(page.locator('#personalAssistantModelSettings')).toHaveAttribute(
     'href',
     `/workspaces/${slug}?editAgentModel=Documents+Manager`
@@ -227,6 +232,10 @@ for (const staffed of [false, true]) {
       );
       await page.locator('#agentName').fill('Letters Archivist');
       await page
+        .locator('#agentCreateAppearanceHost')
+        .getByRole('radio', { name: /^Generated/ })
+        .check();
+      await page
         .locator('#agentSystemPrompt')
         .fill('Help me review the letters in this workspace.');
       await page.locator('#createAgentBtn').click();
@@ -235,6 +244,10 @@ for (const staffed of [false, true]) {
     await page.locator('#wizardNextBtn').click();
     const review = page.locator('#workspaceCreationReviewPanel');
     await expect(review).toContainText(other);
+    if (staffed) {
+      await expect(review.locator('.agent-avatar--generated')).toBeVisible();
+      await page.screenshot({ path: info.outputPath('manager-generated-review.png') });
+    }
     await expect(review).toContainText(
       staffed ? 'Letters Archivist' : 'No agents will be created or attached.'
     );

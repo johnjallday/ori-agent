@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agentappearance"
+	"github.com/johnjallday/ori-agent/internal/folderagent"
+	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -248,7 +250,13 @@ func blankWorkspaceTemplateFor(managerName string) projecttemplates.Template {
 
 func blankWorkspaceDeclaration(managerName, purpose string) projecttemplates.Template {
 	label, prompt := blankManagerRoleLabel, blankWorkspaceManagerPrompt
+	var appearance *types.AgentAppearance
 	if purpose == documentsPurpose {
+		id := folderagent.PreferredCharacter(folderlook.RootDocuments)
+		if version, err := agentappearance.ResolveAssignableCharacter(id); err == nil {
+			appearance = types.NewAgentAppearance()
+			appearance.SetCharacter(id, version)
+		}
 		label = "Documents Manager"
 		prompt = "You are this workspace's Documents Manager. Help the person find, understand, and organize documents in this workspace when asked. Work only with this workspace's files, notes, and tickets. Do not scan, index, edit, move, or share files without explicit permission."
 	}
@@ -258,6 +266,7 @@ func blankWorkspaceDeclaration(managerName, purpose string) projecttemplates.Tem
 			Name:          managerName,
 			Role:          string(types.RoleOrchestrator),
 			SystemPrompt:  prompt,
+			Appearance:    appearance,
 			HostRoleID:    blankManagerRoleID,
 			HostRoleLabel: label,
 		}},
