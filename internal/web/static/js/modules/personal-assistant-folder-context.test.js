@@ -113,6 +113,58 @@ test('a second pick while choosing or a late result after a switch cannot attach
   assert.equal(calls.length, 1);
 });
 
+test('opening a matched workspace rechecks the chosen link once and leaves the index alone', async () => {
+  const matches = [
+    { id: 'a', link: 'linked-a', name: 'Music Library', slug: 'music', connected: true },
+    { id: 'b', link: 'linked-b', name: 'Archive', slug: 'archive' }
+  ];
+  const picked = { id: 'pick', label: 'Albums', matches };
+  const waiting = deferred();
+  const { controller, calls } = fixture((_, body) =>
+    body.action === 'pick' ? picked : waiting.promise
+  );
+  await controller.pick('custom');
+  const opened = [];
+  const choose = match => controller.openLinkedWorkspace(match, slug => opened.push(slug));
+  assert.equal(await choose({ id: 'a' }), false);
+  const opening = choose(matches[1]);
+  assert.equal(await choose(matches[0]), false);
+  waiting.resolve(picked);
+  assert.equal(await opening, true);
+  assert.deepEqual(opened, ['archive']);
+  assert.deepEqual(
+    calls.map(call => call.body.action),
+    ['pick', 'resume']
+  );
+});
+
+test('a lost link offers a new pick and a delayed link cannot navigate a replacement or another chat', async () => {
+  for (const change of ['links', 'removed', 'replaced', 'conversation']) {
+    const match = { id: 'a', link: 'old', slug: 'music', name: 'Music' };
+    const picked = { id: 'pick', label: 'Albums', matches: [match] };
+    const waiting = deferred();
+    const { controller, setId } = fixture((_, body) =>
+      body.action === 'pick' ? { ...picked } : waiting.promise
+    );
+    await controller.pick('custom');
+    const opening = controller.openLinkedWorkspace(match, () =>
+      assert.fail('navigated to a stale link')
+    );
+    if (change === 'conversation') {
+      setId('next');
+      controller.reset('next');
+    }
+    if (change === 'removed' || change === 'replaced') await controller.remove();
+    if (change === 'replaced') await controller.pick('custom');
+    if (change === 'links') waiting.reject(new Error('review changed'));
+    else waiting.resolve(picked);
+    assert.equal(await opening, false);
+    assert.equal(controller.state.needsPick, change === 'links');
+    assert.equal(controller.state.pending, false);
+    if (change === 'replaced') assert.ok(controller.state.picked);
+  }
+});
+
 test('consumed attachment stops supplying references without changing canonical history or writing detach', () => {
   let consumed = false;
   const calls = [];

@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, renameSync, mkdtempSync, realpathSync } from 'node:fs';
 import { arrivalState, choiceInventory } from './helpers/workspace-choice-state';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -239,6 +239,44 @@ test('the assistant links a folder without starting a hire or filename scan', as
   await expect(chip).toContainText('Albums');
   expect(await inventory()).toEqual(initial);
 
+  // Replace only the marked fixture folder and restore it after the refusal.
+  const syntheticHome = join(fixture!, 'home');
+  const { default_workspace_root: workspaceRoot } = await (
+    await request.get('/api/settings/workspace-root')
+  ).json();
+  expect(realpathSync(join(workspaceRoot, '..'))).toBe(realpathSync(syntheticHome));
+  expect(readFileSync(join(fixture!, '.search-first-fixture'), 'utf8')).toBe('synthetic-v1\n');
+  const albums = join(syntheticHome, 'Albums');
+  const parked = join(fixture!, 'original-albums');
+  const replacement = mkdtempSync(join(fixture!, 'replacement-'));
+  await guide();
+  renameSync(albums, parked);
+  try {
+    renameSync(replacement, albums);
+    try {
+      const refusal = page.waitForResponse(r => r.url().endsWith('/folder-context/attachment'));
+      await homeButton.press('Space');
+      expect((await refusal).status()).toBe(409);
+      await expect(modal).toBeHidden();
+      await page.locator('#personalAssistantLauncher').click();
+      await expect(input).toHaveValue('What’s in here?');
+      await expect(chip).toBeHidden();
+      const repick = page.getByRole('button', { name: 'Choose a folder again' });
+      await expect(repick).toBeVisible();
+      await page.screenshot({
+        path: `tasks/evidence-assistant-folder-handoff/${browserName}/repick.png`
+      });
+      expect(await inventory()).toEqual(initial);
+      await repick.click();
+    } finally {
+      renameSync(albums, replacement);
+    }
+  } finally {
+    renameSync(parked, albums);
+  }
+  await pickAlbums();
+  await expect(page.locator('#personalAssistantFolderPreview')).toBeHidden();
+
   const look = picked.getByRole('button', { name: 'Look at names and counts' });
   await look.click();
   await expect(picked).toContainText('one-time local look');
@@ -298,6 +336,23 @@ test('the assistant links a folder without starting a hire or filename scan', as
   await expect
     .poll(async () => (await inventory()).workspaces.length)
     .toBe(initial.workspaces.length + 1);
+
+  const music = (await page.locator('body').getAttribute('data-workspace-id'))!;
+  const links = (await (await request.get(`/api/workspaces/${music}/directories`)).json())
+    .directories;
+  expect(links.filter((link: { path: string }) => link.path === albums)).toHaveLength(1);
+  const createdInventory = await inventory();
+  await page.goto('/?panel=today&folder=explore');
+  await pickAlbums();
+  await expect(picked).toContainText('Albums is linked to Music Library.');
+  await expect(picked.getByRole('button', { name: 'Show me where' })).toBeHidden();
+  await expect(look).toBeVisible();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/linked.png`
+  });
+  await picked.getByRole('button', { name: 'Open Music Library' }).press('Enter');
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', music);
+  expect(await inventory()).toEqual(createdInventory);
 
   // The Files card still owns compact creation, receipt recovery and optional staffing.
   await page.goto('/?view=tree');
@@ -375,6 +430,30 @@ test('the assistant links a folder without starting a hire or filename scan', as
   await match.getByRole('button', { name: 'Allow filename search' }).click();
   await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Downloads');
   expect((await sources())[0].workspace.id).toBe(id);
+  // A second exact link leaves the existing Files connection with Reading inbox.
+  expect(
+    (
+      await request.post(`/api/workspaces/${music}/directories`, {
+        data: { name: 'Downloads', path: join(syntheticHome, 'Downloads') }
+      })
+    ).ok()
+  ).toBeTruthy();
+  const linkedInventory = await inventory();
+  const [index] = await sources();
+  await page.goto('/?panel=today&folder=explore');
+  await host.getByRole('button', { name: 'Downloads', exact: true }).click();
+  await expect(picked).toContainText('Choose one to open.');
+  await expect(picked.getByRole('button', { name: 'Open Reading inbox' })).toBeVisible();
+  await expect(look).toBeVisible();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/multiple-links.png`
+  });
+  await picked.getByRole('button', { name: 'Open Music Library' }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', music);
+  expect(await inventory()).toEqual(linkedInventory);
+  expect(await sources()).toMatchObject([
+    { id: index.id, workspace: index.workspace, generation: index.generation }
+  ]);
   await page.goto('/?panel=today&folder=explore');
   await host.getByRole('button', { name: /Hire an agent or explore a file/ }).click();
   await page.locator('#personalAssistantFolderChips [data-chip="downloads"]').click();

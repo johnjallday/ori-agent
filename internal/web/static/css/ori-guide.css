@@ -1530,6 +1530,12 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   margin: 6px 0;
 }
 
+.personal-assistant-folder-context__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .personal-assistant-folder-context summary {
   cursor: pointer;
   min-height: 44px;

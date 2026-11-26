@@ -43,6 +43,7 @@ export function createFolderContextController({
     draftId: uuid(),
     revision: '',
     picked: null, // local review only: never included in request() or browser storage
+    needsPick: false,
     observation: null,
     consentOpen: false,
     // The group Ori proposes for a folder that holds several projects, as the
@@ -85,6 +86,7 @@ export function createFolderContextController({
       draftId: uuid(),
       revision: saved.revision || '',
       picked: null,
+      needsPick: false,
       observation: saved.observation || null,
       consentOpen: false,
       structure: null,
@@ -113,15 +115,17 @@ export function createFolderContextController({
     if (signal?.aborted) return false;
     const generation = ++state.generation;
     const owner = state.conversationId;
-    const replacing = Boolean(state.picked);
+    const replacing = Boolean(state.picked || state.needsPick);
     state.pending = true;
     state.consentOpen = false;
+    state.needsPick = false;
     state.picked = null; // beginning a replacement invalidates the old Files review
     notify('Choosing a folder…');
     try {
       const review = await post(`${ENDPOINT}/attachment`, { ...target(), action: 'pick', kind });
       if (generation !== state.generation || owner !== currentId() || signal?.aborted) return false;
       if (!review?.id) {
+        state.needsPick = replacing;
         notify(
           replacing
             ? 'Choose the folder again to attach it. Your draft is unchanged.'
@@ -163,8 +167,7 @@ export function createFolderContextController({
       generation === state.generation &&
       state.conversationId === currentId() &&
       !isBusy();
-    const message =
-      'This folder selection changed. Choose the folder again; your draft is unchanged.';
+    const message = 'Choose the folder again to check its current links. Your draft is unchanged.';
     if (!valid()) throw new Error(message);
     try {
       const review = await post(`${ENDPOINT}/attachment`, {
@@ -177,9 +180,47 @@ export function createFolderContextController({
     } catch {
       if (valid()) {
         state.picked = null;
+        state.needsPick = true;
         notify(message);
       }
       throw new Error(message);
+    }
+  }
+  async function openLinkedWorkspace(match, navigate) {
+    const picked = state.picked;
+    if (!picked?.matches?.includes(match) || state.pending || isBusy()) return false;
+    const generation = state.generation;
+    state.pending = true;
+    notify(`Checking the link to ${match.name}…`);
+    try {
+      const review = await resumePick(picked);
+      if (
+        state.generation !== generation ||
+        state.picked !== picked ||
+        state.conversationId !== currentId() ||
+        isBusy()
+      )
+        return false;
+      const verified = review.matches?.find(
+        item => item.id === match.id && item.link === match.link
+      );
+      if (!verified?.slug) {
+        state.picked = null;
+        state.needsPick = true;
+        notify('The workspace link changed. Choose the folder again.');
+        return false;
+      }
+      navigate(verified.slug);
+      notify('');
+      return true;
+    } catch {
+      // resumePick reports a stale selection only to its original conversation.
+      return false;
+    } finally {
+      if (generation === state.generation) {
+        state.pending = false;
+        changed(state);
+      }
     }
   }
   function consent(open) {
@@ -210,6 +251,7 @@ export function createFolderContextController({
     } catch (error) {
       if (generation === state.generation && owner === currentId()) {
         state.picked = null;
+        state.needsPick = true;
         notify(error.message || 'Choose the folder again. Your draft is unchanged.');
       }
       return false;
@@ -257,6 +299,7 @@ export function createFolderContextController({
         return true;
       }
       state.picked = null;
+      state.needsPick = false;
       state.observation = result.observation;
       state.structure = result.structure?.version === 1 ? result.structure : null;
       state.declined = state.structure ? folderDecline(result.declined) : null;
@@ -597,6 +640,7 @@ export function createFolderContextController({
     state,
     pick,
     resumePick,
+    openLinkedWorkspace,
     consent,
     inspect,
     select,
@@ -1136,11 +1180,53 @@ const node = (tag, text, className = '') => {
   return element;
 };
 
+// Rebuild only when the selection changes so a status update keeps keyboard focus.
+let renderedMatches = null;
+function renderWorkspaceMatches(picked, pending) {
+  const host = elements.matches;
+  if (renderedMatches !== picked) {
+    renderedMatches = picked;
+    host.replaceChildren();
+    const matches = [...new Map((picked?.matches || []).map(m => [m.id, m])).values()];
+    if (matches.length) {
+      host.append(
+        node(
+          'p',
+          matches.length === 1
+            ? `${picked.label} is linked to ${matches[0].name}.`
+            : `${picked.label} is linked to several workspaces. Choose one to open.`
+        )
+      );
+      const actions = node('div', '', 'personal-assistant-folder-context__links');
+      host.append(actions);
+      for (const match of matches) {
+        const duplicateName = matches.some(
+          other => other.id !== match.id && other.name === match.name
+        );
+        const label = duplicateName ? `${match.name} (${match.slug})` : match.name;
+        const open = node('button', `Open ${label}`, 'personal-assistant-conversation__button');
+        open.type = 'button';
+        open.addEventListener('click', () =>
+          controller.openLinkedWorkspace(match, slug => {
+            if (!document.getElementById('personalAssistantPanel').hidden)
+              window.location.assign(`/workspaces/${encodeURIComponent(slug)}`);
+          })
+        );
+        actions.append(open);
+      }
+    }
+  }
+  host.hidden = !picked?.matches?.length;
+  for (const button of host.querySelectorAll('button')) button.disabled = pending;
+}
+
 function renderAttachment(state) {
   if (!elements) return;
   const view = folderComposerState(state, consumedSetup(state));
   const attached = Boolean(view?.observation || state?.picked);
   if (elements.picked) {
+    elements.repick.hidden = !state.needsPick;
+    renderWorkspaceMatches(state.consentOpen ? null : state.picked, state.pending);
     elements.picked.hidden = !state.picked || Boolean(state.observation);
     elements.workspace.hidden =
       !state.picked || state.consentOpen || Boolean(state.picked.matches?.length);
@@ -1351,6 +1437,8 @@ function init() {
     add,
     picked: document.getElementById('personalAssistantPickedFolder'),
     workspace: document.getElementById('personalAssistantFolderHandoff'),
+    matches: document.getElementById('personalAssistantFolderMatches'),
+    repick: document.getElementById('personalAssistantRepickFolder'),
     question: document.getElementById('personalAssistantPickedQuestion'),
     consent: document.getElementById('personalAssistantInspectConsent'),
     look: document.getElementById('personalAssistantLookAtNames'),
@@ -1419,6 +1507,9 @@ function init() {
     if (picked && !picked.matches?.length && !controller.state.pending)
       showChatWorkspaceGuide(window, document, picked.label, () => controller.resumePick(picked));
   });
+  elements.repick?.addEventListener('click', () =>
+    window.PersonalAssistantFolder?.openFromAttach?.()
+  );
   elements.look?.addEventListener('click', () => {
     controller.consent(true);
     document.getElementById('personalAssistantInspectOnce')?.focus();
