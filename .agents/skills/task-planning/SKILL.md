@@ -108,7 +108,8 @@ every feature, so a task list does not repeat them.
 3. Write the task list in the shape below: the scope and non-goals, the parent
    groups (usually three to five), the acceptance demo, and dependencies and
    ownership. Prefer thin end-to-end outcomes over architecture layers.
-4. Add a recommended model chip to every implementation parent group.
+4. Add a recommended model chip to every implementation parent group, and name
+   the builder model the chips imply (see _The builder model_).
 5. Present the task list, with the companion decision and its evidence, and
    wait for `Go`. When the file began as a planning starter, a draft saved for
    review before `Go` keeps its `ori-devflow: planning-starter` marker so
@@ -132,7 +133,9 @@ One paragraph: what ships and for whom, delivered as one PR to `dev`; what it
 builds on; and what it is not (the non-goals a builder would otherwise drift
 into).
 
-Implementation agent: `[configured primary, explicit override, or worktree-only]`.
+Implementation agent: `[claude, codex, pi, or worktree-only]`
+Implementation model: `[opus or sonnet; see The builder model]`
+
 Follow `.agents/skills/task-planning/SKILL.md` for operating mode, continuous
 execution, standing steps, dependency preflight, and PR readiness. The current
 authorized handoff supplies the mode; this document defines scope, not
@@ -142,19 +145,18 @@ committed; record decisions, real test counts, and evidence paths in
 
 ## Tasks
 
-- [ ] 1.0 First vertical outcome `Model: Sonnet 5`
+- [ ] 1.0 First vertical outcome `Model: opus`
   What a person can do, or what is true, when this group lands. Boundaries:
   what must keep working, the shortcut not to take, the states that must be
   handled. Settle first: the unknown that governs the rest, if there is one.
-- [ ] 2.0 Next vertical outcome `Model: Sonnet 5`
+- [ ] 2.0 Next vertical outcome `Model: sonnet`
   Outcome, boundaries, states.
-- [ ] 3.0 Verify the journey and deliver `Model: Sonnet 5`
+- [ ] 3.0 Verify the journey and open a PR `Model: sonnet`
   The journeys, layouts, and regressions this feature needs beyond the
   standing delivery steps. Ends when the PR is open: verify the gate, then
   open the PR with `wt pr`.
-- [ ] 4.0 Merge
-  A person reviews the open PR and squash-merges it to `dev`, then runs
-  `wt done <feature>`. Not an agent step.
+- [ ] 4.0 Merge: a person reviews the open PR and squash-merges it to `dev`
+  Then `wt done <feature>`. Not an agent step.
 
 ## Acceptance demo
 
@@ -170,8 +172,27 @@ path that must also hold.
 - Entry points: `[only where the obvious place is wrong or the owner is not discoverable, or none]`
 ```
 
-Keep each checkbox line to the group's title and model chip: progress displays
-and handoff previews show that line. The text under it is for the builder.
+The devtools read specific lines of this file, so their wording is part of the
+shape:
+
+- **`Implementation agent` and `Implementation model`** each start their own
+  line, with the value in backticks and nothing after it. `wt start` and a
+  remote Start launch the builder on that model; the Away dispatcher requires
+  both lines. Write the agent as exactly `claude`, `codex`, or `pi` (the
+  configured primary unless the user chose another), or `worktree-only` with no
+  model line when no agent should start.
+- **Each checkbox line** carries only the group's title and model chip.
+  Progress displays and handoff previews show that line, and the devtools
+  classify it to decide what an unattended agent may continue with. The text
+  under it is for the builder and is not classified.
+- **The last agent group's title says `open a PR`, and the merge line keeps its
+  sentence on the checkbox line.** Those words are what stop an unattended
+  agent before the PR and the merge. A title that names a demo, a sign-off or
+  approval, a credential, a release, or a deploy is treated as a person's too,
+  so keep those words out of the title of a group the builder should do.
+- **A task list queued for the Away dispatcher** adds a `## Relevant Files`
+  section listing the paths it expects to change. The dispatcher's overlap
+  check reads only that section, and a plan without one is never blocked by it.
 
 ### Writing a parent group
 
@@ -385,19 +406,19 @@ repository-reading and coordination tax. Optimize first by routing the smallest
 uncertain unit to the right model.
 
 1. Keep one primary integration owner for a feature branch.
-2. Start the feature session on the balanced tier and keep it there, whatever
-   chips the groups carry (see _Model recommendations_). A mid-session model
-   switch needs a person and re-reads the whole context uncached, so do not
-   plan on one.
+2. Start the feature session on the task list's `Implementation model` and keep
+   it there, whatever chips the groups carry (see _Model recommendations_). A
+   mid-session model switch needs a person and re-reads the whole context
+   uncached, so do not plan on one.
 3. Use a short-lived subagent for a bounded research spike, test matrix, focused
    review, or other output that can return as findings without editing shared
    product files.
 4. Use a persistent separate role only for a genuinely independent long-running
    workstream or repeated review responsibility.
-5. Route deep models to specific decision-bearing tasks. For a deep chip or a
-   named hotspot, a findings-only deep-tier subagent settles the contract and
-   the owner implements it on the balanced tier. Escalate the same way when the
-   same check fails twice with no new approach.
+5. Route stronger models to specific decision-bearing tasks. For a chip above
+   the builder's model or a named hotspot, a findings-only subagent on that
+   model settles the contract and the owner implements it. Escalate the same
+   way when the same check fails twice with no new approach.
 6. Allow only one active writer in a shared worktree. Delegated edits must be
    sequential and explicitly file-bounded; concurrent coding requires separate
    branches, file-disjoint ownership, independent verification, and a planned
@@ -436,11 +457,13 @@ worth keeping afterwards belongs in the PR body or the findings log.
   less than a second context.
 - **Exploration:** "where does this live" sweeps and file maps at the start of a
   group. Findings only, no edits.
-- **Deep consult:** a deep chip, a named hotspot, or the same check failing
-  twice. The owner sends one decision or one failure with what it has already
-  read and ruled out; the lane reads the code on the deep tier and returns a
-  contract of at most 60 lines. Read-only. The owner implements the contract
-  and resumes the same consult if an invariant proves wrong.
+- **Deep consult:** a chip above the builder's model, a named hotspot, or the
+  same check failing twice. The owner sends one decision or one failure with
+  what it has already read and ruled out; the lane reads the code on the
+  stronger model and returns a contract of at most 60 lines. Read-only. The
+  owner implements the contract and resumes the same consult if an invariant
+  proves wrong. A consult on the builder's own model buys a fresh context and
+  nothing else, so it is rarely worth one.
 
 Parent groups are never separate agents: implementation is edit-heavy and needs
 the owner's accumulated context. A harness without a lane runs that step inline
@@ -573,31 +596,45 @@ Split directly into serialized PRs to `dev` only when every slice is:
 
 ## Model recommendations
 
-Choose by uncertainty, not line count:
+Chips and the launch line use Claude Code's model aliases. An alias follows its
+tier's current model, so a task list does not go stale when versions change.
+Choose by risk and uncertainty, not line count:
 
-- **Haiku 4.5** — mechanical changes with a complete pattern
-- **Sonnet 5** — normal well-scoped implementation
-- **Opus 5 / Fable 5** — ambiguous, cross-cutting, architectural, concurrent,
-  performance-sensitive, or security-sensitive work
+- `haiku`: mechanical changes with a complete pattern
+- `sonnet`: work that follows a pattern already in the code, such as UI
+  polish, copy, documentation, and mechanical refactors
+- `opus`: permissions or authorization, data writes or migrations,
+  concurrency, a cross-repository contract, or a `Settle first` unknown; also
+  the choice when unsure
+- `fable`: an unresolved architectural or cross-cutting decision
 
-When model names change, map these to fast, balanced, and deep-reasoning tiers.
+### The builder model
 
-Feature sessions start on Sonnet 5. The `[primary] model` default in
-`.herdr/devflow.toml` sets it for `wt start`; a session started by hand picks
-the same model. A chip is advice to the owner, not a launch setting: a deep chip
-means a deep-tier consult for that group's hotspot (see _Execution topology and
-delegation_), never a deep-tier session for the whole group. Start a session on
-the deep tier (`wt start --model`) only when most groups carry a deep chip.
+Every task list names the model its builder session launches on, in its
+`Implementation model` line. The planner chooses it so that nobody has to at
+launch: `wt start` and a remote Start use that line, `--model` overrides it for
+one run, and the `[primary] model` in `.herdr/devflow.toml` applies only when a
+task list names none or the work is ad-hoc (`wt new`).
 
-A task list that states outcomes leaves the step decisions to the owner. On the
-balanced tier, send the decision-bearing ones to a deep consult. Do not
-compensate by writing steps into the task list.
+The builder model is the strongest chip among the implementation groups, capped
+at `opus`: `opus` when any group carries an `opus` or `fable` chip, otherwise
+`sonnet`. Name `fable` only when most groups carry a `fable` chip. For a
+`codex` or `pi` builder, write that integration's own model id.
+
+The session stays on that model for the whole feature. A chip is advice to the
+owner, not a launch setting: a chip above the builder's model means a consult
+on that model for the group's hotspot (see _Execution topology and
+delegation_), never a stronger session for the whole group.
+
+A task list that states outcomes leaves the step decisions to the owner. Send
+the decision-bearing ones to a consult on a stronger model. Do not compensate
+by writing steps into the task list.
 
 A separate agent on the same model is usually more expensive than staying in the
 owner's context because it must rebuild that context. Use separate contexts for
 isolation or durable independent work, and subagents for narrow outputs. Budget
-the deep tier around unresolved decisions rather than whole parent groups
-whenever possible.
+the strongest models around unresolved decisions rather than whole parent
+groups whenever possible.
 
 ## Continuous execution
 

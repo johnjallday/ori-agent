@@ -166,6 +166,75 @@ func TestTaskPlanningDefaultTemplateStatesOutcomesNotSteps(t *testing.T) {
 	}
 }
 
+// The devtools read specific lines of a task list: the builder's agent and
+// model, which `wt start`, a remote Start and the Away dispatcher launch on,
+// and each checkbox line, which they classify to decide what an unattended
+// agent may continue with. Those parsers live in the companion repository, so
+// the wording they depend on is pinned here.
+func TestTaskPlanningTemplateKeepsTheLinesDevtoolsRead(t *testing.T) {
+	lines := strings.Split(taskListTemplate(t), "\n")
+
+	// Each label starts exactly one line and its value is the backticked rest
+	// of that line: a trailing period or prose would become part of the value.
+	for _, label := range []string{"Implementation agent: `", "Implementation model: `"} {
+		var matches []string
+		for _, line := range lines {
+			if strings.HasPrefix(line, label) {
+				matches = append(matches, line)
+			}
+		}
+		if len(matches) != 1 || !strings.HasSuffix(matches[0], "`") {
+			t.Errorf("want exactly one %q line ending in a backtick, got %q", label, matches)
+		}
+	}
+
+	// A checkbox line with no sub-tasks is the unit the devtools classify. The
+	// last agent group must read as opening a PR and the merge line as a
+	// squash-merge, or an unattended agent would be told they are safe work.
+	var agentGroups []string
+	var merge string
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "- [ ] ") && strings.Contains(line, "`Model: "):
+			agentGroups = append(agentGroups, line)
+		case strings.HasPrefix(line, "- [ ] "):
+			merge = line
+		}
+	}
+	if len(agentGroups) < 2 {
+		t.Fatalf("want at least two agent groups with model chips, got %q", agentGroups)
+	}
+	if last := agentGroups[len(agentGroups)-1]; !strings.Contains(strings.ToLower(last), "open a pr") {
+		t.Errorf("the last agent group's checkbox line does not say it opens a PR: %q", last)
+	}
+	for _, implementation := range agentGroups[:len(agentGroups)-1] {
+		if strings.Contains(strings.ToLower(implementation), "open a pr") {
+			t.Errorf("an implementation group's checkbox line reads as opening a PR: %q", implementation)
+		}
+	}
+	if !strings.Contains(merge, "squash-merges") || !strings.Contains(strings.ToLower(merge), "open pr") {
+		t.Errorf("the merge checkbox line lost the wording that marks it a person's step: %q", merge)
+	}
+
+	protocol := taskPlanningProtocol(t)
+	for _, required := range []string{
+		"### The builder model",
+		"`wt start` and a remote Start use that line",
+		"strongest chip among the implementation groups, capped at `opus`",
+		"## Relevant Files",
+	} {
+		if !strings.Contains(strings.Join(strings.Fields(protocol), " "), required) {
+			t.Errorf("missing builder-model or devtools rule: %q", required)
+		}
+	}
+	// Chips and the launch line use aliases; a versioned name goes stale.
+	for _, stale := range []string{"Sonnet 5", "Opus 5", "Haiku 4.5", "Fable 5"} {
+		if strings.Contains(protocol, stale) {
+			t.Errorf("the protocol names a model version: %q", stale)
+		}
+	}
+}
+
 func TestTaskPlanningTemplateSeparatesOpeningThePRFromTheMerge(t *testing.T) {
 	template := taskListTemplate(t)
 	// Line wrapping is not part of the contract.
@@ -183,9 +252,9 @@ func TestTaskPlanningTemplateSeparatesOpeningThePRFromTheMerge(t *testing.T) {
 	previous := -1
 	for _, checkpoint := range []string{
 		"- [ ] 1.0 First vertical outcome",
-		"Verify the journey and deliver",
+		"Verify the journey and open a PR",
 		"verify the gate, then open the PR with `wt pr`",
-		"- [ ] 4.0 Merge A person reviews the open PR and squash-merges it to `dev`",
+		"- [ ] 4.0 Merge: a person reviews the open PR and squash-merges it to `dev`",
 		"`wt done <feature>`",
 		"Not an agent step",
 	} {
