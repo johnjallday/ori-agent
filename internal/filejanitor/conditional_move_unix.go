@@ -169,27 +169,34 @@ func checkSource(dirfd int, name string, rootDev uint64, expect Fingerprint) err
 
 // resolveAgain re-opens the root and both folders by path and requires the same
 // identities. It is the check that a folder was not swapped or moved while the
-// file was in flight.
+// file was in flight. For a send, To is re-opened under the receiving folder.
 func resolveAgain(m ConditionalMove) error {
-	root, err := openRoot(m.Root)
+	if err := resolveUnder(m.Root, m.RootID, m.From); err != nil {
+		return err
+	}
+	toRoot, toRootID := m.toRoot()
+	return resolveUnder(toRoot, toRootID, m.To)
+}
+
+// resolveUnder opens root by path, requires its identity, and requires ref to
+// resolve under it to the same folder.
+func resolveUnder(rootPath, rootID string, ref DirRef) error {
+	root, err := openRoot(rootPath)
 	if err != nil {
 		return err
 	}
 	defer root.close()
-	if statID(&root.st) != m.RootID {
+	if statID(&root.st) != rootID {
 		return ErrMoveParentChanged
 	}
-	rootDev := uint64(root.st.Dev) // #nosec G115 -- device numbers compare as numbers
-	for _, ref := range []DirRef{m.From, m.To} {
-		dir, err := openRel(root.fd, rootDev, ref.Rel)
-		if err != nil {
-			return err
-		}
-		id := statID(&dir.st)
-		dir.close()
-		if id != ref.ID {
-			return ErrMoveParentChanged
-		}
+	dir, err := openRel(root.fd, uint64(root.st.Dev), ref.Rel) // #nosec G115 -- device numbers compare as numbers
+	if err != nil {
+		return err
+	}
+	id := statID(&dir.st)
+	dir.close()
+	if id != ref.ID {
+		return ErrMoveParentChanged
 	}
 	return nil
 }
@@ -365,12 +372,34 @@ func (p *platformMover) MoveIfUnchanged(ctx context.Context, m ConditionalMove) 
 	}
 	rootDev := uint64(root.st.Dev) // #nosec G115 -- device numbers compare as numbers
 
+	// For a send, To lives under the receiving folder, opened and checked the same
+	// way. It must be on the sending folder's disk: a move between disks would be a
+	// copy, and the kernel rename below would refuse it anyway.
+	toRootFD := root.fd
+	if m.crossRoot() {
+		dest, err := openRoot(m.DestRoot)
+		if err != nil {
+			return Fingerprint{}, err
+		}
+		defer dest.close()
+		if statID(&dest.st) != m.DestRootID {
+			return Fingerprint{}, ErrMoveParentChanged
+		}
+		if err := cachedVerdict(m.DestRootID, dest.fd); err != nil {
+			return Fingerprint{}, err
+		}
+		if uint64(dest.st.Dev) != rootDev { // #nosec G115 -- device numbers compare as numbers
+			return Fingerprint{}, ErrMoveCrossDevice
+		}
+		toRootFD = dest.fd
+	}
+
 	from, err := openRel(root.fd, rootDev, m.From.Rel)
 	if err != nil {
 		return Fingerprint{}, err
 	}
 	defer from.close()
-	to, err := openRel(root.fd, rootDev, m.To.Rel)
+	to, err := openRel(toRootFD, rootDev, m.To.Rel)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -427,6 +456,9 @@ func (p *platformMover) refused(m ConditionalMove, from, to heldDir, err error) 
 		return ErrMoveSourceChanged
 	case unsupportedRename(err):
 		markUnsupported(m.RootID)
+		if m.crossRoot() {
+			markUnsupported(m.DestRootID)
+		}
 		return fmt.Errorf("%w: the folder's filesystem refused a move that cannot replace", ErrMoveUnsupported)
 	}
 	// An unexpected error: trust the disk, not the error.
