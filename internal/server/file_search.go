@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/filesearch"
@@ -19,7 +20,7 @@ func (b *ServerBuilder) initializeFileSearch() {
 	if runtime.GOOS != "darwin" || b.sessionStore == nil || b.sessionStore.DB() == nil || b.configManager == nil {
 		return
 	}
-	service, err := filesearch.New(context.Background(), filesearch.Options{DB: b.sessionStore.DB().DB, Gate: b.resetWork, Policy: func() filesearch.Policy {
+	policy := func() filesearch.Policy {
 		home, _ := os.UserHomeDir()
 		protected := []string{config.DefaultDataDir(), config.DefaultWorkspaceRoot(), config.ResolveWorkspaceRoot(b.configManager.GetWorkspaceRoot()), config.ResolveTemplatesRoot(b.configManager.GetTemplatesRoot()), config.ResolveVaultRoot(b.configManager.GetVaultRoot())}
 		if p := os.Getenv("AGENT_STORE_PATH"); p != "" {
@@ -30,7 +31,19 @@ func (b *ServerBuilder) initializeFileSearch() {
 			protected = append(protected, filepath.Dir(abs))
 		}
 		return filesearch.Policy{Home: home, Protected: protected}
-	}, Pick: pickSearchFolder, ValidLink: func(owner, path string, m filesearch.WorkspaceMatch) bool {
+	}
+	localOwner := func(r *http.Request, owner string) bool {
+		if !localSearchPage(r) || !b.server.folderSearchReady() {
+			return false
+		}
+		current, e := learningmissionshttp.LocalOwner(r, b.userProvider, r.Method != http.MethodGet)
+		site := r.Header.Get("Sec-Fetch-Site")
+		return e == nil && current == owner && (site == "" || site == "same-origin")
+	}
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetGuidedDocumentsLook(localOwner, func(path string, at time.Time) string { return policy().DocumentsWitness(path, at) })
+	}
+	service, err := filesearch.New(context.Background(), filesearch.Options{DB: b.sessionStore.DB().DB, Gate: b.resetWork, Policy: policy, Pick: pickSearchFolder, ValidLink: func(owner, path string, m filesearch.WorkspaceMatch) bool {
 		if b.workspaceFileStore == nil {
 			return false
 		}
@@ -44,14 +57,7 @@ func (b *ServerBuilder) initializeFileSearch() {
 	if err == nil {
 		b.server.fileSearch = service
 		if b.sessionHandler != nil {
-			b.sessionHandler.SetFolderSearch(service, func(r *http.Request, owner string) bool {
-				if !localSearchPage(r) || !b.server.folderSearchReady() {
-					return false
-				}
-				current, e := learningmissionshttp.LocalOwner(r, b.userProvider, r.Method != http.MethodGet)
-				site := r.Header.Get("Sec-Fetch-Site")
-				return e == nil && current == owner && (site == "" || site == "same-origin")
-			})
+			b.sessionHandler.SetFolderSearch(service, localOwner)
 		}
 	}
 }

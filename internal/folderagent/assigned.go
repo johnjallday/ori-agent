@@ -46,7 +46,15 @@ func (s *Service) StartAssigned(ctx context.Context, owner, id, agent, link, bri
 		_ = s.deps.Tickets.Finish(id, ticket, "Could not record the ticket. Nothing was scanned.", true)
 		return err
 	}
-	s.pin(id, agent, false)
+	if pins, ok := s.deps.Pins.(interface{ PinAssigned(string, string) error }); ok {
+		if err = pins.PinAssigned(id, agent); err != nil {
+			const failure = "The folder binding or agent toolbox changed. Nothing was scanned."
+			_, saveErr := s.deps.Store.Update(id, func(r *Record) error { r.State, r.Failure = StateFailed, failure; return nil })
+			return errors.Join(err, saveErr, s.deps.Tickets.Finish(id, ticket, failure, true))
+		}
+	} else {
+		s.pin(id, agent, false)
+	}
 	s.startLook(id, nil)
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -14,16 +15,13 @@ import (
 // further. The binding itself never changes: the pin is what narrows, and the
 // runtime intersects it with the binding's current allowlist.
 var (
-	folderAgentListingTools = []string{
-		"list_directory", "list_directory_with_sizes", "directory_tree", "search_files",
-		"get_file_info", "list_allowed_directories",
-	}
+	folderAgentListingTools = folderagent.ListingTools()
 	folderAgentContentTools = []string{"read_file", "read_text_file", "read_media_file", "read_multiple_files"}
 )
 
 const (
 	folderAgentToolboxName       = "First look"
-	folderAgentToolboxProvenance = "folder_agent"
+	folderAgentToolboxProvenance = folderagent.FirstLookProvenance
 )
 
 var errFolderAgentNoAnchorBinding = errors.New("the workspace has no anchor binding")
@@ -111,6 +109,22 @@ func (p folderAgentPins) Release(workspaceID, agentName string) error {
 			return nil
 		}
 		return ws.DeleteToolboxAssignment(instance.ID)
+	})
+}
+
+// The workspace can change after the start request and before this write.
+func (p folderAgentPins) PinAssigned(workspaceID, agentName string) error {
+	return p.store.Update(workspaceID, func(ws *workspace.Workspace) error {
+		lead, ok := ws.FindUniqueAgentInstance(agentName, "")
+		if !ok {
+			return errors.New("the assigned agent changed")
+		}
+		for _, b := range ws.GetMCPBindings() {
+			if b.Alias == workspace.AnchorFolderMCPAlias && b.Enabled && folderagent.ListingPinAllowed(ws, lead.ID, b.ID) {
+				return pinFolderAgentToolbox(ws, agentName, false)
+			}
+		}
+		return errors.New("the anchor binding or assigned toolbox changed")
 	})
 }
 

@@ -131,6 +131,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		subPath := parts[1]
 
 		switch subPath {
+		case "verify-documents-folder":
+			h.handleVerifyDocumentsFolder(w, r, id)
+			return
 		case "folder-manager-look":
 			h.handleFolderManagerLook(w, r, id)
 			return
@@ -1015,6 +1018,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		// reserved identity before constructing it, not a throwaway UUID.
 		if op := creationOperationFrom(r.Context()); op != nil {
 			ws.ID = op.WorkspaceID
+			if req.GuidedPurpose == documentsPurpose && h.guidedLookAllowed != nil && h.guidedLookAllowed(r, op.Owner) && h.documentsWitness != nil {
+				op.documentsWitness = h.documentsWitness(req.AnchorPath, time.Time{})
+			}
 		}
 		if err := provisionAnchoredScaffolding(ws, req.AnchorPath); err != nil {
 			_ = orihttp.RespondInternalError(w, "Failed to prepare the anchored workspace")

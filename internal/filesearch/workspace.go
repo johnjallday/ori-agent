@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/knownfolder"
 )
 
 // WorkspaceMatch names a persisted, currently owned external link. For older
@@ -81,6 +83,21 @@ func (s *Service) matchesLocked(ctx context.Context, owner string, c choice) ([]
 		return nil, ErrUnavailable
 	}
 	return slices.DeleteFunc(out, func(m WorkspaceMatch) bool { return !s.ValidLink(owner, c.root, m) }), nil
+}
+
+// DocumentsWitness inspects just the known directory, never its entries. It
+// requires no search service, choice or grant. A legacy caller can additionally
+// rule out a directory born after the original anchor was created.
+func (g Policy) DocumentsWitness(path string, existedAt time.Time) string {
+	known, err := knownfolder.ResolveForAnchor(g.Home, "documents")
+	if err != nil || path != known || !g.allows(path) {
+		return ""
+	}
+	id, err := rootWitness(path)
+	if err != nil || (!existedAt.IsZero() && !rootExistedAt(path, id, existedAt)) {
+		return ""
+	}
+	return id
 }
 
 // StaffingFolderKind recognizes only a current link with an identity saved by

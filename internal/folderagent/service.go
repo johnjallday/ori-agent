@@ -567,16 +567,9 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 		}
 	}
 	root, err := s.deps.Workspaces.AnchorRoot(workspaceID)
-	if rec.AssignedLink != "" {
-		if s.deps.AssignedRoot == nil {
-			fail("The folder assignment could not be verified.", nil)
-			return
-		}
-		verified, _, ok := s.deps.AssignedRoot(ctx, rec.OwnerUserID, workspaceID, rec.AgentName, rec.AssignedLink)
-		if !ok || verified != root {
-			fail("The folder or its assigned agent changed. Nothing was scanned.", nil)
-			return
-		}
+	if rec.AssignedLink != "" && !s.assignedRootCurrent(ctx, rec, root) {
+		fail("The folder or its assigned agent changed. Nothing was scanned.", nil)
+		return
 	}
 	if err != nil || root == "" {
 		fail("The folder is no longer where it was.", err)
@@ -611,6 +604,10 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	}
 	if err != nil {
 		fail("Ori could not list this folder.", err)
+		return
+	}
+	if rec.AssignedLink != "" && !s.assignedRootCurrent(ctx, rec, root) {
+		fail("The folder assignment changed. No look was sent to the model.", nil)
 		return
 	}
 	// The walk is done; the search and the turn come next. Until the turn
@@ -846,9 +843,12 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 		AskAllowed: ask, Hint: rec.Hint, Policy: rec.RootPolicy,
 	})
 	var mu sync.Mutex
-	look := func(_ context.Context, folder string) (string, error) {
+	look := func(ctx context.Context, folder string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
+		if rec.AssignedLink != "" && !s.assignedRootCurrent(ctx, rec, root) {
+			return "", ErrWrongState
+		}
 		s.narrate(rec.WorkspaceID, ProgressFolder(folder, rec.FolderName))
 		result, err := foldermap.Look(root, m, folder)
 		if err != nil {
@@ -976,6 +976,14 @@ func provenanceWord(text string) string {
 		return "unknown"
 	}
 	return text
+}
+
+func (s *Service) assignedRootCurrent(ctx context.Context, rec *Record, root string) bool {
+	if s.deps.AssignedRoot == nil {
+		return false
+	}
+	verified, _, ok := s.deps.AssignedRoot(ctx, rec.OwnerUserID, rec.WorkspaceID, rec.AgentName, rec.AssignedLink)
+	return ok && verified == root
 }
 
 // Record reads a user's record.

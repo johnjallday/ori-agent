@@ -39,6 +39,8 @@ type Handler struct {
 	folderManager           *folderagent.Service
 	folderSearch            *filesearch.Service
 	folderSearchAllowed     func(*http.Request, string) bool
+	guidedLookAllowed       func(*http.Request, string) bool
+	documentsWitness        func(string, time.Time) string
 	hireConversationAllowed func(context.Context, string, string) bool
 	store                   session.HybridStore
 	workspaceStore          *workspace.FileStore // optional folder-based workspace store

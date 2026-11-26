@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 96
+const schemaVersion = 97
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -263,6 +263,11 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
             state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','dismissed','claiming','accepted')),
             workspace_id TEXT NOT NULL DEFAULT '', ticket_id TEXT NOT NULL DEFAULT '',
             PRIMARY KEY(note_key,revision,action_id))`)
+		return err
+	case 97:
+		// Local-only directory identity. NULL on pre-update receipts; never
+		// synthesize historical proof from the directory at migration time.
+		_, err := db.ExecContext(ctx, `ALTER TABLE workspace_creation_operations ADD COLUMN documents_witness TEXT`)
 		return err
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
