@@ -58,6 +58,113 @@ function fixture(post) {
   };
 }
 
+test('a passive pick supplies no send reference; cancel and remove do not inspect or write', async () => {
+  const picked = { id: 'review', label: 'Albums' };
+  const results = [picked, null, picked];
+  const { controller, calls } = fixture(async () => results.shift());
+  assert.equal(await controller.pick('custom'), true);
+  assert.deepEqual(controller.state.picked, picked);
+  assert.equal(controller.request(), null);
+  assert.equal(await controller.pick('custom'), false);
+  assert.match(controller.state.notice, /Choose the folder again/);
+  assert.equal(controller.state.picked, null);
+  await controller.pick('custom');
+  await controller.remove();
+  assert.equal(controller.state.picked, null);
+  assert.deepEqual(
+    calls.map(c => c.body.action),
+    ['pick', 'pick', 'pick']
+  );
+});
+
+test('explicit consent is required, and removing during inspection discards its result', async () => {
+  const waiting = deferred();
+  const { controller, calls } = fixture((_, body) =>
+    body.action === 'pick' ? { id: 'review', label: 'Albums' } : waiting.promise
+  );
+  await controller.pick('custom');
+  assert.equal(await controller.inspect(), false);
+  controller.consent(true);
+  controller.consent(false);
+  assert.equal(await controller.inspect(), false);
+  controller.consent(true);
+  const inspection = controller.inspect();
+  assert.equal(await controller.inspect(), false);
+  await controller.remove();
+  waiting.resolve({ ...observation('snap'), discussion_only: true });
+  assert.equal(await inspection, false);
+  assert.equal(controller.request(), null);
+  assert.deepEqual(
+    calls.map(c => c.body.action),
+    ['pick', 'inspect']
+  );
+});
+
+test('a second pick while choosing or a late result after a switch cannot attach', async () => {
+  const waiting = deferred();
+  const { controller, calls, setId } = fixture(() => waiting.promise);
+  const first = controller.pick('custom');
+  assert.equal(await controller.pick('documents'), false);
+  setId('another');
+  controller.reset('another');
+  waiting.resolve({ id: 'review', label: 'Albums' });
+  assert.equal(await first, false);
+  assert.equal(controller.state.picked, null);
+  assert.equal(calls.length, 1);
+});
+
+test('opening a matched workspace rechecks the chosen link once and leaves the index alone', async () => {
+  const matches = [
+    { id: 'a', link: 'linked-a', name: 'Music Library', slug: 'music', connected: true },
+    { id: 'b', link: 'linked-b', name: 'Archive', slug: 'archive' }
+  ];
+  const picked = { id: 'pick', label: 'Albums', matches };
+  const waiting = deferred();
+  const { controller, calls } = fixture((_, body) =>
+    body.action === 'pick' ? picked : waiting.promise
+  );
+  await controller.pick('custom');
+  const opened = [];
+  const choose = match => controller.openLinkedWorkspace(match, slug => opened.push(slug));
+  assert.equal(await choose({ id: 'a' }), false);
+  const opening = choose(matches[1]);
+  assert.equal(await choose(matches[0]), false);
+  waiting.resolve(picked);
+  assert.equal(await opening, true);
+  assert.deepEqual(opened, ['archive']);
+  assert.deepEqual(
+    calls.map(call => call.body.action),
+    ['pick', 'resume']
+  );
+});
+
+test('a lost link offers a new pick and a delayed link cannot navigate a replacement or another chat', async () => {
+  for (const change of ['links', 'removed', 'replaced', 'conversation']) {
+    const match = { id: 'a', link: 'old', slug: 'music', name: 'Music' };
+    const picked = { id: 'pick', label: 'Albums', matches: [match] };
+    const waiting = deferred();
+    const { controller, setId } = fixture((_, body) =>
+      body.action === 'pick' ? { ...picked } : waiting.promise
+    );
+    await controller.pick('custom');
+    const opening = controller.openLinkedWorkspace(match, () =>
+      assert.fail('navigated to a stale link')
+    );
+    if (change === 'conversation') {
+      setId('next');
+      controller.reset('next');
+    }
+    if (change === 'removed' || change === 'replaced') await controller.remove();
+    if (change === 'replaced') await controller.pick('custom');
+    if (change === 'links') waiting.reject(new Error('review changed'));
+    else waiting.resolve(picked);
+    assert.equal(await opening, false);
+    assert.equal(controller.state.needsPick, change === 'links');
+    assert.equal(controller.state.pending, false);
+    if (change === 'replaced') assert.ok(controller.state.picked);
+  }
+});
+
 test('consumed attachment stops supplying references without changing canonical history or writing detach', () => {
   let consumed = false;
   const calls = [];

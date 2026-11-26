@@ -106,7 +106,7 @@ func TestExternalAnchorAndSearchHaveIndependentWriteBoundaries(t *testing.T) {
 }
 
 func TestSearchableAnchorUsesOneReviewedSelection(t *testing.T) {
-	for _, scenario := range []string{"allow", "deny", "failed grant"} {
+	for _, scenario := range []string{"allow", "deny", "failed grant", "link appeared"} {
 		consent := scenario != "deny"
 		h, managed, _, cleanup := templateTestEnv(t)
 		t.Cleanup(cleanup)
@@ -147,6 +147,25 @@ func TestSearchableAnchorUsesOneReviewedSelection(t *testing.T) {
 		}
 		if ws, e := h.store.ListWorkspaces(t.Context()); e != nil || len(ws) != 0 {
 			t.Fatal("review created workspace", e)
+		}
+		if scenario == "link appeared" {
+			other, otherDigest := reviewCreationOperation(t, h, map[string]any{"name": "Existing archive", "anchor_path": root, "blank": true, "create_template_agents": false})
+			created, result := creationOperationRequest(t, h, http.MethodPost, "/"+other+"/confirm", map[string]any{"review_digest": otherDigest})
+			if created.Code != http.StatusCreated {
+				t.Fatalf("competing workspace: %d %s", created.Code, created.Body)
+			}
+			refused, _ := creationOperationRequest(t, h, http.MethodPost, "/"+op+"/confirm", map[string]any{"review_digest": digest})
+			if refused.Code != http.StatusConflict {
+				t.Fatalf("stale confirmation: %d %s", refused.Code, refused.Body)
+			}
+			all, err := h.store.ListWorkspaces(t.Context())
+			if err != nil || len(all) != 1 || all[0].ID != result["folder"].(map[string]any)["id"] {
+				t.Fatal("stale confirmation changed the workspace inventory", err)
+			}
+			if ss, err := s.Sources(t.Context(), "local"); err != nil || len(ss) != 0 {
+				t.Fatal("stale confirmation granted search", err)
+			}
+			continue
 		}
 		if scenario == "failed grant" {
 			if _, err := s.DB.Exec(`CREATE TRIGGER fail_grant BEFORE INSERT ON filename_sources BEGIN SELECT RAISE(ABORT,'fixture grant failure'); END`); err != nil {

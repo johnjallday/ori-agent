@@ -75,16 +75,17 @@ type Coverage struct {
 // Observation is a dated summary, not an exhaustive inventory or authority to
 // inspect again. ContentsRead is intentionally not a field: contents are never read.
 type Observation struct {
-	Version   int       `json:"version"`
-	ID        string    `json:"id"`
-	Folder    string    `json:"folder"`
-	ScannedAt time.Time `json:"scanned_at"`
-	Entries   int       `json:"entries"`
-	Files     int       `json:"files"`
-	Kinds     []Kind    `json:"kinds"`
-	Projects  []Project `json:"projects"`
-	Coverage  Coverage  `json:"coverage"`
-	Tree      *Tree     `json:"tree,omitempty"`
+	DiscussionOnly bool      `json:"discussion_only,omitempty"` // an explicitly inspected chat attachment is never setup authority
+	Version        int       `json:"version"`
+	ID             string    `json:"id"`
+	Folder         string    `json:"folder"`
+	ScannedAt      time.Time `json:"scanned_at"`
+	Entries        int       `json:"entries"`
+	Files          int       `json:"files"`
+	Kinds          []Kind    `json:"kinds"`
+	Projects       []Project `json:"projects"`
+	Coverage       Coverage  `json:"coverage"`
+	Tree           *Tree     `json:"tree,omitempty"`
 }
 
 // Event is stored only through the internal canonical-message writer. A nil

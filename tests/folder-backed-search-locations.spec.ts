@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, renameSync, mkdtempSync, realpathSync } from 'node:fs';
 import { arrivalState, choiceInventory } from './helpers/workspace-choice-state';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -114,7 +114,7 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
   await expect(page.getByText('Research archive', { exact: true }).first()).toBeVisible();
 });
 
-test('the assistant links a folder without starting a hire or filename scan', async ({
+test('Home chat inspects an attachment or hands it to the real New Workspace button', async ({
   page,
   request,
   baseURL,
@@ -156,13 +156,262 @@ test('the assistant links a folder without starting a hire or filename scan', as
       staffing.push(r.url());
   });
   await page.goto('/?panel=today&folder=explore');
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-bs-theme',
+    browserName === 'webkit' ? 'dark' : 'light'
+  );
   const host = page.locator('#assistantExploreFolder');
-  await host.getByRole('button', { name: 'Documents', exact: true }).click();
-  const card = host.locator('section.explore-card');
-  await expect(card.getByRole('heading')).toHaveText('Create a workspace from Documents?');
-  await card.getByRole('button', { name: 'Cancel' }).click();
-  await expect(host.getByRole('button', { name: 'Documents', exact: true })).toBeFocused();
-  await host.getByRole('button', { name: 'Downloads', exact: true }).click();
+  const inventory = () => choiceInventory(request, join(fixture!, 'data'));
+  const initial = await inventory();
+  const audit = () =>
+    existsSync(join(fixture!, 'provider-audit.json'))
+      ? JSON.parse(readFileSync(join(fixture!, 'provider-audit.json'), 'utf8'))
+      : { requests: 0, hits: [] };
+  const baseline = audit(); // model configuration may have made its own readiness call
+  const pickAlbums = () => host.getByRole('button', { name: 'Choose another folder…' }).click();
+  await pickAlbums();
+  const chip = page.locator('#personalAssistantActiveFolder');
+  const input = page.locator('#personalAssistantInput');
+  const picked = page.locator('#personalAssistantPickedFolder');
+  await expect(chip).toHaveText(/Albums/);
+  await expect(picked).toContainText('What would you like to do with Albums?');
+  await expect(page.locator('#personalAssistantFolderPreview')).toBeHidden();
+  await expect(page.locator('section.explore-card')).toHaveCount(0);
+  await input.fill('What’s in here?');
+  await chip.getByRole('button').click();
+  await expect(chip).toBeHidden();
+  await expect(input).toHaveValue('What’s in here?');
+  await page.locator('#personalAssistantAttachMenu').click();
+  await page.locator('#personalAssistantFolderChip').click();
+  await pickAlbums();
+  await expect(chip).toContainText('Albums');
+  await expect(input).toHaveValue('What’s in here?');
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/attachment.png`
+  });
+  expect(await inventory()).toEqual(initial);
+
+  const homeButton = page.locator('#cockpitCreateWorkspaceBtn');
+  const modal = page.locator('#addFolderModal');
+  const hint = page.locator('#chatWorkspaceHint');
+  const guide = () => picked.getByRole('button', { name: 'Show me where' }).click();
+  const cancelWizard = async () => {
+    await modal.locator('[data-bs-dismiss="modal"]').filter({ visible: true }).first().click();
+    await expect(modal).toBeHidden();
+  };
+  const showPrefill = async () => {
+    await modal.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#workspaceAnchorPath')).toHaveValue('Albums');
+    await expect(page.locator('#workspaceSearchConsent')).toBeVisible();
+    await expect(page.locator('#workspaceSearchConsent')).not.toBeChecked();
+  };
+  const attachmentActions: string[] = [];
+  let wizardConfirmations = 0;
+  page.on('request', r => {
+    if (r.url().endsWith('/folder-context/attachment'))
+      attachmentActions.push(r.postDataJSON().action);
+    if (r.method() === 'POST' && /\/create-operations\/[^/]+\/confirm$/.test(r.url()))
+      wizardConfirmations++;
+  });
+  await guide();
+  await page.keyboard.press('Escape');
+  await expect(hint).toBeHidden();
+  await homeButton.press('Enter');
+  await expect(modal).toBeVisible();
+  await expect(page.locator('#workspaceAnchorPath')).toHaveValue('');
+  await cancelWizard();
+  await page.locator('#personalAssistantLauncher').click();
+  expect(attachmentActions).toEqual([]);
+  // An unrelated modal or another tab can never consume this drawer's pick.
+  await guide();
+  await page.locator('#cockpitCaptureBtn').click();
+  await expect(hint).toBeHidden();
+  await page.locator('#cockpitCaptureCancel').click();
+  await homeButton.click();
+  await expect(modal).toBeVisible();
+  await expect(page.locator('#workspaceAnchorPath')).toHaveValue('');
+  await cancelWizard();
+  await page.locator('#personalAssistantLauncher').click();
+  const desktop = page.viewportSize()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  // On macOS WebKit, Option+Tab includes buttons in keyboard navigation.
+  const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
+  const showWhere = picked.getByRole('button', { name: 'Show me where' });
+  await picked.getByRole('button', { name: 'Look at names and counts' }).focus();
+  await page.keyboard.press(tab);
+  await expect(showWhere).toBeFocused();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/narrow-attachment.png`
+  });
+  await page.keyboard.press('Enter');
+  await expect(homeButton).toBeFocused();
+  await expect(homeButton).toHaveCSS('animation-name', 'none');
+  await expect(homeButton).toHaveAttribute('aria-describedby', 'chatWorkspaceInstruction');
+  await page.keyboard.press(tab);
+  await expect(hint.getByRole('button', { name: 'Dismiss hint' })).toBeFocused();
+  await page.keyboard.press('Shift+' + tab);
+  await expect(homeButton).toBeFocused();
+  await expect(hint).toContainText('Start here to use Albums.');
+  await expect(modal).toBeHidden();
+  expect(attachmentActions).toEqual([]);
+  const other = await page.context().newPage();
+  try {
+    await installLocalCdn(other);
+    await other.goto('/?home=1');
+    await other.locator('#cockpitCreateWorkspaceBtn').click();
+    await expect(other.locator('#addFolderModal')).toBeVisible();
+    await expect(other.locator('#workspaceFolderModeManaged')).toBeChecked();
+    await expect(other.locator('#workspaceAnchorPath')).toHaveValue('');
+  } finally {
+    await other.close();
+  }
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/hint.png`
+  });
+  await homeButton.press('Enter');
+  await showPrefill();
+  await page.setViewportSize(desktop);
+  expect(attachmentActions).toEqual(['resume']);
+  await page.locator('#workspaceSearchConsent').scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/prefill.png`
+  });
+  await cancelWizard();
+  await homeButton.click();
+  await expect(page.locator('#workspaceAnchorPath')).toHaveValue('');
+  await cancelWizard();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(input).toHaveValue('What’s in here?');
+  await expect(chip).toContainText('Albums');
+  expect(await inventory()).toEqual(initial);
+
+  // Replace only the marked fixture folder and restore it after the refusal.
+  const syntheticHome = join(fixture!, 'home');
+  const { default_workspace_root: workspaceRoot } = await (
+    await request.get('/api/settings/workspace-root')
+  ).json();
+  expect(realpathSync(join(workspaceRoot, '..'))).toBe(realpathSync(syntheticHome));
+  expect(readFileSync(join(fixture!, '.search-first-fixture'), 'utf8')).toBe('synthetic-v1\n');
+  const albums = join(syntheticHome, 'Albums');
+  const parked = join(fixture!, 'original-albums');
+  const replacement = mkdtempSync(join(fixture!, 'replacement-'));
+  await guide();
+  renameSync(albums, parked);
+  try {
+    renameSync(replacement, albums);
+    try {
+      const refusal = page.waitForResponse(r => r.url().endsWith('/folder-context/attachment'));
+      await homeButton.press('Space');
+      expect((await refusal).status()).toBe(409);
+      await expect(modal).toBeHidden();
+      await page.locator('#personalAssistantLauncher').click();
+      await expect(input).toHaveValue('What’s in here?');
+      await expect(chip).toBeHidden();
+      const repick = page.getByRole('button', { name: 'Choose a folder again' });
+      await expect(repick).toBeVisible();
+      await page.screenshot({
+        path: `tasks/evidence-assistant-folder-handoff/${browserName}/repick.png`
+      });
+      expect(await inventory()).toEqual(initial);
+      await repick.click();
+    } finally {
+      renameSync(albums, replacement);
+    }
+  } finally {
+    renameSync(parked, albums);
+  }
+  await pickAlbums();
+  await expect(page.locator('#personalAssistantFolderPreview')).toBeHidden();
+
+  const look = picked.getByRole('button', { name: 'Look at names and counts' });
+  await look.click();
+  await expect(picked).toContainText('one-time local look');
+  await picked.getByRole('button', { name: 'Cancel' }).click();
+  await expect(input).toHaveValue('What’s in here?');
+  await look.click();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/consent.png`
+  });
+  await picked.getByRole('button', { name: 'Preview locally' }).click();
+  const preview = page.locator('#personalAssistantFolderPreview');
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText('Send shares');
+  await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeHidden();
+  await expect(input).toHaveValue('What’s in here?');
+  expect(audit()).toEqual(baseline);
+  // Local preview works even with no model configured. Enable the isolated
+  // loopback model only now, for the explicit Send.
+  expect(
+    (
+      await request.post('/api/settings/system-model', {
+        data: { provider: 'ollama', model: 'ori-workspace-fixture' }
+      })
+    ).ok()
+  ).toBe(true);
+  await page.locator('#personalAssistantSend').click();
+  await expect(page.locator('#homeAssistantConversation')).toContainText(
+    'Fixture observation of Albums: Daybreak.wav'
+  );
+  expect(audit()).toEqual({ requests: baseline.requests + 1, hits: [1] });
+  expect(await inventory()).toEqual(initial);
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/answer.png`
+  });
+
+  await page.locator('#personalAssistantAttachMenu').click();
+  await page.locator('#personalAssistantFolderChip').click();
+  await pickAlbums();
+  await guide();
+  await homeButton.evaluate(button => {
+    button.click();
+    button.click();
+  });
+  await showPrefill();
+  await page.locator('#folderNameInput').fill('Music Library');
+  await page.locator('#wizardNextBtn').click();
+  await page.getByRole('checkbox', { name: 'Create without agents' }).click();
+  await page.locator('#wizardNextBtn').click();
+  const creation = page.locator('#workspaceCreationReviewPanel');
+  await expect(creation).toContainText('Albums');
+  expect(await inventory()).toEqual(initial);
+  expect(wizardConfirmations).toBe(0);
+  await creation.getByRole('button', { name: 'Use automatic placement' }).click();
+  await creation.locator('[data-placement-action="confirm"]').click();
+  await expect(creation.getByRole('heading', { name: 'Workspace created' })).toBeVisible();
+  await creation.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', /.+/);
+  await expect
+    .poll(async () => (await inventory()).workspaces.length)
+    .toBe(initial.workspaces.length + 1);
+
+  const music = (await page.locator('body').getAttribute('data-workspace-id'))!;
+  expect(wizardConfirmations).toBe(1);
+  const links = (await (await request.get(`/api/workspaces/${music}/directories`)).json())
+    .directories;
+  expect(links.filter((link: { path: string }) => link.path === albums)).toHaveLength(1);
+  const createdInventory = await inventory();
+  await page.goto('/?panel=today&folder=explore');
+  await pickAlbums();
+  await expect(picked).toContainText('Albums is linked to Music Library.');
+  await expect(picked.getByRole('button', { name: 'Show me where' })).toBeHidden();
+  await expect(look).toBeVisible();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/linked.png`
+  });
+  await picked.getByRole('button', { name: 'Open Music Library' }).press('Enter');
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', music);
+  expect(await inventory()).toEqual(createdInventory);
+
+  // The Files card still owns compact creation, receipt recovery and optional staffing.
+  await page.goto('/?view=tree');
+  await page.locator('[data-tree-add-folder]').click();
+  await page
+    .getByRole('dialog', { name: 'Choose a folder' })
+    .getByRole('button', { name: 'Downloads', exact: true })
+    .click();
+  const card = page.locator('dialog.explore-card');
   await expect(card.getByRole('checkbox')).not.toBeChecked();
   await card.getByLabel('Workspace name').fill('Reading inbox');
   await page.screenshot({
@@ -193,7 +442,6 @@ test('the assistant links a folder without starting a hire or filename scan', as
     ).json();
   expect(await sources()).toEqual([]);
   await expect(card.getByRole('button', { name: 'Open workspace' })).toBeVisible();
-  const inventory = () => choiceInventory(request, join(fixture!, 'data'));
   const receipt = await inventory();
   await card.getByRole('button', { name: 'Add an agent…' }).click();
   const rosterForm = page.locator('#workspace-detail-add-agent-modal');
@@ -232,6 +480,30 @@ test('the assistant links a folder without starting a hire or filename scan', as
   await match.getByRole('button', { name: 'Allow filename search' }).click();
   await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Downloads');
   expect((await sources())[0].workspace.id).toBe(id);
+  // A second exact link leaves the existing Files connection with Reading inbox.
+  expect(
+    (
+      await request.post(`/api/workspaces/${music}/directories`, {
+        data: { name: 'Downloads', path: join(syntheticHome, 'Downloads') }
+      })
+    ).ok()
+  ).toBeTruthy();
+  const linkedInventory = await inventory();
+  const [index] = await sources();
+  await page.goto('/?panel=today&folder=explore');
+  await host.getByRole('button', { name: 'Downloads', exact: true }).click();
+  await expect(picked).toContainText('Choose one to open.');
+  await expect(picked.getByRole('button', { name: 'Open Reading inbox' })).toBeVisible();
+  await expect(look).toBeVisible();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/multiple-links.png`
+  });
+  await picked.getByRole('button', { name: 'Open Music Library' }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', music);
+  expect(await inventory()).toEqual(linkedInventory);
+  expect(await sources()).toMatchObject([
+    { id: index.id, workspace: index.workspace, generation: index.generation }
+  ]);
   await page.goto('/?panel=today&folder=explore');
   await host.getByRole('button', { name: /Hire an agent or explore a file/ }).click();
   await page.locator('#personalAssistantFolderChips [data-chip="downloads"]').click();

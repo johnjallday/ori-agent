@@ -277,7 +277,12 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 	options := h.folderReviewOptions(ctx, turn.target, &PersonalAssistantFolderState{Observation: turn.observation, OfferID: turn.offerID, Historical: turn.ref.Historical})
 	proposal, currentReview := h.folderTurnRecommendation(ctx, turn)
 	recommendationText := folderRecommendationPrompt(proposal, currentReview, turn.observation)
-	contextText += folderSetupOptionsPrompt(turn.observation, options) + recommendationText
+	instructions := folderTurnInstructions(options, recommendationText != "")
+	if turn.observation.DiscussionOnly {
+		instructions = folderInstructionsOpening + folderInstructionsMiddle + " Discuss only the dated metadata and the user's question. Do not offer workspace setup or a hire."
+	} else {
+		contextText += folderSetupOptionsPrompt(turn.observation, options) + recommendationText
+	}
 	savedDraft, draftContext := h.savedDraftPromptContext(draft, workContext)
 	answer := ""
 	// Picking a folder never becomes permission to read it. A request for file
@@ -292,7 +297,7 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 			user += folderContentsAuthority
 		}
 		answer, err = h.runModel(ctx, modelTurn{
-			system:  buildAssistantConversationSystemPrompt(workContext) + folderTurnInstructions(options, recommendationText != "") + folderReplyPresentation(conversation, turn),
+			system:  buildAssistantConversationSystemPrompt(workContext) + instructions + folderReplyPresentation(conversation, turn),
 			history: conversation.history,
 			user:    user,
 			sources: h.Sources, temperature: 0.6,

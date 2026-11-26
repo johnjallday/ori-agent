@@ -88,10 +88,28 @@ const (
 // choice is the chip identifier in chip mode, the selection token in selection
 // mode, and empty in picker mode; it is never a path.
 func (s *FolderObservationService) Observe(ctx context.Context, target foldercontext.Target, mode, choice string) (*foldercontext.Observation, error) {
+	return s.observe(ctx, target, mode, choice, nil)
+}
+
+// ObserveReviewed reuses the bounded scan only after the host checks the
+// original owner's chat-bound physical review. No path mode is exposed on the
+// normal selection endpoint. Recheck the witness on both sides of the scan.
+func (s *FolderObservationService) ObserveReviewed(ctx context.Context, target foldercontext.Target, resolve func() (string, error)) (*foldercontext.Observation, error) {
+	if resolve == nil {
+		return nil, ErrFolderSelection
+	}
+	return s.observe(ctx, target, "", "", resolve)
+}
+
+func (s *FolderObservationService) observe(ctx context.Context, target foldercontext.Target, mode, choice string, reviewed func() (string, error)) (*foldercontext.Observation, error) {
 	if s == nil || s.digest == nil || s.digest.store == nil || !target.Valid() {
 		return nil, ErrFolderSelection
 	}
 	switch mode {
+	case "":
+		if reviewed == nil {
+			return nil, ErrFolderSelection
+		}
 	case FolderObserveChip:
 	case FolderObservePicker:
 		if choice != "" {
@@ -134,6 +152,8 @@ func (s *FolderObservationService) Observe(ctx context.Context, target foldercon
 
 	var raw string
 	switch mode {
+	case "":
+		raw, err = reviewed()
 	case FolderObserveChip:
 		raw, err = d.chipPath(choice)
 	case FolderObserveSelection:
@@ -159,6 +179,16 @@ func (s *FolderObservationService) Observe(ctx context.Context, target foldercon
 	if err != nil {
 		return nil, ErrFolderPathLost
 	}
+	checkReview := func() bool {
+		if reviewed == nil {
+			return true
+		}
+		checked, err := reviewed()
+		return err == nil && checked == root
+	}
+	if !checkReview() {
+		return nil, ErrFolderSelection
+	}
 	result, err := d.deps.ScanObservation(root)
 	if err != nil {
 		return nil, &FolderRootError{Message: "Ori could not inspect that folder. Check access or choose a different folder. No file contents were read."}
@@ -172,7 +202,11 @@ func (s *FolderObservationService) Observe(ctx context.Context, target foldercon
 	if err != nil || canonical != root || identityErr != nil || identity != after || bindingErr != nil || fresh != binding {
 		return nil, ErrFolderPathLost
 	}
+	if !checkReview() {
+		return nil, ErrFolderSelection
+	}
 	observation := summarizeFolder(result, d.deps.NewID())
+	observation.DiscussionOnly = reviewed != nil
 	if err := observation.Validate(); err != nil {
 		return nil, err
 	}

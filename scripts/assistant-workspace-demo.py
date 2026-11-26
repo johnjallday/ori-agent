@@ -483,6 +483,9 @@ def folder_response_step(content):
     observation = json.loads(match.group(1))
     if observation.get("version", 1) != 1 or not isinstance(observation.get("folder"), str):
         raise ValueError("fixture requires typed folder metadata")
+    if observation['folder'] == 'Albums':
+        names = [e['name'] for e in observation.get('observed_entries', []) if e['kind'] == 'file']
+        return {'answer': 'Fixture observation of Albums: ' + ', '.join(names) + '. No file contents were read.'}
     return {"answer": "Fixture interpretation: The names and markers suggest projects alongside shared material. "
                       "They do not establish contents or progress. What would you like to work out first?"}
 

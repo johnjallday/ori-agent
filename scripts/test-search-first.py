@@ -3,6 +3,9 @@
 import argparse
 import contextlib
 import json
+import runpy
+import threading
+from http.server import ThreadingHTTPServer
 import os
 from pathlib import Path
 import socket
@@ -38,13 +41,15 @@ def api(url, path, body=None):
 
 
 @contextlib.contextmanager
-def serve(root, rev=None, build_tmp=None, fixture_binary=None):
+def serve(root, rev=None, build_tmp=None, fixture_binary=None, provider=None):
     assert (root/'.search-first-fixture').read_text() == 'synthetic-v1\n'
     number = port()
     url = f'http://localhost:{number}'
     (root/'.search-first-test-url').write_text(url+'\n')
     env = {k: os.environ[k] for k in ('PATH','HOME','TMPDIR','GOCACHE','GOMODCACHE','GOPATH') if k in os.environ}
     env.update(GOWORK='off', ORI_DEMO_REQUIRE_FREE_PORT='1', ORI_DEMO_SPLIT_PROFILE='1', HTTP_PROXY='http://127.0.0.1:1', HTTPS_PROXY='http://127.0.0.1:1', NO_PROXY='localhost,127.0.0.1')
+    if provider:
+        env['OLLAMA_BASE_URL'] = f'http://127.0.0.1:{provider.server_port}'
     if rev:
         # git archive and Go scratch never become dependencies on another checkout.
         env['TMPDIR'] = str(build_tmp)
@@ -142,13 +147,13 @@ if __name__=='__main__':
     parser.add_argument('--upgrades',action='store_true',help='also build the prior-version fixture')
     parser.add_argument('--folder-backed',action='store_true',help='run only reviewed folder setup on established split profiles')
     parser.add_argument('--browser',choices=('chromium','webkit'),action='append',help='limit the browser journeys to this browser (repeatable; default both)')
-    parser.add_argument('--scenario',choices=('fresh','skip','navigation','files-search'),action='append',help='run only these default scenarios while iterating (repeatable; default all; not with --folder-backed)')
+    parser.add_argument('--scenario',choices=('fresh','skip','navigation','files-search','folder-assistant'),action='append',help='run only these default scenarios while iterating (repeatable; default all; not with --folder-backed)')
     args=parser.parse_args()
     BROWSERS=tuple(args.browser or ('chromium','webkit'))
     SCENARIOS=set(args.scenario or ('fresh','skip','navigation','files-search'))
     if sys.platform!='darwin':sys.exit('macOS only')
     SCRATCH.mkdir(parents=True,exist_ok=True);EVIDENCE.mkdir(parents=True,exist_ok=True)
-    if args.folder_backed:
+    if args.folder_backed or SCENARIOS == {'folder-assistant'}:
         def project_fixture():
             root=fixture()
             project=root/'home/Synthetic Project'
@@ -166,7 +171,24 @@ if __name__=='__main__':
         }}))
         binary=build/'fixture-server'
         subprocess.run(['go','build','-overlay',str(overlay),'-o',str(binary),'./cmd/server'],cwd=REPO,env={**os.environ,'GOWORK':'off'},check=True)
+        def assistant_journey(browser):
+            root=project_fixture()
+            albums=root/'home/Albums'
+            albums.mkdir()
+            (albums/'Daybreak.wav').write_text('private-content-sentinel\n')
+            fake = runpy.run_path(str(REPO/'scripts/assistant-workspace-demo.py'))
+            (root/'sentinels.json').write_text(json.dumps(['private-content-sentinel','Daybreak.wav']))
+            with ThreadingHTTPServer(('127.0.0.1',0), fake['provider_handler'](root,folder_response=True)) as provider:
+                threading.Thread(target=provider.serve_forever,daemon=True).start()
+                try:
+                    with serve(root,fixture_binary=binary,provider=provider) as url:
+                        spec(root,url,'folder-assistant','folder-backed-search-locations',browser)
+                finally:
+                    provider.shutdown()
         for browser in BROWSERS:
+            if not args.folder_backed:
+                assistant_journey(browser)
+                continue
             root=project_fixture()
             with serve(root, fixture_binary=binary) as url:
                 # First-run search consent predates established workspace setup.
@@ -179,9 +201,7 @@ if __name__=='__main__':
                 locations=json.loads(api(url,'/api/file-search/sources'))
                 assert sorted(s['label'] for s in locations)==['Documents','Downloads']
                 assert len([w for w in json.loads(api(url,'/api/workspaces'))['folders'] if w['name']=='Research archive'])==1
-            root=project_fixture()
-            with serve(root,fixture_binary=binary) as url:
-                spec(root,url,'folder-assistant','folder-backed-search-locations',browser)
+            assistant_journey(browser)
             for entry in ('files','workspace'):
                 for kind in ('downloads','documents','custom'):
                     root=project_fixture()

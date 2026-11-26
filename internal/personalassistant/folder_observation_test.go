@@ -30,6 +30,36 @@ func observationFixture(t *testing.T) (*folderDigestFixture, *FolderObservationS
 	return f, NewFolderObservationService(f.service), foldercontext.Target{UserID: "local", WorkspaceID: binding.HQWorkspaceID, AgentName: "Atlas", DraftID: "draft-a"}
 }
 
+func TestFolderObservation_ReviewedChatHasNoSetupAuthority(t *testing.T) {
+	f, s, target := observationFixture(t)
+	root := filepath.Join(f.home, "Desktop")
+	scans := 0
+	scan := f.service.deps.ScanObservation
+	f.service.deps.ScanObservation = func(path string) (folderdigest.Result, error) { scans++; return scan(path) }
+	denied := func() (string, error) { return "", ErrFolderSelection }
+	if _, err := s.ObserveReviewed(t.Context(), target, denied); err == nil || scans != 0 {
+		t.Fatal("scanned without a live review")
+	}
+	o, err := s.ObserveReviewed(t.Context(), target, func() (string, error) { return root, nil })
+	if err != nil || !o.DiscussionOnly || scans != 1 {
+		t.Fatal(o, err, scans)
+	}
+	if _, err = s.ResolveRoot(t.Context(), target, o.ID); err == nil {
+		t.Fatal("chat-only selection authorized setup")
+	}
+	if _, err = s.Resolve(t.Context(), target, o.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ObserveReviewed(t.Context(), target, func() (string, error) {
+		if scans > 1 {
+			return denied()
+		}
+		return root, nil
+	}); err == nil {
+		t.Fatal("published a preview after replacement during scan")
+	}
+}
+
 func TestFolderObservation_LocalOnlyAndBounded(t *testing.T) {
 	f, service, target := observationFixture(t)
 	ctx := context.Background()

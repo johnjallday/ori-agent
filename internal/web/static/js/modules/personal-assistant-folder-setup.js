@@ -501,7 +501,11 @@ function applySuggestion(value) {
 // for a folder with nothing to set up, and for one Ori proposed a group for,
 // which is set up from its card instead.
 export function reviewLinkHidden(observation, structure) {
-  return setupCandidates(observation).length === 0 || Boolean(structure);
+  return (
+    Boolean(observation?.discussion_only) ||
+    setupCandidates(observation).length === 0 ||
+    Boolean(structure)
+  );
 }
 
 function syncReviewLink() {

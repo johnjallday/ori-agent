@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { folderContentSentinel } from './fixtures/assistant-folder-response.js';
 import { openFolderAttach, chooseAttach, chooseConversation } from './helpers/assistant-menus';
+import { talkToPersonalAssistant } from './helpers/assistant-recipient';
 
 // Real host/provider/store characterization. Geometry is observed BEFORE any
 // screenshot/action can scroll it. Group 2 adds the new visibility assertions;
@@ -190,6 +191,7 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     await page.waitForFunction(() => (window as any).PersonalAssistantPanel?._state.view.available);
     if (!(await page.locator('#personalAssistantPanel').isVisible()))
       await page.locator('#personalAssistantLauncher').click();
+    await talkToPersonalAssistant(page);
     if (await page.locator('#personalAssistantConversationNew').isEnabled())
       await chooseConversation(page, '#personalAssistantConversationNew');
     if (path === '/') await capture('home-today-error-compact');
@@ -227,6 +229,10 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
       (node: any) => node.kind === 'folder' && node.name === 'Albums'
     );
     expect(topic).toBeTruthy();
+    await page
+      .locator('#personalAssistantFolderExplorer')
+      .getByRole('button', { name: 'Focus', exact: true })
+      .click();
     await page.locator(`[data-tree-focus="${topic.id}"]`).check();
     const beforeSend = await audit();
     const refs = await page.evaluate(() =>
@@ -350,6 +356,8 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     ).toHaveCount(1);
     const beforeReload = await audit();
     await page.reload();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await talkToPersonalAssistant(page);
     await page.waitForFunction(
       () =>
         !(window as any).PersonalAssistantConversation?.isLoading() &&
