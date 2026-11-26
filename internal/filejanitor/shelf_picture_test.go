@@ -4,11 +4,77 @@ package filejanitor
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+func TestFindExistingShelfBeyondBoundedList(t *testing.T) {
+	f := newDocsFixture(t, "one.txt")
+	names := []string{}
+	for i := range workspace.DirectoryListMaxEntries + 3 {
+		name := fmt.Sprintf("folder-%03d", i)
+		f.mkdir(name)
+		names = append(names, name)
+	}
+	p, err := f.s.ReadShelfPicture(t.Context(), "local", "ws-1", f.batch.ID, "")
+	if err != nil || !p.Partial {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, sh := range p.Folders {
+		listed[sh.Name] = true
+	}
+	var parent string
+	for _, n := range names {
+		if !listed[n] {
+			parent = n
+			break
+		}
+	}
+	if parent == "" {
+		t.Fatal("expected a folder beyond the page")
+	}
+	f.mkdir(parent + "/Winter")
+	f.mkdir("Internal")
+	f.write("Internal/workspace.json", "{}")
+	if err := os.Symlink(t.TempDir(), f.abs("Alias")); err != nil {
+		t.Fatal(err)
+	}
+	p, err = f.s.ReadShelfPicture(t.Context(), "local", "ws-1", f.batch.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	find := func(name string) (PictureShelf, error) {
+		return f.s.FindPictureShelf(t.Context(), "local", "ws-1", f.batch.ID, p.Revision, name)
+	}
+	for _, bad := range []string{"../outside", "Internal", "Alias", ".hidden", "Filed", "one.txt", parent + "/Winter/Deeper"} {
+		if _, err := find(bad); err == nil {
+			t.Fatal("accepted", bad)
+		}
+	}
+	sh, err := find(parent + "/Winter")
+	if err != nil || sh.Parent == "" {
+		t.Fatal(sh, err)
+	}
+	row := ShelfPlacement{File: p.Files[0].ID, Located: sh.Name, Shelf: sh.Key, Parent: sh.Parent}
+	file := func(row ShelfPlacement) (DocumentsFilingResult, error) {
+		return f.s.FileShelfPicture(t.Context(), "local", "ws-1", f.batch.ID, p.Revision, keyA, []ShelfPlacement{row})
+	}
+	wrong := row
+	wrong.Located = parent
+	if _, err := file(wrong); err == nil {
+		t.Fatal("name hint overrode reviewed shelf")
+	}
+	r, err := file(row)
+	if err != nil || r.Filed != 1 || !f.exists(sh.Name+"/one.txt") {
+		t.Fatal(r, err)
+	}
+}
 
 func TestShelfPictureListsOnlyFoldersInReviewedRoot(t *testing.T) {
 	f := newDocsFixture(t, "receipt-01.pdf", "tax-receipt.pdf", "loose.png")

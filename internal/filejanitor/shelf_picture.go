@@ -28,9 +28,10 @@ type ShelfPicture struct {
 	Files     []ShelfFile    `json:"files"`
 }
 type PictureShelf struct {
-	Key  string `json:"key"`
-	Name string `json:"name"`
-	dir  DirRef
+	Parent string `json:"parent,omitempty"`
+	Key    string `json:"key"`
+	Name   string `json:"name"`
+	dir    DirRef
 }
 type ShelfFile struct {
 	ID        string `json:"id"`
@@ -91,7 +92,7 @@ func (s shelfScope) folders(parent DirRef) ([]PictureShelf, bool, error) {
 			continue
 		}
 		ref := DirRef{Rel: path.Join(parent.Rel, entry.Name), ID: entry.Version.Identity}
-		key, err := setupDigest([]string{"filing-shelf-v1", s.scope, s.witness, parent.ID, ref.Rel, ref.ID})
+		key, err := s.folderKey(parent, ref)
 		if err != nil {
 			return nil, false, err
 		}
@@ -99,6 +100,66 @@ func (s shelfScope) folders(parent DirRef) ([]PictureShelf, bool, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, list.Truncated, nil
+}
+
+func (s shelfScope) folderKey(parent, ref DirRef) (string, error) {
+	return setupDigest([]string{"filing-shelf-v1", s.scope, s.witness, parent.ID, ref.Rel, ref.ID})
+}
+
+// exactFolder checks a person's folder name without expanding the listing
+// bounds. Its name is only a lookup hint: the key must also match at File.
+func (s shelfScope) exactFolder(rel string) (PictureShelf, error) {
+	var out PictureShelf
+	parts := strings.Split(rel, "/")
+	if len(parts) > 2 || strings.EqualFold(parts[0], s.filedName) {
+		return out, ErrInvalidAction
+	}
+	for _, part := range parts {
+		if !validNewShelfName(part) {
+			return out, ErrInvalidAction
+		}
+	}
+	chain, err := workspace.WitnessedFolderChain(s.root.Path, rel, s.witness)
+	if err != nil {
+		return out, ErrReviewPlanChanged
+	}
+	parent := DirRef{ID: s.witness}
+	for i, v := range chain {
+		if !sameDevice(s.witness, v.Identity) {
+			return PictureShelf{}, ErrReviewPlanChanged
+		}
+		ref := DirRef{Rel: path.Join(parent.Rel, parts[i]), ID: v.Identity}
+		key, err := s.folderKey(parent, ref)
+		if err != nil {
+			return PictureShelf{}, err
+		}
+		out = PictureShelf{Parent: out.Key, Key: key, Name: ref.Rel, dir: ref}
+		parent = ref
+	}
+	return out, nil
+}
+
+func (s *Service) FindPictureShelf(ctx context.Context, owner, id, batch, revision, rel string) (PictureShelf, error) {
+	var no PictureShelf
+	scope, err := s.shelfScope(owner, id)
+	if err != nil {
+		return no, err
+	}
+	p, err := s.ReadShelfPicture(ctx, owner, id, batch, "")
+	if err != nil {
+		return no, err
+	}
+	if p.Revision != revision {
+		return no, ErrReviewPlanChanged
+	}
+	sh, err := scope.exactFolder(rel)
+	if err != nil {
+		return no, err
+	}
+	if again, err := s.shelfScope(owner, id); err != nil || again != scope || ctx.Err() != nil {
+		return no, ErrReviewPlanChanged
+	}
+	return sh, nil
 }
 
 func safeShelfName(name string) bool {

@@ -83,6 +83,7 @@ func (h *Handler) CheckShelfName(w http.ResponseWriter, r *http.Request) {
 		Revision string `json:"revision"`
 		Parent   string `json:"parent"`
 		Name     string `json:"name"`
+		Located  string `json:"located"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048))
 	dec.DisallowUnknownFields()
@@ -90,11 +91,41 @@ func (h *Handler) CheckShelfName(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondBadRequest(w, "Send one folder name.")
 		return
 	}
-	if err = h.service.CheckShelfName(r.Context(), owner, id, r.PathValue("batchID"), b.Revision, b.Parent, b.Name); err != nil {
+	if err = h.service.CheckShelfName(r.Context(), owner, id, r.PathValue("batchID"), b.Revision, b.Parent, b.Name, b.Located); err != nil {
 		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("folder_unavailable", "That name is not available here. Choose a different name or reload the picture."))
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"available": true})
+}
+
+// FindPictureShelf names one existing shelf without listing past the page limit.
+func (h *Handler) FindPictureShelf(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	id, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	owner, err := h.currentOwner(r.Context())
+	if err != nil {
+		_ = orihttp.RespondForbidden(w, "Your workspace identity is unavailable.")
+		return
+	}
+	var b struct {
+		Revision string `json:"revision"`
+		Name     string `json:"name"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	dec.DisallowUnknownFields()
+	if dec.Decode(&b) != nil || dec.Decode(&struct{}{}) != io.EOF {
+		_ = orihttp.RespondBadRequest(w, "Send one folder name.")
+		return
+	}
+	sh, err := h.service.FindPictureShelf(r.Context(), owner, id, r.PathValue("batchID"), b.Revision, b.Name)
+	if err != nil {
+		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("folder_unavailable", "That folder is not available in this picture."))
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"shelf": sh})
 }
 
 func (h *Handler) fileShelfPicture(w http.ResponseWriter, r *http.Request, id string) {
@@ -103,7 +134,7 @@ func (h *Handler) fileShelfPicture(w http.ResponseWriter, r *http.Request, id st
 		Key        string                       `json:"client_key"`
 		Placements []filejanitor.ShelfPlacement `json:"placements"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 384<<10))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&body) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		_ = orihttp.RespondBadRequest(w, "Send one reviewed folder picture.")

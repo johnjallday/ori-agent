@@ -63,7 +63,7 @@ func TestUndoShelfFilingRetainsOnlyConfirmedNewFolderNames(t *testing.T) {
 	}
 	sh := p.Folders[0]
 	check := func(parent, name string) error {
-		return f.s.CheckShelfName(t.Context(), "local", "ws-1", f.batch.ID, p.Revision, parent, name)
+		return f.s.CheckShelfName(t.Context(), "local", "ws-1", f.batch.ID, p.Revision, parent, name, "")
 	}
 	for _, bad := range []string{"", "..", "a/b", ".hidden", "Invoices", "Filed", "order.pdf"} {
 		if check("", bad) == nil {
@@ -105,12 +105,13 @@ func TestNewShelfUsesNameCheckAsAdviceOnly(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.s.CheckShelfName(t.Context(), "local", "ws-1", f.batch.ID, p.Revision, "", "Orders"); err != nil {
+			if err := f.s.CheckShelfName(t.Context(), "local", "ws-1", f.batch.ID, p.Revision, "", "Orders", ""); err != nil {
 				t.Fatal(err)
 			}
-			if scenario == "stale source" {
+			switch scenario {
+			case "stale source":
 				f.write("one.pdf", "changed since scan")
-			} else if scenario == "name taken" {
+			case "name taken":
 				f.mkdir("Orders")
 				f.write("Orders/other.txt", "not ours")
 			}

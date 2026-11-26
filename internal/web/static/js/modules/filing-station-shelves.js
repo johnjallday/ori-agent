@@ -192,10 +192,39 @@
       toolbar.appendChild(sub);
       select.addEventListener('change', () => {
         add.disabled = !active() || !select.value;
-        sub.disabled = add.disabled || !!folders.get(select.value)?.parent;
+        sub.disabled =
+          add.disabled ||
+          !!folders.get(select.value)?.parent ||
+          !!folders.get(select.value)?.located;
+      });
+      const lookup = node('details', 'fj-shelf-lookup');
+      const summary = node('summary', '', 'Find a folder by name');
+      lookup.appendChild(summary);
+      const search = node('form', 'fj-shelf-tools');
+      const name = node('input', 'fj-input');
+      name.setAttribute('aria-label', 'Existing folder name, such as Orders or Orders/Winter');
+      name.placeholder = 'Orders or Orders/Winter';
+      name.required = true;
+      name.maxLength = 511;
+      name.disabled = !active();
+      const find = node('button', 'fj-btn fj-btn-secondary', 'Add named shelf');
+      find.type = 'submit';
+      find.disabled = !active();
+      search.append(name, find);
+      lookup.appendChild(search);
+      host.appendChild(lookup);
+      search.addEventListener('submit', e => {
+        e.preventDefault();
+        if (active()) void findShelf(name.value);
       });
       if (picture.partial)
-        host.appendChild(node('p', 'fj-sub', 'This is a partial list of folders.'));
+        host.appendChild(
+          node(
+            'p',
+            'fj-sub',
+            'Only part of this folder is listed. Use Find a folder by name to add another shelf.'
+          )
+        );
       const count = picture.files.filter(f => places.get(f.id)).length;
       const footer = node('footer', 'fj-shelf-footer');
       host.appendChild(footer);
@@ -227,6 +256,42 @@
       if (focus === 'title') title.focus();
       else focusTarget?.focus();
     }
+    async function findShelf(name) {
+      if (busy || waiting || !current()) return;
+      busy = true;
+      message = 'Checking that folder…';
+      draw();
+      let focus = 'title';
+      try {
+        const r = await fetch(base + '/picture/find-folder', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ name, revision: picture.revision })
+        });
+        const b = await r.json();
+        if (!current()) return;
+        const f = b.shelf;
+        if (
+          !r.ok ||
+          !f ||
+          f.name !== name ||
+          !/^[a-f0-9]{64}$/.test(f.key) ||
+          (f.parent && !/^[a-f0-9]{64}$/.test(f.parent))
+        )
+          throw Error(b.message || 'That folder is not available in this picture.');
+        if (!folders.has(f.key)) folders.set(f.key, { ...f, located: f.name });
+        shown.add(f.key);
+        message = f.name + ' is in the picture.';
+        focus = selected || 'title';
+      } catch (error) {
+        message = error.message;
+      } finally {
+        if (current()) {
+          busy = false;
+          draw(focus);
+        }
+      }
+    }
     async function checkName() {
       if (!naming || busy || !current()) return;
       const { name, parent } = naming;
@@ -238,7 +303,12 @@
         const r = await fetch(base + '/picture/check-folder', {
           method: 'POST',
           headers,
-          body: JSON.stringify({ name, parent, revision: picture.revision })
+          body: JSON.stringify({
+            name,
+            parent,
+            located: folders.get(parent)?.located,
+            revision: picture.revision
+          })
         });
         const b = await r.json();
         if (!current()) return;
@@ -246,7 +316,12 @@
           throw Error(b.message || b.error?.message || 'That folder name is not available.');
         const k = 'new:' + JSON.stringify([parent, name]);
         const display = parent ? folders.get(parent).name + '/' + name : name;
-        folders.set(k, { name: display, newName: name, parent });
+        folders.set(k, {
+          name: display,
+          newName: name,
+          parent,
+          located: folders.get(parent)?.located
+        });
         shown.add(k);
         if (selected) {
           places.set(selected, k);
@@ -335,6 +410,7 @@
           ...(folders.get(places.get(f.id)).newName
             ? { new_name: folders.get(places.get(f.id)).newName }
             : { shelf: places.get(f.id) }),
+          located: folders.get(places.get(f.id)).located,
           parent: folders.get(places.get(f.id)).parent
         }));
       if (!placements.length || placements.length > 1000) return;

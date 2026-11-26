@@ -268,10 +268,11 @@ test('the manager offers a first look on Open; dismissal and return do not start
     if (!(await station.isVisible())) await building.press('Enter');
     await station.getByRole('button', { name: 'Into my folders', exact: true }).press('Enter');
     const shelves = station.locator('.fj-shelves');
-    const picker = shelves.getByRole('combobox', { name: 'Choose an existing folder' });
     await expect(shelves).toContainText('8 ready to file · 5 stay loose');
-    await picker.selectOption({ label: 'Trips' });
-    await shelves.getByRole('button', { name: 'Add shelf' }).press('Enter');
+    await shelves.getByText('Find a folder by name', { exact: true }).press('Enter');
+    await shelves.getByRole('textbox', { name: /Existing folder name/ }).fill('Trips');
+    await shelves.getByRole('button', { name: 'Add named shelf' }).press('Enter');
+    await expect(shelves).toContainText('Trips is in the picture.');
     await shelves.getByRole('button', { name: 'estimate.txt', exact: true }).press('Enter');
     await shelves.getByRole('button', { name: 'Move here: Trips', exact: true }).press('Enter');
     await expect(shelves).toContainText('9 ready to file · 4 stay loose');

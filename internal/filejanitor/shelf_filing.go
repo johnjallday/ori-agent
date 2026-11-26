@@ -15,6 +15,7 @@ type ShelfPlacement struct {
 	File    string `json:"file"`
 	Shelf   string `json:"shelf"`
 	Parent  string `json:"parent,omitempty"`
+	Located string `json:"located,omitempty"`  // lookup hint for an explicitly found folder, never authority
 	NewName string `json:"new_name,omitempty"` // mutually exclusive with Shelf
 }
 type shelfRequest struct {
@@ -42,7 +43,7 @@ func (s *Service) FileShelfPicture(ctx context.Context, owner, id, batch, revisi
 	for i, row := range p.Placements {
 		existing := len(row.Shelf) == 64 && row.NewName == ""
 		newFolder := row.Shelf == "" && validNewShelfName(row.NewName)
-		if !managedRootGeneration.MatchString(row.File) || (!existing && !newFolder) || (row.Parent != "" && len(row.Parent) != 64) || (i > 0 && p.Placements[i-1].File == row.File) {
+		if len(row.Located) > 511 || (row.NewName != "" && row.Parent == "" && row.Located != "") || !managedRootGeneration.MatchString(row.File) || (!existing && !newFolder) || (row.Parent != "" && len(row.Parent) != 64) || (i > 0 && p.Placements[i-1].File == row.File) {
 			return no, ErrInvalidAction
 		}
 	}
@@ -119,7 +120,7 @@ func (s *Service) checkNewShelf(scope shelfScope, parent DirRef, name string) er
 	return nil
 }
 
-func (s *Service) CheckShelfName(ctx context.Context, owner, id, batch, revision, parentKey, name string) error {
+func (s *Service) CheckShelfName(ctx context.Context, owner, id, batch, revision, parentKey, name, located string) error {
 	view, err := s.ReadShelfPicture(ctx, owner, id, batch, "")
 	if err != nil {
 		return err
@@ -132,7 +133,13 @@ func (s *Service) CheckShelfName(ctx context.Context, owner, id, batch, revision
 		return err
 	}
 	parent := DirRef{ID: scope.witness}
-	if parentKey != "" {
+	if located != "" {
+		sh, err := scope.exactFolder(located)
+		if err != nil || sh.Parent != "" || sh.Key != parentKey {
+			return ErrReviewPlanChanged
+		}
+		parent = sh.dir
+	} else if parentKey != "" {
 		parent = DirRef{}
 		for _, folder := range view.Folders {
 			if folder.Key == parentKey {
@@ -180,29 +187,52 @@ func (s *Service) planShelves(ctx context.Context, owner, id, batch string, p sh
 		folders[parent] = dirs
 	}
 	index("", view.Folders)
+	located := map[string]PictureShelf{}
+	resolve := func(key, parentKey, hint string) (DirRef, error) {
+		if hint != "" {
+			sh, ok := located[hint]
+			if !ok {
+				var err error
+				sh, err = scope.exactFolder(hint)
+				if err != nil {
+					return DirRef{}, err
+				}
+				located[hint] = sh
+			}
+			if sh.Key != key || sh.Parent != parentKey {
+				return DirRef{}, ErrReviewPlanChanged
+			}
+			return sh.dir, nil
+		}
+		if _, ok := folders[parentKey]; !ok {
+			parent, ok := folders[""][parentKey]
+			if !ok {
+				return DirRef{}, ErrReviewPlanChanged
+			}
+			children, _, err := scope.folders(parent)
+			if err != nil {
+				return DirRef{}, err
+			}
+			index(parentKey, children)
+		}
+		dir, ok := folders[parentKey][key]
+		if !ok {
+			return DirRef{}, ErrReviewPlanChanged
+		}
+		return dir, nil
+	}
 	plan := documentsPlan{rootDirID: scope.witness, scope: scope.scope}
 	for _, row := range p.Placements {
 		if ctx.Err() != nil {
 			return no, ctx.Err()
 		}
-		if _, ok := folders[row.Parent]; row.NewName == "" && !ok {
-			parent, ok := folders[""][row.Parent]
-			if !ok {
-				return no, ErrReviewPlanChanged
-			}
-			children, _, err := scope.folders(parent)
-			if err != nil {
-				return no, err
-			}
-			index(row.Parent, children)
-		}
-		dir, ok := folders[row.Parent][row.Shelf]
+		var dir DirRef
 		if row.NewName != "" {
 			parent := DirRef{ID: scope.witness}
 			if row.Parent != "" {
-				parent, ok = folders[""][row.Parent]
-				if !ok {
-					return no, ErrReviewPlanChanged
+				parent, err = resolve(row.Parent, "", row.Located)
+				if err != nil {
+					return no, err
 				}
 			}
 			rel := path.Join(parent.Rel, row.NewName)
@@ -215,9 +245,14 @@ func (s *Service) planShelves(ctx context.Context, owner, id, batch string, p sh
 				}
 				plan.newShelves[rel] = parent
 			}
-			dir, ok = DirRef{Rel: rel}, true
+			dir = DirRef{Rel: rel}
+		} else {
+			dir, err = resolve(row.Shelf, row.Parent, row.Located)
+			if err != nil {
+				return no, err
+			}
 		}
-		if !ok || !files[row.File] {
+		if !files[row.File] {
 			return no, ErrReviewPlanChanged
 		}
 		c, ok := state.Candidate(row.File)

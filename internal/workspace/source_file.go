@@ -299,6 +299,49 @@ func ListWitnessedPage(root, relativePath, rootWitness, folderWitness string) (D
 	return listContainedEntries(root, relativePath, 1, true, rootWitness, folderWitness)
 }
 
+// WitnessedFolderChain resolves one explicitly named folder beyond a bounded
+// listing. It examines at most two directory components and never enumerates
+// their siblings or opens a regular file. Each witness is from the same chain
+// of held handles, under the same exclusions as the listing.
+func WitnessedFolderChain(root, relative, rootWitness string) ([]SourceVersion, error) {
+	rel, err := ContainedRelativePath(relative)
+	if err != nil || rel != relative || rootWitness == "" {
+		return nil, ErrSourceExcluded
+	}
+	parts := strings.Split(rel, "/")
+	if len(parts) > 2 {
+		return nil, ErrSourceExcluded
+	}
+	top, id, err := openLinkedRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = top.Close() }()
+	if id != rootWitness {
+		return nil, ErrSourceChanged
+	}
+	current := top
+	var versions []SourceVersion
+	for _, name := range parts {
+		next, err := openContainedDir(current, name)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = next.Close() }()
+		info, err := next.Stat(".")
+		if err != nil {
+			return nil, ErrSourceUnreadable
+		}
+		v := sourceVersion(info)
+		if v.Placeholder || v.Identity == "" {
+			return nil, ErrSourceExcluded
+		}
+		versions = append(versions, v)
+		current = next
+	}
+	return versions, nil
+}
+
 func listContainedEntries(root, relativePath string, depth int, page bool, witness, folderWitness string) (DirectoryListing, error) {
 	start := "."
 	if strings.TrimSpace(relativePath) != "" && strings.TrimSpace(relativePath) != "." {
