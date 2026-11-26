@@ -67,7 +67,7 @@ func (h *HomeAssistantAskHandler) bindSuggestionSubject(ctx context.Context, sug
 }
 
 func (h *HomeAssistantAskHandler) folderReviewOptions(ctx context.Context, target foldercontext.Target, state *PersonalAssistantFolderState) []personalassistant.FolderReviewOption {
-	if h.FolderSetups == nil || state == nil || state.Observation == nil || state.Observation.Validate() != nil || state.Historical || state.Authority != "" || state.OfferID != "" {
+	if h.FolderSetups == nil || state == nil || state.Observation == nil || state.Observation.Validate() != nil || state.Observation.DiscussionOnly || state.Historical || state.Authority != "" || state.OfferID != "" {
 		return nil
 	}
 	return h.FolderSetups.ReviewOptions(ctx, target, state.Observation.ID)

@@ -43,7 +43,7 @@ export function createFolderContextController({
     revision: '',
     picked: null, // local review only: never included in request() or browser storage
     observation: null,
-    picked: null,
+    consentOpen: false,
     // The group Ori proposes for a folder that holds several projects, as the
     // attach response described it. A local preview only: after Send the
     // reply's own suggestion carries the proposal.
@@ -85,7 +85,7 @@ export function createFolderContextController({
       revision: saved.revision || '',
       picked: null,
       observation: saved.observation || null,
-      picked: null,
+      consentOpen: false,
       structure: null,
       declined: null,
       structureUnavailable: '',
@@ -109,11 +109,12 @@ export function createFolderContextController({
       notify('Wait for the current request before choosing a folder.');
       return false;
     }
-    if (isBusy() || state.pending || signal?.aborted) return false;
+    if (signal?.aborted) return false;
     const generation = ++state.generation;
     const owner = state.conversationId;
     const replacing = Boolean(state.picked);
     state.pending = true;
+    state.consentOpen = false;
     state.picked = null; // beginning a replacement invalidates the old Files review
     notify('Choosing a folder…');
     try {
@@ -150,6 +151,44 @@ export function createFolderContextController({
         if (signal?.aborted)
           notify(replacing ? 'Choose the folder again. Your draft is unchanged.' : '');
         else changed(state);
+      }
+    }
+  }
+  function consent(open) {
+    if (!state.picked || state.pending || isBusy()) return;
+    state.consentOpen = open;
+    changed(state);
+  }
+  async function inspect() {
+    if (!state.picked || !state.consentOpen || state.pending || isBusy()) return false;
+    const generation = ++state.generation;
+    const picked = state.picked;
+    const owner = state.conversationId;
+    state.pending = true;
+    state.consentOpen = false;
+    notify('Looking at names and counts locally…');
+    try {
+      const observation = await post(`${ENDPOINT}/attachment`, {
+        ...target(),
+        action: 'inspect',
+        id: picked.id
+      });
+      if (generation !== state.generation || owner !== currentId()) return false;
+      if (!observation?.discussion_only || !observation.id)
+        throw new Error('Choose the folder again before inspecting.');
+      Object.assign(state, { observation, preview: true, authority: '', focusIDs: [] });
+      notify('');
+      return true;
+    } catch (error) {
+      if (generation === state.generation && owner === currentId()) {
+        state.picked = null;
+        notify(error.message || 'Choose the folder again. Your draft is unchanged.');
+      }
+      return false;
+    } finally {
+      if (generation === state.generation) {
+        state.pending = false;
+        changed(state);
       }
     }
   }
@@ -231,10 +270,15 @@ export function createFolderContextController({
       notify('Wait for the current reply before removing its folder.');
       return false;
     }
-    if (state.picked && !state.observation) {
+    if (state.picked) {
       state.generation++;
-      state.picked = null;
-      state.pending = false;
+      Object.assign(state, {
+        picked: null,
+        consentOpen: false,
+        pending: false,
+        observation: null,
+        preview: false
+      });
       notify('Folder removed. Your draft is unchanged.');
       return true;
     }
@@ -514,11 +558,18 @@ export function createFolderContextController({
       authority: 'revalidating'
     });
     changed(state);
+    if (state.picked || state.observation?.discussion_only) {
+      state.authority = saved.authority;
+      changed(state);
+      return true;
+    }
     return refreshRecommendation();
   }
   return {
     state,
     pick,
+    consent,
+    inspect,
     select,
     remove,
     reset,
@@ -1061,7 +1112,10 @@ function renderAttachment(state) {
   const view = folderComposerState(state, consumedSetup(state));
   const attached = Boolean(view?.observation || state?.picked);
   if (elements.picked) {
-    elements.picked.hidden = !state.picked;
+    elements.picked.hidden = !state.picked || Boolean(state.observation);
+    elements.consent.hidden = !state.consentOpen;
+    elements.look.hidden = state.consentOpen;
+    elements.look.disabled = state.pending;
     elements.question.textContent = state.picked
       ? `What would you like to do with ${state.picked.label}?`
       : '';
@@ -1079,7 +1133,7 @@ function renderAttachment(state) {
   elements.add.setAttribute('aria-label', attached ? 'Replace folder' : 'Add folder');
   elements.add.title = attached ? 'Replace folder' : '';
   elements.name.textContent = state?.picked?.label || view?.observation?.folder || '';
-  elements.remove.disabled = Boolean(state?.pending);
+  elements.remove.disabled = Boolean(state?.pending && !state.picked);
   elements.preview.hidden = !attached || !view.preview;
   elements.history.hidden = !attached || !view.authority;
   elements.history.textContent =
@@ -1266,6 +1320,8 @@ function init() {
     add,
     picked: document.getElementById('personalAssistantPickedFolder'),
     question: document.getElementById('personalAssistantPickedQuestion'),
+    consent: document.getElementById('personalAssistantInspectConsent'),
+    look: document.getElementById('personalAssistantLookAtNames'),
     chooser: document.getElementById('personalAssistantContextChooser'),
     choices: document.getElementById('personalAssistantFolderChoices'),
     active: document.getElementById('personalAssistantActiveFolder'),
@@ -1326,8 +1382,19 @@ function init() {
     },
     true
   );
+  elements.look?.addEventListener('click', () => {
+    controller.consent(true);
+    document.getElementById('personalAssistantInspectOnce')?.focus();
+  });
+  document.getElementById('personalAssistantInspectCancel')?.addEventListener('click', () => {
+    controller.consent(false);
+    elements.look.focus();
+  });
+  document.getElementById('personalAssistantInspectOnce')?.addEventListener('click', async () => {
+    if (await controller.inspect()) document.getElementById('personalAssistantInput')?.focus();
+  });
   elements.remove.addEventListener('click', async () => {
-    const saved = controller.state.accepted;
+    const saved = !controller.state.picked && controller.state.accepted;
     if (await controller.remove()) {
       if (saved) renderEvent(controller.state.revision, { version: 1 });
       elements.add.focus();

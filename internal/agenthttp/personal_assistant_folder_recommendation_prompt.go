@@ -12,7 +12,7 @@ import (
 // of new executable options. A current explicit review owns the chosen alternative.
 // Historical snapshots never trigger live discovery or regain review authority.
 func (h *HomeAssistantAskHandler) folderTurnRecommendation(ctx context.Context, turn *preparedFolderTurn) (personalassistant.FolderStructureProposal, *personalassistant.FolderOfferView) {
-	if turn == nil || turn.ref.Historical {
+	if turn == nil || turn.ref.Historical || (turn.observation != nil && turn.observation.DiscussionOnly) {
 		return personalassistant.FolderStructureProposal{}, nil
 	}
 	proposal := h.folderStructure(ctx, turn.target, turn.observation)

@@ -64,6 +64,9 @@ func (s *FolderObservationService) resolve(ctx context.Context, target foldercon
 
 func (s *FolderObservationService) resolveForReview(ctx context.Context, target foldercontext.Target, id, offerID string) (heldFolderObservation, FolderContinuationReason, error) {
 	held, reason, err := s.resolveHeld(ctx, target, id)
+	if held.observation.DiscussionOnly {
+		return heldFolderObservation{}, FolderContinuationLost, ErrFolderSelection
+	}
 	if err == nil && held.reheld == nil {
 		return held, reason, nil
 	}

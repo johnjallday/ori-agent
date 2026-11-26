@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { arrivalState, choiceInventory } from './helpers/workspace-choice-state';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -159,6 +159,11 @@ test('the assistant links a folder without starting a hire or filename scan', as
   const host = page.locator('#assistantExploreFolder');
   const inventory = () => choiceInventory(request, join(fixture!, 'data'));
   const initial = await inventory();
+  const audit = () =>
+    existsSync(join(fixture!, 'provider-audit.json'))
+      ? JSON.parse(readFileSync(join(fixture!, 'provider-audit.json'), 'utf8'))
+      : { requests: 0, hits: [] };
+  const baseline = audit(); // model configuration may have made its own readiness call
   const pickAlbums = () => host.getByRole('button', { name: 'Choose another folder…' }).click();
   await pickAlbums();
   const chip = page.locator('#personalAssistantActiveFolder');
@@ -181,6 +186,41 @@ test('the assistant links a folder without starting a hire or filename scan', as
     path: `tasks/evidence-assistant-folder-handoff/${browserName}/attachment.png`
   });
   expect(await inventory()).toEqual(initial);
+
+  const look = picked.getByRole('button', { name: 'Look at names and counts' });
+  await look.click();
+  await expect(picked).toContainText('one-time local look');
+  await picked.getByRole('button', { name: 'Cancel' }).click();
+  await expect(input).toHaveValue('What’s in here?');
+  await look.click();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/consent.png`
+  });
+  await picked.getByRole('button', { name: 'Preview locally' }).click();
+  const preview = page.locator('#personalAssistantFolderPreview');
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText('Send shares');
+  await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeHidden();
+  await expect(input).toHaveValue('What’s in here?');
+  expect(audit()).toEqual(baseline);
+  // Local preview works even with no model configured. Enable the isolated
+  // loopback model only now, for the explicit Send.
+  expect(
+    (
+      await request.post('/api/settings/system-model', {
+        data: { provider: 'ollama', model: 'ori-workspace-fixture' }
+      })
+    ).ok()
+  ).toBe(true);
+  await page.locator('#personalAssistantSend').click();
+  await expect(page.locator('#homeAssistantConversation')).toContainText(
+    'Fixture observation of Albums: Daybreak.wav'
+  );
+  expect(audit()).toEqual({ requests: baseline.requests + 1, hits: [1] });
+  expect(await inventory()).toEqual(initial);
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/answer.png`
+  });
 
   // The Files card still owns compact creation, receipt recovery and optional staffing.
   await page.goto('/?view=tree');

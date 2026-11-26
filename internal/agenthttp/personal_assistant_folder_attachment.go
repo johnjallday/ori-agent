@@ -76,6 +76,18 @@ func (h *HomeAssistantAskHandler) FolderAttachmentHandler(w http.ResponseWriter,
 		result, err = h.ChatFolders.PickForChat(ctx, owner, target, req.Revision, req.Kind)
 	case req.Action == "resume" && req.ID != "" && req.Kind == "":
 		result, _, err = h.ChatFolders.ResumeForChat(ctx, owner, target, req.Revision, req.ID)
+	case req.Action == "inspect" && req.ID != "" && req.Kind == "":
+		reader, ok := h.FolderObservations.(interface {
+			ObserveReviewed(context.Context, foldercontext.Target, func() (string, error)) (*foldercontext.Observation, error)
+		})
+		if !ok {
+			writeFolderError(w, foldercontext.ErrInvalid)
+			return
+		}
+		result, err = reader.ObserveReviewed(ctx, target, func() (string, error) {
+			_, path, e := h.ChatFolders.ResumeForChat(ctx, owner, target, req.Revision, req.ID)
+			return path, e
+		})
 	default:
 		err = foldercontext.ErrInvalid
 	}

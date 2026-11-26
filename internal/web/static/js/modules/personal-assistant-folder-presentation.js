@@ -265,13 +265,15 @@ export function renderFolderSummary(container, observation, options = {}) {
     container.append(
       node(
         'p',
-        'Local selection lasts up to 30 minutes. After a restart, pick again for setup.',
+        observation.discussion_only
+          ? 'Send shares this question and the recorded names, kinds, counts, markers, dates and coverage with your configured model. No file contents are shared.'
+          : 'Local selection lasts up to 30 minutes. After a restart, pick again for setup.',
         'personal-assistant-folder-context__note'
       )
     );
   if (view.rootMarker)
     container.append(node('p', view.rootMarker, 'personal-assistant-folder-context__marker'));
-  if (options.local)
+  if (options.local && !observation.discussion_only)
     container.append(
       node(
         'p',

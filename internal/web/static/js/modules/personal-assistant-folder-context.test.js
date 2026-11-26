@@ -77,6 +77,29 @@ test('a passive pick supplies no send reference; cancel and remove do not inspec
   );
 });
 
+test('explicit consent is required, and removing during inspection discards its result', async () => {
+  const waiting = deferred();
+  const { controller, calls } = fixture((_, body) =>
+    body.action === 'pick' ? { id: 'review', label: 'Albums' } : waiting.promise
+  );
+  await controller.pick('custom');
+  assert.equal(await controller.inspect(), false);
+  controller.consent(true);
+  controller.consent(false);
+  assert.equal(await controller.inspect(), false);
+  controller.consent(true);
+  const inspection = controller.inspect();
+  assert.equal(await controller.inspect(), false);
+  await controller.remove();
+  waiting.resolve({ ...observation('snap'), discussion_only: true });
+  assert.equal(await inspection, false);
+  assert.equal(controller.request(), null);
+  assert.deepEqual(
+    calls.map(c => c.body.action),
+    ['pick', 'inspect']
+  );
+});
+
 test('a second pick while choosing or a late result after a switch cannot attach', async () => {
   const waiting = deferred();
   const { controller, calls, setId } = fixture(() => waiting.promise);

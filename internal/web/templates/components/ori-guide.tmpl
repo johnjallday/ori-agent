@@ -398,6 +398,12 @@
       <section id="personalAssistantPickedFolder" class="personal-assistant-folder-context" aria-labelledby="personalAssistantPickedQuestion" hidden>
         <h3 id="personalAssistantPickedQuestion"></h3>
         <p>Attached locally. Nothing inside has been inspected or shared.</p>
+        <button type="button" id="personalAssistantLookAtNames" class="personal-assistant-conversation__button" aria-controls="personalAssistantInspectConsent">Look at names and counts</button>
+        <div id="personalAssistantInspectConsent" hidden>
+          <p>A one-time local look at names, kinds, counts and dates. No file contents are read. You’ll see a preview before anything is shared.</p>
+          <button type="button" id="personalAssistantInspectOnce" class="personal-assistant-conversation__button">Preview locally</button>
+          <button type="button" id="personalAssistantInspectCancel" class="personal-assistant-conversation__button">Cancel</button>
+        </div>
       </section>
       {{end}}
       <div id="personalAssistantContextProgress"></div>

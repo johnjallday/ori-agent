@@ -614,6 +614,9 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		// folder's own card (#689: the hire card, or the review it offers while
 		// its plugin is missing), so the request's hire offer stays out of the
 		// way; any other folder leaves it available, as a link does.
+		if folderTurn.observation.DiscussionOnly {
+			return h.answerFolderTurn(ctx, prompt, req.Draft, identity, workContext, conversation, folderTurn)
+		}
 		if h.folderOwnsTheOffer(ctx, folderTurn) {
 			ctx = context.WithValue(ctx, hireProposalWithheldKey{}, true)
 		} else if proposal := h.hireProposalForPrompt(ctx, conversation, prompt); proposal != nil {

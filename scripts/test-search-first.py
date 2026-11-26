@@ -3,6 +3,9 @@
 import argparse
 import contextlib
 import json
+import runpy
+import threading
+from http.server import ThreadingHTTPServer
 import os
 from pathlib import Path
 import socket
@@ -38,13 +41,15 @@ def api(url, path, body=None):
 
 
 @contextlib.contextmanager
-def serve(root, rev=None, build_tmp=None, fixture_binary=None):
+def serve(root, rev=None, build_tmp=None, fixture_binary=None, provider=None):
     assert (root/'.search-first-fixture').read_text() == 'synthetic-v1\n'
     number = port()
     url = f'http://localhost:{number}'
     (root/'.search-first-test-url').write_text(url+'\n')
     env = {k: os.environ[k] for k in ('PATH','HOME','TMPDIR','GOCACHE','GOMODCACHE','GOPATH') if k in os.environ}
     env.update(GOWORK='off', ORI_DEMO_REQUIRE_FREE_PORT='1', ORI_DEMO_SPLIT_PROFILE='1', HTTP_PROXY='http://127.0.0.1:1', HTTPS_PROXY='http://127.0.0.1:1', NO_PROXY='localhost,127.0.0.1')
+    if provider:
+        env['OLLAMA_BASE_URL'] = f'http://127.0.0.1:{provider.server_port}'
     if rev:
         # git archive and Go scratch never become dependencies on another checkout.
         env['TMPDIR'] = str(build_tmp)
@@ -171,8 +176,15 @@ if __name__=='__main__':
             albums=root/'home/Albums'
             albums.mkdir()
             (albums/'Daybreak.wav').write_text('private-content-sentinel\n')
-            with serve(root,fixture_binary=binary) as url:
-                spec(root,url,'folder-assistant','folder-backed-search-locations',browser)
+            fake = runpy.run_path(str(REPO/'scripts/assistant-workspace-demo.py'))
+            (root/'sentinels.json').write_text(json.dumps(['private-content-sentinel','Daybreak.wav']))
+            with ThreadingHTTPServer(('127.0.0.1',0), fake['provider_handler'](root,folder_response=True)) as provider:
+                threading.Thread(target=provider.serve_forever,daemon=True).start()
+                try:
+                    with serve(root,fixture_binary=binary,provider=provider) as url:
+                        spec(root,url,'folder-assistant','folder-backed-search-locations',browser)
+                finally:
+                    provider.shutdown()
         for browser in BROWSERS:
             if not args.folder_backed:
                 assistant_journey(browser)
