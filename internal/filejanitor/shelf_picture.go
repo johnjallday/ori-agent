@@ -40,8 +40,8 @@ type ShelfFile struct {
 }
 
 type shelfScope struct {
-	root                      ManagedRoot
-	witness, scope, filedName string
+	root                                      ManagedRoot
+	witness, scope, filedName, methodRevision string
 }
 
 func shelfWitness(generation, id string) string {
@@ -78,7 +78,7 @@ func (s *Service) shelfScope(owner, id string) (shelfScope, error) {
 	if err != nil || !info.IsDir() || shelfWitness(root.Generation, platformFileID(info)) != proof.Witness {
 		return no, ErrReviewUnavailable
 	}
-	return shelfScope{root: root, witness: platformFileID(info), scope: reviewScopeDigest(root, install), filedName: settings.FilingRootName}, nil
+	return shelfScope{root: root, witness: platformFileID(info), scope: reviewScopeDigest(root, install), filedName: settings.FilingRootName, methodRevision: settings.MethodRevision}, nil
 }
 
 func (s shelfScope) folders(parent DirRef) ([]PictureShelf, bool, error) {
@@ -258,7 +258,7 @@ func (s *Service) shelfPicture(ctx context.Context, owner, id, batchID, parentKe
 		versions = append(versions, c.Fingerprint.Key())
 		view.Files = append(view.Files, ShelfFile{ID: c.ID, Name: c.Display(), Suggested: suggestedShelf(c.Name, first)})
 	}
-	view.Revision, err = setupDigest([]any{"filing-shelves-v1", scope.scope, scope.witness, batchID, draft.Revision, groups.Revision, first, view.Files, versions})
+	view.Revision, err = setupDigest([]any{"filing-shelves-v1", scope.scope, scope.witness, scope.methodRevision, batchID, draft.Revision, groups.Revision, first, view.Files, versions})
 	if err != nil {
 		return no, err
 	}

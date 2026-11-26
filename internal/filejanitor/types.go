@@ -184,6 +184,9 @@ type JanitorSettings struct {
 	FilingRootName string `json:"filing_root_name,omitempty"`
 	// Station setup grants metadata access without creating a destination.
 	DeferredDestination bool `json:"deferred_destination,omitempty"`
+	// The local layout is presentation, not approval. Its revision invalidates a picture from before a change, even if the person later switches back.
+	FilingMethod   string `json:"filing_method,omitempty"`
+	MethodRevision string `json:"method_revision,omitempty"`
 	// A stopped build keeps its completed part; this note grants nothing.
 	StoppedStationPart string `json:"stopped_station_part,omitempty"`
 	// DailyScanLocalTime is the daily catch-up time as "HH:MM" wall clock.
@@ -302,6 +305,10 @@ func (s JanitorSettings) Normalize() JanitorSettings {
 		out.SetupDecision = nil
 		out.SetupPreparation = nil
 		out.SendsTo = nil
+		out.FilingMethod, out.MethodRevision = "", ""
+	}
+	if !validFilingMethod(out.FilingMethod) || !managedRootGeneration.MatchString(out.MethodRevision) {
+		out.FilingMethod, out.MethodRevision = "", ""
 	}
 	switch out.StoppedStationPart {
 	case "plot", "foundation", "walls", "roof":

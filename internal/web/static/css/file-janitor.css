@@ -31,6 +31,24 @@
   padding: 0.85rem;
   min-width: 0;
 }
+.fj-method .fj-shelf {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+.fj-method .fj-shelf .fj-btn {
+  margin-top: auto;
+}
+.fj-method-suggested {
+  font-weight: 600;
+  border-inline-start: 0.2rem solid currentColor;
+  padding-inline-start: 0.5rem;
+}
+.fj-shelf-tools .fj-label input {
+  display: block;
+  max-width: 100%;
+}
 .fj-shelf-new {
   border-style: dashed;
 }

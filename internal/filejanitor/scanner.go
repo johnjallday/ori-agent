@@ -131,6 +131,15 @@ func (s *Scanner) ResolveRoot(settings JanitorSettings) (string, error) {
 	if filepath.Clean(actual) != resolved {
 		return "", fmt.Errorf("%w: the folder you approved now points somewhere else", ErrRootUnavailable)
 	}
+	// A station's reviewed layout belongs to the physical directory. The
+	// legacy unattended scanner keeps its existing recovery contract until
+	// this workspace opts into a station method.
+	if proof := settings.ApprovedReference; (settings.DeferredDestination || settings.MethodRevision != "") && proof != nil && proof.Witness != "" {
+		info, err := os.Lstat(resolved) // #nosec G304 G703 -- canonical grant path, checked for identity only
+		if err != nil || !info.IsDir() || proof.RootID != settings.RootID || proof.ReferenceID != reference.ID || shelfWitness(settings.RootID, platformFileID(info)) != proof.Witness {
+			return "", fmt.Errorf("%w: the folder you approved has been replaced", ErrRootUnavailable)
+		}
+	}
 	return resolved, nil
 }
 

@@ -48,7 +48,7 @@
       if (!picture) {
         if (!busy) {
           host.appendChild(button('Reload picture', () => void load()));
-          host.appendChild(button('Back to By kind', back, 'fj-link'));
+          host.appendChild(button('Change filing method', back, 'fj-link'));
         }
         if (focus === 'title') title.focus();
         return;
@@ -197,10 +197,9 @@
           !!folders.get(select.value)?.parent ||
           !!folders.get(select.value)?.located;
       });
-      const lookup = node('details', 'fj-shelf-lookup');
-      const summary = node('summary', '', 'Find a folder by name');
-      lookup.appendChild(summary);
       const search = node('form', 'fj-shelf-tools');
+      const label = node('label', 'fj-label', 'Find a folder by name');
+      search.appendChild(label);
       const name = node('input', 'fj-input');
       name.setAttribute('aria-label', 'Existing folder name, such as Orders or Orders/Winter');
       name.placeholder = 'Orders or Orders/Winter';
@@ -210,9 +209,9 @@
       const find = node('button', 'fj-btn fj-btn-secondary', 'Add named shelf');
       find.type = 'submit';
       find.disabled = !active();
-      search.append(name, find);
-      lookup.appendChild(search);
-      host.appendChild(lookup);
+      label.appendChild(name);
+      search.appendChild(find);
+      host.appendChild(search);
       search.addEventListener('submit', e => {
         e.preventDefault();
         if (active()) void findShelf(name.value);
@@ -250,7 +249,8 @@
       );
       file.disabled = busy || Boolean(naming) || !picture.supported || !count || count > 1000;
       footer.appendChild(file);
-      const reset = button('Back to By kind', back, 'fj-link');
+      const reset = button('Filing into my folders · Change', back, 'fj-link');
+      reset.id = 'fileJanitorChangeMethod';
       reset.disabled = busy || !!waiting;
       footer.appendChild(reset);
       if (focus === 'title') title.focus();
@@ -450,7 +450,7 @@
       }
     }
     draw();
-    return { host, load };
+    return { host, load, pending: () => busy || Boolean(waiting) };
   }
   window.FilingStationShelves = { create };
 })();

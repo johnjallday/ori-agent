@@ -338,7 +338,11 @@ func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state Sc
 	if out.plan.Changed.Items == nil {
 		out.plan.Changed.Items = []PlanChanged{}
 	}
-	out.plan.PlanDigest = planDigest(workspaceID, batchID, binding.Digest, view.Revision, groups.Revision, out.lines, out.items, changed, routes)
+	scope := binding.Digest
+	if settings.MethodRevision != "" {
+		scope += "/" + settings.MethodRevision
+	}
+	out.plan.PlanDigest = planDigest(workspaceID, batchID, scope, view.Revision, groups.Revision, out.lines, out.items, changed, routes)
 	return out, nil
 }
 

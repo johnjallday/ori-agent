@@ -60,6 +60,8 @@ func (h *Handler) registerUnder(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+base+"/content-consent", h.GrantConsent)
 	mux.HandleFunc("POST "+base+"/relink", h.Relink)
 	mux.HandleFunc("POST "+base+"/revoke", h.RevokeAccess)
+	mux.HandleFunc("GET "+base+"/method", h.StationMethod)
+	mux.HandleFunc("POST "+base+"/method", h.StationMethod)
 	mux.HandleFunc("GET "+base+"/connections", h.ListConnections)
 	mux.HandleFunc("POST "+base+"/connections", h.CreateConnection)
 	mux.HandleFunc("POST "+base+"/connections/{connectionID}/turn-off", h.TurnOffConnection)

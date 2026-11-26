@@ -759,6 +759,7 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 		settings.Timezone = timezone
 		settings.LastAssistedAutomation = nil
 		if rootChanged {
+			settings.FilingMethod, settings.MethodRevision = "", ""
 			settings.AutomationApprovedAt = time.Time{}
 			settings.SetupDecision = nil
 		}

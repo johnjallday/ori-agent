@@ -266,15 +266,27 @@ test('the manager offers a first look on Open; dismissal and return do not start
     // setup or by selecting a chip. Exercise the admitted File and Undo too.
     expect((await readdir(root)).sort()).toEqual(stationTree);
     if (!(await station.isVisible())) await building.press('Enter');
-    await station.getByRole('button', { name: 'Into my folders', exact: true }).press('Enter');
+    const method = station.getByRole('region', { name: 'Filing method' });
+    await expect(method).toContainText('How should Documents be filed?');
+    await expect(method).toContainText('Suggested · This folder already has shelves.');
+    await expect(method.getByRole('button', { name: 'Send to another workspace' })).toBeDisabled();
+    await method.screenshot({ path: info.outputPath('method-chooser.png') });
+    await method.getByRole('button', { name: 'Into my folders', exact: true }).press('Enter');
     const shelves = station.locator('.fj-shelves');
     await expect(shelves).toContainText('8 ready to file · 5 stay loose');
-    await shelves.getByText('Find a folder by name', { exact: true }).press('Enter');
+    await page.reload();
+    if (!(await station.isVisible())) await building.press('Enter');
+    await expect(shelves).toContainText('8 ready to file · 5 stay loose');
+    await expect(method).toHaveCount(0);
     await shelves.getByRole('textbox', { name: /Existing folder name/ }).fill('Trips');
     await shelves.getByRole('button', { name: 'Add named shelf' }).press('Enter');
     await expect(shelves).toContainText('Trips is in the picture.');
     await shelves.getByRole('button', { name: 'estimate.txt', exact: true }).press('Enter');
     await shelves.getByRole('button', { name: 'Move here: Trips', exact: true }).press('Enter');
+    await expect(shelves).toContainText('9 ready to file · 4 stay loose');
+    await shelves.getByRole('button', { name: 'Filing into my folders · Change' }).press('Enter');
+    await expect(method).toContainText('Changing the method replaces your unfiled picture.');
+    await method.getByRole('button', { name: 'Keep current picture' }).press('Enter');
     await expect(shelves).toContainText('9 ready to file · 4 stay loose');
     await verifyBytes();
     await page.screenshot({ path: info.outputPath('own-shelves.png') });
@@ -322,6 +334,11 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await expect.poll(() => readdir(join(root, 'Invoices'))).toEqual([]);
     await page.screenshot({ path: info.outputPath('undo-retained-folder.png') });
     await verifyBytes();
+    expect((await readdir(root)).sort()).toEqual([...stationTree, 'Invoices'].sort());
+    await station.getByRole('tab', { name: 'Settings', exact: true }).click();
+    await station.locator('#fileJanitorChangeMethod').press('Enter');
+    await method.getByRole('button', { name: 'By kind', exact: true }).press('Enter');
+    await expect(station).toContainText('Filing by kind');
     expect((await readdir(root)).sort()).toEqual([...stationTree, 'Invoices'].sort());
     return;
   }

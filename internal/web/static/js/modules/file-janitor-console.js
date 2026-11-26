@@ -2973,7 +2973,82 @@
   // the picture read says. A tick or untick is one saved edit through the same
   // lifecycle as every other choice, and the picture is redrawn from the server's
   // next read, never from this module's own arithmetic.
-  let shelfVisit = null;
+  let shelfVisit = null,
+    methodVisit = null;
+  function filingMethod() {
+    const s = lastStatus?.settings;
+    return s?.filing_method || (s?.deferred_destination ? '' : 'by_kind');
+  }
+  function changeMethod() {
+    if (!window.FilingStationMethod || busy || pressing || shelfVisit?.surface?.pending()) return;
+    const scope = requestScope();
+    const root = lastStatus?.settings?.root_id;
+    if (!root) return;
+    const was = filingMethod();
+    const visit = { scope, root };
+    methodVisit = visit;
+    const current = () =>
+      methodVisit === visit &&
+      consoleOpen &&
+      scopeCurrent(scope) &&
+      lastStatus?.settings?.root_id === root;
+    visit.surface = window.FilingStationMethod.create({
+      doc: document,
+      base: apiBase(scope.id),
+      current,
+      hasPicture: !!shelfVisit,
+      cancel: was
+        ? () => {
+            if (current()) {
+              methodVisit = null;
+              renderBatch();
+              document.getElementById('fileJanitorChangeMethod')?.focus();
+            }
+          }
+        : null,
+      send: () => {
+        if (current()) {
+          methodVisit = null;
+          openConnectFromReview();
+        }
+      },
+      saved(method) {
+        if (!current()) return;
+        methodVisit = null;
+        if (method !== was) {
+          shelfVisit = null;
+          discardProtectionApproval();
+          resetPicture();
+        }
+        lastStatus.settings.filing_method = method;
+        renderBatch();
+        void refresh();
+      }
+    });
+    reviewView = 'groups';
+    if (consoleTab !== 'review') selectTab('review');
+    renderBatch();
+    void visit.surface.load();
+  }
+  function methodControl() {
+    const m = filingMethod();
+    const row = el('div', 'fj-shelf-tools');
+    row.appendChild(
+      el(
+        'span',
+        'fj-label',
+        m === 'own_folders'
+          ? 'Filing into my folders'
+          : m === 'by_kind'
+            ? 'Filing by kind'
+            : 'How this folder is filed'
+      )
+    );
+    const b = button(m ? 'Change' : 'Choose filing method', 'fj-link', changeMethod);
+    b.id = 'fileJanitorChangeMethod';
+    row.appendChild(b);
+    return row;
+  }
   function openShelfPicture() {
     if (!lastBatch || !window.FilingStationShelves || shelfVisit || busy) return;
     const scope = requestScope(),
@@ -2989,21 +3064,18 @@
       current,
       key: newClientKey,
       back() {
-        if (!current()) return;
-        shelfVisit = null;
-        renderBatch();
-        document.getElementById('fileJanitorOpenShelves')?.focus();
+        if (current()) changeMethod();
       },
       async receipt(result) {
+        if (!current()) return;
+        await showReceipt(scope, result);
         if (!current()) return;
         shelfVisit = null;
         await loadBatch();
         if (!scopeCurrent(scope)) return;
-        await showReceipt(scope, result);
         await loadHistory();
       }
     });
-    renderBatch();
     void visit.surface.load();
   }
   function renderPictureView() {
@@ -3295,6 +3367,28 @@
     const otherScan = otherScanLine();
     if (otherScan) container.appendChild(otherScan);
 
+    if (
+      consoleOpen &&
+      window.FilingStationMethod &&
+      lastStatus?.settings?.root_id &&
+      reviewView === 'groups'
+    ) {
+      if (
+        methodVisit &&
+        (!scopeCurrent(methodVisit.scope) || methodVisit.root !== lastStatus.settings.root_id)
+      )
+        methodVisit = null;
+      if (!methodVisit && !filingMethod() && !lastResults && !busy && !pressing) {
+        changeMethod();
+        return;
+      }
+      if (methodVisit) {
+        container.appendChild(methodVisit.surface.host);
+        if (headerAllFiles) headerAllFiles.hidden = true;
+        return;
+      }
+      if (!lastResults && filingMethod() !== 'own_folders') container.appendChild(methodControl());
+    }
     if (!lastBatch) {
       if (batchLoadState === 'loading' || batchLoadState === 'error') return;
       const empty = el('div', 'fj-empty');
@@ -3341,14 +3435,11 @@
       // the header and owns the progress, picker and filters.
       if (shelfVisit && (!scopeCurrent(shelfVisit.scope) || shelfVisit.batch !== lastBatch.id))
         shelfVisit = null;
-      if (shelfVisit?.surface) {
-        container.appendChild(shelfVisit.surface.host);
+      if (consoleOpen && filingMethod() === 'own_folders' && window.FilingStationShelves) {
+        if (lastResults) return;
+        if (!shelfVisit) openShelfPicture();
+        if (shelfVisit?.surface) container.appendChild(shelfVisit.surface.host);
         return;
-      }
-      if (lastStatus?.settings?.deferred_destination && window.FilingStationShelves) {
-        const shelves = button('Into my folders', 'fj-btn fj-btn-secondary', openShelfPicture);
-        shelves.id = 'fileJanitorOpenShelves';
-        container.appendChild(shelves);
       }
       container.appendChild(renderPictureView());
       if (protection) container.appendChild(protection);
@@ -3662,6 +3753,8 @@
     const title = el('h3', 'fj-settings-title', 'Settings');
     title.id = 'fileJanitorSettingsTitle';
     panel.appendChild(title);
+    if (window.FilingStationMethod && consoleOpen && settings.root_id)
+      panel.appendChild(methodControl());
 
     // Daily catch-up time.
     const timeRow = el('div', 'fj-setting');
@@ -4808,6 +4901,7 @@
     lastResults = null;
     const host = document.getElementById('fileJanitorResultsHost');
     if (host) clear(host);
+    if (filingMethod() === 'own_folders') renderBatch();
     // The button that was pressed is gone. Focus goes to the picture; when the
     // review has nothing left to draw, to the Scan now button, then to the tab, so a
     // keyboard user is never dropped at the top of the page.
@@ -5857,6 +5951,7 @@
     if (!consoleOpen) return false;
     discardProtectionApproval();
     shelfVisit = null;
+    methodVisit = null;
     lastResults = null;
     consoleOpen = false;
     if (stationBuildOpen()) {
@@ -6225,7 +6320,10 @@
   function selectTab(tab) {
     const next = validTab(tab);
     if (!next) return;
-    if (consoleTab !== next) consoleVisit++;
+    if (consoleTab !== next) {
+      consoleVisit++;
+      if (next !== 'review') methodVisit = null;
+    }
     // Coming back to Review reads what arrived again: a send may have landed, or
     // been undone from the other workspace, meanwhile.
     if (next === 'review' && consoleTab !== next) arrivalsLoadState = 'idle';
