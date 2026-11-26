@@ -1,5 +1,16 @@
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
@@ -67,6 +78,16 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(evidence, `${name}.png`), animations: 'disabled' });
 }
 
+const linkedEvidence = 'tasks/evidence-workspace-linked-project-files';
+
+async function linkedFixture(page: Page, owner: string, name: string, path: string) {
+  const res = await page.request.post(`/api/workspaces/${owner}/directories`, {
+    data: { name, path }
+  });
+  expect(res.ok(), await res.text()).toBe(true);
+  return (await res.json()).directory.id as string;
+}
+
 const keyed = (page: Page, key: string) => reader(page).locator(`[data-key="${key}"]`);
 const mode = (page: Page, name: string) => page.locator(`[data-cmd-view-mode="${name}"]`);
 async function ready(page: Page) {
@@ -87,6 +108,198 @@ async function musicGroup(page: Page) {
   }
   return { home, demo, albums };
 }
+
+for (const phone of [false, true])
+  test(`linked Track-2 reveals its original only on disclosure (${phone ? 'phone, dark' : 'desktop, light'})`, async ({
+    page
+  }) => {
+    test.setTimeout(60000);
+    await page.setViewportSize(phone ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+    await page.addInitScript(
+      theme => localStorage.setItem('ori-theme', theme),
+      phone ? 'dark' : 'light'
+    );
+    const home = await workspace(page, 'Music Production Home', '', true);
+    const demo = await workspace(page, 'Ori Music Demo', home.id, true);
+    const track = await workspace(page, 'Track-2', demo.id);
+    await files(page, track.id); // verify this server belongs to the supplied sandbox
+    const fixtures = mkdtempSync(join(realpathSync(process.env.ORI_SANDBOX!), 'linked-'));
+    execFileSync('./scripts/folder-agent-fixtures.sh', [fixtures]);
+    const project = join(fixtures, 'Ori Music Demo', 'Picker Songs', track.name);
+    const ref = await linkedFixture(page, track.id, 'Project', project);
+    const sibling = await workspace(page, 'Track-1', demo.id);
+    const siblingRef = await linkedFixture(
+      page,
+      sibling.id,
+      'Project',
+      join(dirname(project), 'Track-1')
+    );
+    const absent = join(fixtures, 'Filed');
+    mkdirSync(absent);
+    const missing = await linkedFixture(page, track.id, 'Archive', absent);
+    renameSync(absent, `${absent}-offline`);
+    await page.goto(`/workspaces/${home.folder_slug}?mode=map`);
+    await ready(page);
+    const viewport = page.locator('[data-ws-map-viewport]');
+    await viewport.press('+');
+    await viewport.press('ArrowRight');
+    const camera = () => page.evaluate(() => (window as any).OriWorkspaceMap.getCamera());
+    const moved = await camera();
+    await mode(page, 'files').click();
+    const reads: string[] = [];
+    page.on('request', r => {
+      const path = new URL(r.url()).pathname;
+      if (
+        path.includes('/directories/') ||
+        (path.endsWith('/open') && !path.endsWith('/lead-conversation/open'))
+      )
+        reads.push(`${r.method()} ${path}`);
+    });
+    await row(page, 'Linked workspaces').click();
+    await row(page, demo.name).click();
+    await keyed(page, sibling.id).click();
+    await keyed(page, `${sibling.id}/s/files`).click();
+    await keyed(page, `${sibling.id}/l/${siblingRef}`).press('Enter');
+    await keyed(page, `${sibling.id}/lf/${siblingRef}/Song.rpp`).press('Enter');
+    await expect(reader(page).locator('.wf-crumb')).toHaveText(
+      'Track-1 / Files / Project / Song.rpp'
+    );
+    if (phone) await reader(page).getByRole('button', { name: 'Back to files' }).press('Enter');
+    await keyed(page, sibling.id).click();
+    await row(page, track.name).click();
+    await keyed(page, `${track.id}/s/files`).click();
+    await expect(row(page, 'Project Linked folder')).toBeVisible();
+    expect(reads.splice(0)).toEqual([
+      `GET /api/workspaces/${sibling.id}/directories/${siblingRef}/entries`
+    ]);
+    await row(page, 'Project Linked folder').click();
+    await row(page, 'Song.rpp').press('Enter');
+    await expect(reader(page).locator('.wf-crumb')).toHaveText(
+      'Track-2 / Files / Project / Song.rpp'
+    );
+    await expect(page.locator('.ws-cmd-title h2')).toHaveText(home.name);
+    await page.screenshot({
+      path: join(linkedEvidence, phone ? 'track-2-phone.png' : 'track-2.png')
+    });
+    if (phone) {
+      await reader(page).getByRole('button', { name: 'Back to files' }).press('Enter');
+      await expect(row(page, 'Song.rpp')).toBeFocused();
+    }
+    await row(page, 'Archive Linked folder').click();
+    await expect(row(page, 'Folder unavailable. Retry')).toBeVisible();
+    await row(page, 'Folder unavailable. Retry').scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: join(linkedEvidence, phone ? 'unavailable-phone.png' : 'unavailable.png')
+    });
+    expect(reads).toEqual(
+      [ref, missing].map(id => `GET /api/workspaces/${track.id}/directories/${id}/entries`)
+    );
+    await mode(page, 'map').click();
+    await expect(viewport).toBeVisible();
+    expect(await camera()).toEqual(moved);
+  });
+
+test('a linked alternate opens only by explicit sandbox dispatch; disconnect refuses replay', async ({
+  page
+}) => {
+  const sandbox = realpathSync(process.env.ORI_SANDBOX!);
+  const sidecar = mkdtempSync(join(sandbox, 'reader-export-'));
+  const project = mkdtempSync(join(sandbox, 'reader-project-'));
+  const id = randomUUID(),
+    ref = randomUUID(),
+    slug = `project-${id.slice(0, 8)}`;
+  const now = new Date().toISOString();
+  const locator = {
+    schema_version: 1,
+    kind: 'directory_reference',
+    directory_reference_id: ref,
+    relative_path: 'Song.rpp'
+  };
+  const originals = ['Song.rpp', 'Alternate.rpp'];
+  const content = (name: string) => `<REAPER_PROJECT 0.1 "7.0" 0\n  NOTES 0 0\n  |${name}\n>\n`;
+  for (const name of originals) writeFileSync(join(project, name), content(name), { mode: 0o600 });
+  writeFileSync(
+    join(sidecar, 'workspace.json'),
+    JSON.stringify({
+      id,
+      name: 'Album sessions',
+      folder_slug: slug,
+      status: 'active',
+      created_at: now,
+      updated_at: now,
+      directory_references: [
+        {
+          id: ref,
+          name: 'Session originals',
+          workspace_id: id,
+          path: project,
+          created_at: now,
+          updated_at: now
+        }
+      ],
+      shared_data: { project_entry: locator }
+    }),
+    { mode: 0o600 }
+  );
+  const imported = await page.request.post('/api/workspaces/import', { data: { path: sidecar } });
+  expect(imported.ok(), await imported.text()).toBe(true);
+  created.push(id);
+  const owned = await files(page, id);
+  writeFileSync(join(owned, 'Credits.txt'), 'Credits');
+  const api = `/api/workspaces/${id}/directories/${ref}`;
+  const listed = await (await page.request.get(`${api}/entries`)).json();
+  expect(
+    listed.desktop_disabled,
+    'refuse to dispatch unless desktop launches are disabled in the server'
+  ).toBe(true);
+  test.skip(
+    !listed.entries.find((entry: { path: string }) => entry.path === 'Alternate.rpp')?.selection,
+    'native open is Mac-only'
+  );
+  await page.goto(`/workspaces/${slug}?mode=files`);
+  await page
+    .getByRole('dialog', { name: 'Hire a Commander for this workspace?' })
+    .getByRole('button', { name: 'Not now' })
+    .click();
+  const sent: string[] = [];
+  page.on('request', r => {
+    if (r.url().endsWith(`${api}/open`)) sent.push(r.postDataJSON().path);
+  });
+  await row(page, 'Files').click();
+  await expect(row(page, 'Stored in Ori')).toBeVisible();
+  await row(page, 'Session originals Linked folder').click();
+  await row(page, 'Song.rpp').click();
+  await row(page, 'Alternate.rpp').press('Enter');
+  const open = reader(page).getByRole('button', { name: 'Open in default app' });
+  await expect(open).toBeEnabled();
+  expect(sent).toEqual([]);
+  await open.click();
+  await expect(reader(page)).toContainText('Sandbox dispatch accepted. No application was opened.');
+  expect(sent).toEqual(['Alternate.rpp']);
+  await page.screenshot({ path: join(linkedEvidence, 'alternate-dispatch.png') });
+  const persisted = JSON.parse(readFileSync(join(dirname(owned), 'workspace.json'), 'utf8'));
+  expect(persisted.shared_data.project_entry).toEqual(locator);
+  // Disconnect after the user clicks but before the queued POST reaches the host.
+  await page.route(
+    `**${api}/open`,
+    async route => {
+      expect((await page.request.delete(api)).ok()).toBe(true);
+      await route.continue();
+    },
+    { times: 1 }
+  );
+  const refused = page.waitForResponse(r => r.url().endsWith(`${api}/open`));
+  await open.click();
+  expect((await refused).status()).toBe(404);
+  await expect
+    .poll(async () => await reader(page).innerText())
+    .toMatch(/Linked folder unavailable|Select a file or note/);
+  await page.screenshot({ path: join(linkedEvidence, 'disconnected.png') });
+  expect(readdirSync(owned)).toEqual(['Credits.txt']);
+  expect(readdirSync(project).sort()).toEqual([...originals].sort());
+  for (const name of originals)
+    expect(readFileSync(join(project, name), 'utf8')).toBe(content(name));
+});
 
 test('group keeps its identity while reading same-named files in linked albums', async ({
   page

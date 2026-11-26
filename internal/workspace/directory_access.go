@@ -29,6 +29,7 @@ var (
 type DirectoryEntry struct {
 	// Version is populated by the contained reader only. Never expose device/inode values through listing APIs.
 	Version      SourceVersion `json:"-"`
+	mode         os.FileMode   // matched to Version on the same Lstat
 	Name         string        `json:"name"`
 	RelativePath string        `json:"path"`
 	Kind         string        `json:"kind"` // file | folder | link
@@ -38,7 +39,8 @@ type DirectoryEntry struct {
 
 // DirectoryListing is a bounded listing.
 type DirectoryListing struct {
-	Entries []DirectoryEntry
+	rootIdentity string // contained reader only; never serialized
+	Entries      []DirectoryEntry
 	// Truncated reports that the entry cap stopped the listing early.
 	Truncated bool
 }

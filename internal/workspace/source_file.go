@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -275,6 +276,21 @@ func readContainedFile(root, relativePath string, maxBytes int64, rootID string,
 // skips hidden entries and Ori's own record files. It reads names, sizes and
 // times only; no file is opened.
 func ListContainedEntries(root, relativePath string, depth int) (DirectoryListing, error) {
+	return listContainedEntries(root, relativePath, depth, false)
+}
+
+// listContainedPage bounds the directory read itself, including names that are
+// later excluded. Do not enumerate the rest just to sort or count the folder.
+func listContainedPage(root, relativePath string) (DirectoryListing, error) {
+	if relativePath != "" {
+		if clean, err := ContainedRelativePath(relativePath); err != nil || clean != relativePath {
+			return DirectoryListing{}, ErrSourceExcluded
+		}
+	}
+	return listContainedEntries(root, relativePath, 1, true)
+}
+
+func listContainedEntries(root, relativePath string, depth int, page bool) (DirectoryListing, error) {
 	start := "."
 	if strings.TrimSpace(relativePath) != "" && strings.TrimSpace(relativePath) != "." {
 		rel, err := ContainedRelativePath(relativePath)
@@ -283,25 +299,11 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 		}
 		start = rel
 	}
-	if !filepath.IsAbs(root) {
-		return DirectoryListing{}, ErrSourceUnreadable
-	}
-	root = filepath.Clean(root)
-	rootInfo, err := os.Lstat(root) // #nosec G304 G703 -- a folder resolved from canonical state by the caller, never a request path
+	folder, rootID, err := openLinkedRoot(root)
 	if err != nil {
-		return DirectoryListing{}, ErrSourceMissing
-	}
-	if !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
-		return DirectoryListing{}, ErrSourceOutside
-	}
-	folder, err := os.OpenRoot(root)
-	if err != nil {
-		return DirectoryListing{}, ErrSourceUnreadable
+		return DirectoryListing{}, err
 	}
 	defer func() { _ = folder.Close() }()
-	if opened, err := folder.Stat("."); err != nil || !os.SameFile(rootInfo, opened) {
-		return DirectoryListing{}, ErrSourceChanged
-	}
 	if depth <= 0 || depth > DirectoryListMaxDepth {
 		depth = DirectoryListMaxDepth
 	}
@@ -318,10 +320,16 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 		}
 		defer func() { _ = top.Close() }()
 	}
-	var listing DirectoryListing
+	listing := DirectoryListing{rootIdentity: rootID}
 	var walk func(current *os.Root, dir string, level int) error
 	walk = func(current *os.Root, dir string, level int) error {
-		entries, err := fs.ReadDir(current.FS(), ".")
+		var entries []fs.DirEntry
+		var err error
+		if page {
+			entries, listing.Truncated, err = readDirectoryPage(current)
+		} else {
+			entries, err = fs.ReadDir(current.FS(), ".")
+		}
 		if err != nil {
 			// An unreadable subfolder is skipped; the starting folder's error surfaces.
 			if level == 1 {
@@ -353,6 +361,7 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 			// in between would describe an excluded entry under a visible name.
 			if info, err := current.Lstat(name); err == nil {
 				item.Version = sourceVersion(info)
+				item.mode = info.Mode()
 				item.ModTime = info.ModTime()
 				if item.Kind == "file" {
 					item.Size = info.Size()
@@ -378,7 +387,7 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 				if below != nil {
 					return below
 				}
-				if listing.Truncated {
+				if !page && listing.Truncated {
 					return nil
 				}
 			}
@@ -389,6 +398,49 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 		return DirectoryListing{}, err
 	}
 	return listing, nil
+}
+
+// openLinkedRoot opens the canonical root itself without admitting a symlink
+// or a substitution between inspecting the root and acquiring its handle.
+func openLinkedRoot(root string) (*os.Root, string, error) {
+	if !filepath.IsAbs(root) {
+		return nil, "", ErrSourceUnreadable
+	}
+	root = filepath.Clean(root)
+	info, err := os.Lstat(root) // #nosec G304 G703 -- canonical persisted directory reference, never a caller-selected root
+	if err != nil {
+		return nil, "", ErrSourceMissing
+	}
+	if !info.IsDir() {
+		return nil, "", ErrSourceOutside
+	}
+	folder, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, "", ErrSourceUnreadable
+	}
+	if opened, err := folder.Stat("."); err != nil || !os.SameFile(info, opened) {
+		_ = folder.Close()
+		return nil, "", ErrSourceChanged
+	}
+	return folder, directoryid.Witness(info), nil
+}
+
+func readDirectoryPage(root *os.Root) ([]fs.DirEntry, bool, error) {
+	dir, err := root.Open(".")
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(DirectoryListMaxEntries + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, false, err
+	}
+	partial := len(entries) > DirectoryListMaxEntries
+	if partial {
+		entries = entries[:DirectoryListMaxEntries]
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	return entries, partial, nil
 }
 
 // AttachmentSourcePath is the workspace-relative path of an attachment's own

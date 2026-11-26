@@ -745,13 +745,64 @@ export async function loadWorkspaceContents(workspaceId, sectionId, { fetchImpl 
   if (![SECTION_FILES, SECTION_NOTES].includes(sectionId))
     throw new Error('Unsupported reader section');
   const loader = LOADERS[sectionId];
-  const payload = await getJSON(loader.url(workspaceId), fetchImpl);
-  if (sectionId === SECTION_FILES && Array.isArray(payload.files)) {
-    return loader.shape(workspaceId, {
-      files: payload.files.filter(entry => entry?.status !== 'missing')
+  if (sectionId === SECTION_NOTES)
+    return loader.shape(workspaceId, await getJSON(loader.url(workspaceId), fetchImpl));
+  const payload = await getJSON(`${loader.url(workspaceId)}?linked_sources=1`, fetchImpl);
+  const owned = filesToRows(workspaceId, {
+    files: payload.files?.filter(entry => entry?.status !== 'missing')
+  });
+  const linked = (payload.linked_sources || [])
+    .map(({ id, name }) =>
+      row(workspaceId, 'linked', id, name, { dirId: id, dirName: name, path: '' })
+    )
+    .sort(byName);
+  if (!linked.length && !payload.linked_sources_unavailable) return owned;
+  const rows = [...linked];
+  if (owned.rows.length)
+    rows.unshift({
+      id: sectionKey(workspaceId, 'stored'),
+      kind: 'folder',
+      label: 'Stored in Ori',
+      children: owned.rows
     });
-  }
-  return loader.shape(workspaceId, payload);
+  if (payload.linked_sources_unavailable)
+    rows.push({
+      id: sectionKey(workspaceId, 'links-failed'),
+      kind: 'retry',
+      label: 'Linked folders unavailable. Retry'
+    });
+  return { rows };
+}
+
+// Detail Files only: this endpoint returns immediate children, never the Home walk.
+export async function loadLinkedPage(parent, { fetchImpl } = {}) {
+  const {
+    workspaceId,
+    meta: { dirId, dirName, path }
+  } = parent;
+  const base = `/api/workspaces/${enc(workspaceId)}/directories/${enc(dirId)}/entries`;
+  const payload = await getJSON(path ? `${base}?path=${enc(path)}` : base, fetchImpl);
+  const rows = (payload.entries || [])
+    .map(entry =>
+      row(
+        workspaceId,
+        entry.kind === 'folder' ? 'linkedFolder' : 'linkedFile',
+        `${dirId}/${entry.path}`,
+        entry.name,
+        { dirName, dirId, path: entry.path, selection: entry.selection }
+      )
+    )
+    .sort(
+      (a, b) =>
+        Number(b.kind === 'linkedFolder') - Number(a.kind === 'linkedFolder') || byName(a, b)
+    );
+  if (payload.partial)
+    rows.push({
+      id: `${workspaceId}/partial/${dirId}/${path}`,
+      kind: 'status',
+      label: 'Partial listing — this folder has more entries.'
+    });
+  return { rows };
 }
 
 /** Fetch one section of one workspace and return its capped rows. */

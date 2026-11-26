@@ -65,6 +65,11 @@
   stroke-width: 1.4;
   flex: none;
 }
+.wf-source-label {
+  margin-inline-start: auto;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
 .wf-spacer {
   width: 12px;
   flex: none;
@@ -97,6 +102,16 @@
 .wf-body img {
   max-width: 100%;
   height: auto;
+}
+.wf-action {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  padding: 0.45rem 0.75rem;
+}
+.wf-action:disabled {
+  color: var(--text-secondary);
 }
 .wf-back {
   display: none;

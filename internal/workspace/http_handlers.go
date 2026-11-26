@@ -1,10 +1,12 @@
 package workspace
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -37,6 +39,8 @@ type HTTPHandler struct {
 	folderWorkspaceResolver folderWorkspaceResolver
 	openFolder              func(string) error
 	openFile                func(string) error
+	linkedSelectionKey      []byte
+	linkedDesktop           bool // native launch policy is macOS only
 	revealFile              func(string) error
 	pathSelectionIssuer     trustedPathSelectionIssuer
 	typedFolderPaths        TypedFolderPathChecker
@@ -57,12 +61,14 @@ type HTTPHandler struct {
 // NewHTTPHandler creates a new HTTP handler
 func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus) *HTTPHandler {
 	handler := &HTTPHandler{
-		store:        store,
-		orchestrator: orchestrator,
-		eventBus:     eventBus,
-		openFolder:   platform.OpenFolder,
-		openFile:     platform.OpenFile,
-		revealFile:   platform.RevealInFileManager,
+		store:              store,
+		orchestrator:       orchestrator,
+		eventBus:           eventBus,
+		openFolder:         platform.OpenFolder,
+		openFile:           platform.OpenFile,
+		linkedSelectionKey: []byte(rand.Text()),
+		linkedDesktop:      runtime.GOOS == "darwin",
+		revealFile:         platform.RevealInFileManager,
 	}
 	if resolver, ok := store.(FolderResolver); ok {
 		handler.folderResolver = resolver
