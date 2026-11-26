@@ -3,6 +3,7 @@ package filejanitor
 import (
 	"context"
 	"errors"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
@@ -38,6 +39,16 @@ type ReceiptDestination struct {
 	Count       int      `json:"count"`
 }
 
+// ReceiptSend totals the files that went to one receiving workspace.
+type ReceiptSend struct {
+	ReceiverWorkspaceID string `json:"receiver_workspace_id"`
+	ReceiverName        string `json:"receiver_name"`
+	Count               int    `json:"count"`
+	// ReceiverLink opens the receiver's Filing review (a page route, never a
+	// folder path), for "Open <receiver>" (FR 31).
+	ReceiverLink string `json:"receiver_link,omitempty"`
+}
+
 // ReceiptNotMoved is one file that was planned and did not move, with the reason in
 // words a person can act on.
 type ReceiptNotMoved struct {
@@ -55,8 +66,13 @@ type FilingReceipt struct {
 	AdmittedAt  time.Time `json:"admitted_at"`
 	CompletedAt time.Time `json:"completed_at,omitzero"`
 	// Filed and Trashed count files that actually moved and were verified.
-	Filed         int                  `json:"filed"`
-	Trashed       int                  `json:"trashed"`
+	Filed   int `json:"filed"`
+	Trashed int `json:"trashed"`
+	// Sent counts the filed files that went to another workspace (they are in
+	// Filed too), and Sends splits them by receiver. Sent files are never in
+	// ByDestination, which holds this folder's Filed folders only.
+	Sent          int                  `json:"sent,omitempty"`
+	Sends         []ReceiptSend        `json:"sends,omitempty"`
 	ByDestination []ReceiptDestination `json:"by_destination"`
 	NotMovedTotal int                  `json:"not_moved_total"`
 	NotMoved      []ReceiptNotMoved    `json:"not_moved"`
@@ -92,6 +108,7 @@ type FilingSummary struct {
 	AdmittedAt    time.Time `json:"admitted_at"`
 	CompletedAt   time.Time `json:"completed_at,omitzero"`
 	Filed         int       `json:"filed"`
+	Sent          int       `json:"sent,omitempty"`
 	Trashed       int       `json:"trashed"`
 	NotMoved      int       `json:"not_moved"`
 	UndoAvailable bool      `json:"undo_available"`
@@ -157,11 +174,22 @@ func buildReceipt(state ScanState, record FilingRecord, currentRootID string, of
 	}
 	actions := filingActions(state, record.ID)
 	byDestination := map[string]*ReceiptDestination{}
+	byReceiver := map[string]*ReceiptSend{}
 	var notMoved []ReceiptNotMoved
 	for _, action := range actions {
 		switch {
 		case action.Result == ResultApplied && action.Operation == OperationTrash:
 			receipt.Trashed++
+		case action.Result == ResultApplied && action.Operation == OperationSend && action.Send != nil:
+			// Before the generic case: a send has no destination inside this folder.
+			receipt.Filed++
+			receipt.Sent++
+			entry := byReceiver[action.Send.ReceiverWorkspaceID]
+			if entry == nil {
+				entry = &ReceiptSend{ReceiverWorkspaceID: action.Send.ReceiverWorkspaceID}
+				byReceiver[action.Send.ReceiverWorkspaceID] = entry
+			}
+			entry.Count++
 		case action.Result == ResultApplied:
 			receipt.Filed++
 			destination := path.Dir(action.DestinationRelative)
@@ -191,6 +219,12 @@ func buildReceipt(state ScanState, record FilingRecord, currentRootID string, of
 	}
 	sort.Slice(destinations, func(i, j int) bool { return destinations[i].Destination < destinations[j].Destination })
 	receipt.ByDestination = destinations
+	for _, entry := range byReceiver {
+		receipt.Sends = append(receipt.Sends, *entry)
+	}
+	sort.Slice(receipt.Sends, func(i, j int) bool {
+		return receipt.Sends[i].ReceiverWorkspaceID < receipt.Sends[j].ReceiverWorkspaceID
+	})
 
 	receipt.NotMovedTotal = len(notMoved)
 	offset = min(max(offset, 0), len(notMoved))
@@ -282,7 +316,19 @@ func (s *Service) ReadFiling(ctx context.Context, owner, workspaceID, filingID s
 	if err != nil {
 		return FilingReceipt{}, err
 	}
-	return buildReceipt(state, record, settings.RootID, offset), nil
+	receipt := buildReceipt(state, record, settings.RootID, offset)
+	// Names are read now, so a renamed workspace reads as it is called today.
+	for i := range receipt.Sends {
+		id := receipt.Sends[i].ReceiverWorkspaceID
+		receipt.Sends[i].ReceiverName = s.workspaceName(id)
+		if ws, err := s.readWorkspace(id); err == nil && ws != nil && ws.ID == id && ownedBy(ws, owner) && strings.TrimSpace(ws.FolderSlug) != "" {
+			receipt.Sends[i].ReceiverLink = "/workspaces/" + url.PathEscape(ws.FolderSlug) + "?view=details&panel=file-janitor&tab=review"
+		}
+	}
+	sort.SliceStable(receipt.Sends, func(i, j int) bool {
+		return strings.ToLower(receipt.Sends[i].ReceiverName) < strings.ToLower(receipt.Sends[j].ReceiverName)
+	})
+	return receipt, nil
 }
 
 // ListFilings returns the most recent filings of this owner, newest first, at most
@@ -311,7 +357,7 @@ func (s *Service) ListFilings(ctx context.Context, owner, workspaceID string, li
 		receipt := buildReceipt(state, record, settings.RootID, 0)
 		summaries = append(summaries, FilingSummary{
 			FilingID: record.ID, State: receipt.State, AdmittedAt: record.AdmittedAt, CompletedAt: record.CompletedAt,
-			Filed: receipt.Filed, Trashed: receipt.Trashed, NotMoved: receipt.NotMovedTotal,
+			Filed: receipt.Filed, Sent: receipt.Sent, Trashed: receipt.Trashed, NotMoved: receipt.NotMovedTotal,
 			UndoAvailable: receipt.UndoAvailable, Undone: !record.UndoClaimedAt.IsZero(),
 		})
 	}

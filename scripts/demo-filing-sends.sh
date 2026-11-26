@@ -19,7 +19,7 @@
 # 3. Two workspaces, "Downloads" and "Documents", each with Filing installed and set
 #    up on its folder in manual mode, through the same host routes the Playwright
 #    suites use. --connect also turns on "Downloads sends to Documents" for the
-#    Documents kind.
+#    Documents kind and scans Downloads, so Review opens on the picture.
 #
 # The guided Documents pre-tick (FR 6) is not seeded: creating a guided Documents
 # workspace needs the reviewed creation flow. Unit tests cover it.
@@ -177,6 +177,9 @@ if [[ "$connect" == 1 ]]; then
 	on="$(api POST "/api/workspaces/$downloads_id/file-janitor/connections" \
 		"{\"receiver_workspace_id\":\"$documents_id\",\"kinds\":[\"documents\"]}" | field connections.sends_to.0.on)"
 	echo "CONNECTED=$on"
+	# A scan of Downloads, so Review opens on the picture with its Leaving card.
+	api POST "/api/workspaces/$downloads_id/file-janitor/scan" >/dev/null
+	echo "SCANNED=Downloads"
 fi
 
 echo "URL=$base"

@@ -111,6 +111,17 @@ func locateAfterUndo(root string, action FileAction) (location, destination stri
 		}
 		return LocationUnknown, ""
 	}
+	if action.Operation == OperationSend {
+		// A send has no destination inside this folder: it is back here, or still
+		// in the workspace it was sent to (the outcome's message names it).
+		original := filepath.Join(root, action.SourceName)
+		if withinRoot(root, original) {
+			if _, err := os.Lstat(original); err == nil {
+				return LocationFolder, ""
+			}
+		}
+		return LocationSent, ""
+	}
 	filed := filepath.Join(root, filepath.FromSlash(action.DestinationRelative))
 	if withinRoot(root, filed) {
 		if _, err := os.Lstat(filed); err == nil {
@@ -156,13 +167,20 @@ func (s *Service) UndoFiling(ctx context.Context, owner, workspaceID, filingID s
 
 	// The same boundary every other writer takes: the root lock first, then one
 	// scan-state write. Holding it for the whole run is what makes a second press
-	// wait and then find the first run's result.
-	unlock := lockRoot(root)
+	// wait and then find the first run's result. A filing that sent files also
+	// holds each receiver's folder (the ones that still manage the folder the
+	// files went to), in one fixed order.
+	receivers := map[string]string{}
+	if before, loadErr := s.store.LoadScanState(workspaceID); loadErr == nil {
+		receivers = s.sendReceivers(owner, filingActions(before, filingID))
+	}
+	unlock := lockRoots(append([]string{root}, receiverPaths(receivers)...)...)
 	defer unlock()
 
-	// A placement whose undo was cut short is settled from the disk before this
-	// run decides what is left to put back.
+	// A placement or a send whose undo was cut short is settled from the disk
+	// before this run decides what is left to put back.
 	s.settlePlacementUndos(workspaceID, root)
+	s.settleSendUndos(workspaceID, root, receivers)
 
 	var claimed FilingRecord
 	var targets []FileAction
@@ -239,6 +257,14 @@ func (s *Service) UndoFiling(ctx context.Context, owner, workspaceID, filingID s
 			_, _ = s.undoMove(ctx, settings, root, action, owner)
 		case OperationPlace:
 			_, _ = s.undoPlacement(ctx, settings, root, action)
+		case OperationSend:
+			// Put back from the receiver's folder; reported, never touched, when
+			// that receiver no longer manages the folder the file went to (FR 34).
+			receiverRoot := ""
+			if action.Send != nil {
+				receiverRoot = receivers[action.Send.ReceiverWorkspaceID]
+			}
+			_, _ = s.undoSend(ctx, settings, root, action, receiverRoot)
 		case OperationTrash:
 			_, _ = s.restoreFromTrash(settings, root, action, owner)
 		default:

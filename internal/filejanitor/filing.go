@@ -141,10 +141,13 @@ type FileRequest struct {
 // and a replay are identical. When the press was refused because the plan had
 // changed, Plan is the fresh one and nothing moved.
 type FilingResult struct {
-	FilingID     string        `json:"filing_id,omitempty"`
-	Replayed     bool          `json:"replayed,omitempty"`
-	Interrupted  bool          `json:"interrupted,omitempty"`
-	Filed        int           `json:"filed"`
+	FilingID    string `json:"filing_id,omitempty"`
+	Replayed    bool   `json:"replayed,omitempty"`
+	Interrupted bool   `json:"interrupted,omitempty"`
+	Filed       int    `json:"filed"`
+	// Sent counts the filed files that went to another workspace; they are also
+	// counted in Filed.
+	Sent         int           `json:"sent,omitempty"`
 	Trashed      int           `json:"trashed"`
 	Failed       int           `json:"failed"`
 	Stale        int           `json:"stale"`
@@ -180,9 +183,25 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 
 	// The same boundary every review edit takes before its scan-state write: an
 	// edit that wins first changes the plan this press quoted; an apply already
-	// admitted finishes before a later edit.
-	unlock := lockRoot(root.Path)
+	// admitted finishes before a later edit. A press that sends also holds each
+	// receiver's folder, taken in one fixed order (lockRoots), so a send and that
+	// folder's own filing never overlap.
+	routes0 := s.liveSendRoutes(owner, workspaceID)
+	unlock := lockRoots(append([]string{root.Path}, routes0.receiverRoots()...)...)
 	defer unlock()
+	s.reconcileSends(workspaceID, root.Path, routes0)
+	// Worked out again under the locks: a connection turned off, or either folder
+	// changed, while this press waited is a changed plan, and nothing moves.
+	routes := s.liveSendRoutes(owner, workspaceID)
+	if !sameRoutes(routes0, routes) {
+		fresh := ReviewPlan{}
+		if state, err := s.store.LoadScanState(workspaceID); err == nil {
+			if computed, err := s.computeReviewPlan(owner, workspaceID, batchID, state, routes); err == nil {
+				fresh = computed.plan
+			}
+		}
+		return FilingResult{Plan: fresh, Outcomes: []ItemOutcome{}}, ErrReviewPlanChanged
+	}
 
 	var admitted struct {
 		record   FilingRecord
@@ -205,7 +224,7 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 				state.Filings[i].Interrupted = true // the process died after admitting it
 			}
 		}
-		computed, err := s.computeReviewPlan(owner, workspaceID, batchID, *state)
+		computed, err := s.computeReviewPlan(owner, workspaceID, batchID, *state, routes)
 		if err != nil {
 			return err
 		}
@@ -242,7 +261,7 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 		}
 		admitted.record = FilingRecord{
 			ID: filingID, Owner: owner, BatchID: batchID, RootID: root.Generation, ClientKey: req.ClientKey,
-			PlanDigest: computed.plan.PlanDigest, PlannedMoves: computed.plan.MoveCount, PlannedTrash: computed.plan.TrashCount,
+			PlanDigest: computed.plan.PlanDigest, PlannedMoves: computed.plan.MoveCount + computed.plan.SendCount, PlannedTrash: computed.plan.TrashCount,
 			AdmittedAt: now,
 		}
 		admitted.items = computed.items
@@ -271,9 +290,13 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 	var unrecorded []FilingUnrecorded
 	for _, item := range admitted.items {
 		var outcome ItemOutcome
-		if item.Operation == OperationTrash {
+		switch item.Operation {
+		case OperationTrash:
 			outcome = s.trashOne(runCtx, settings, root.Path, admitted.approval, item)
-		} else {
+		case OperationSend:
+			route, _ := routes.byID(item.ConnectionID)
+			outcome = s.sendOne(runCtx, settings, root.Path, admitted.approval, item, route)
+		default:
 			outcome = s.applyOne(runCtx, settings, root.Path, admitted.approval, item)
 		}
 		if outcome.ActionID == "" {
@@ -319,6 +342,9 @@ func (s *Service) filingResult(state ScanState, record FilingRecord, replayed bo
 			result.Trashed++
 		case outcome.Result == ResultApplied:
 			result.Filed++
+			if outcome.Operation == OperationSend {
+				result.Sent++
+			}
 		case outcome.Result == ResultFailed:
 			result.Failed++
 		case outcome.Result == ResultStale:

@@ -348,6 +348,29 @@ func (p *platformMover) MakeFolder(ctx context.Context, root, rootID string, par
 	return DirRef{Rel: path.Join(parent.Rel, name), ID: statID(&made.st)}, nil
 }
 
+// namesUsed reports, for each name, whether something already has that name at
+// the top level of root, as the filesystem compares names (so "Lease.pdf" and
+// "lease.pdf" are one name on a case-insensitive disk). It is one no-follow stat
+// per name under the verified folder: it never lists, opens or reads anything
+// that is there. It is advice for the picture; the kernel rename decides.
+func namesUsed(root, rootID string, names []string) (map[string]bool, error) {
+	held, _, err := openVerifiedRoot(root, rootID)
+	if err != nil {
+		return nil, err
+	}
+	defer held.close()
+	used := make(map[string]bool, len(names))
+	for _, name := range names {
+		if ValidateFileName(name) != nil {
+			used[name] = true
+			continue
+		}
+		_, err := lookup(held.fd, name)
+		used[name] = !errors.Is(err, unix.ENOENT)
+	}
+	return used, nil
+}
+
 // ---------------------------------------------------------------- the move
 
 // MoveIfUnchanged implements ConditionalMover.

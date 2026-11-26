@@ -1163,7 +1163,9 @@
       count(value.move_count) &&
       count(value.trash_count) &&
       count(value.total) &&
-      value.total === value.move_count + value.trash_count &&
+      (value.send_count === undefined || count(value.send_count)) &&
+      value.total === value.move_count + (value.send_count || 0) + value.trash_count &&
+      (value.sends === undefined || (Array.isArray(value.sends) && value.sends.length <= 8)) &&
       value.changed &&
       count(value.changed.total) &&
       Array.isArray(value.changed.items) &&
@@ -2097,7 +2099,23 @@
       ) &&
       section(value.left_out) &&
       section(value.trash) &&
-      section(value.could_not_file)
+      section(value.could_not_file) &&
+      // Leaving: one card per connection that is on, three names each at most.
+      (value.leaving === undefined ||
+        (Array.isArray(value.leaving) &&
+          value.leaving.length <= 8 &&
+          value.leaving.every(
+            card =>
+              typeof card.connection_id === 'string' &&
+              typeof card.receiver_name === 'string' &&
+              count(card.count) &&
+              count(card.not_sent_count) &&
+              count(card.kept_count) &&
+              Array.isArray(card.files) &&
+              card.files.length <= 3 &&
+              Array.isArray(card.not_sent_files) &&
+              card.not_sent_files.length <= 3
+          )))
     );
   }
 
@@ -2502,15 +2520,65 @@
         null,
         binding
       );
+    } else if (choice.kind === 'send') {
+      // FR 27: the row's files go to that workspace on the press.
+      await submitReviewEdit(
+        'send_group',
+        { group_id: row.group_id, connection_id: choice.connectionId },
+        null,
+        binding
+      );
+    } else if (choice.kind === 'connect') {
+      // "Send to another workspace…" opens the connect step in Settings (FR 4).
+      renderBatch();
+      openConnectFromReview();
     } else if (choice.kind === 'leave') {
       // Nothing recorded for the row any more; nothing to ask the server when
-      // nothing was placed.
-      if (row.placed_count > 0)
+      // nothing was placed or sent.
+      if (row.placed_count > 0 || row.sent_count > 0)
         await submitReviewEdit('clear_group', { group_id: row.group_id }, null, binding);
       else renderBatch();
     } else if (choice.kind === 'stop') {
       await stopAskingAboutRow(row, binding);
     }
+  }
+
+  // The Leaving card's controls (FR 22, 23): its tick, "Keep these in <folder>
+  // instead" and "Send them to <receiver>".
+  async function answerLeaving(card, action, binding) {
+    const sentence = {
+      send_connection: count =>
+        (count === 1 ? '1 file will' : count + ' files will') +
+        ' go to ' +
+        card.receiver_name +
+        '.',
+      unsend_connection: () => 'Nothing will go to ' + card.receiver_name + '.',
+      keep_connection: () =>
+        'These files will stay in ' + compactFolderName(lastStatus?.settings?.root_path) + '.'
+    }[action];
+    const saved = await submitReviewEdit(
+      action,
+      { connection_id: card.connection_id },
+      null,
+      binding
+    );
+    if (saved && sentence) {
+      const after = (picture?.leaving || []).find(
+        item => item.connection_id === card.connection_id
+      );
+      announce(sentence(after ? after.count : 0));
+    }
+  }
+
+  // openConnectFromReview switches to Settings with the connect card open.
+  function openConnectFromReview() {
+    selectTab('settings');
+    if (connectionsLoadState === 'ready') {
+      openConnectStep();
+      renderSettings();
+      return;
+    }
+    connectAfterLoad = true;
   }
 
   // The files "Leave here, stop asking" will cover, which Review again must be able
@@ -2884,6 +2952,12 @@
             null,
             binding
           ),
+        // Leaving (FR 21 to 23, FR 27): a card's tick and its two switches, and one
+        // "Send to <receiver>" entry per connection in each row menu.
+        onTickLeaving: (card, ticked) =>
+          void answerLeaving(card, ticked ? 'send_connection' : 'unsend_connection', binding),
+        onKeepLeaving: card => void answerLeaving(card, 'keep_connection', binding),
+        onSendLeaving: card => void answerLeaving(card, 'send_connection', binding),
         onOpenMore: (pickedSection, key) => {
           if (pictureMore?.section === pickedSection && pictureMore?.key === key)
             closePictureMore();
@@ -3563,6 +3637,7 @@
   let connectionsWorkspace = '';
   let connectCard = null; // { receiverId, kinds: [ids], error } while the card is open
   let connectionBusy = ''; // '' | 'connect' | the connection id being turned off
+  let connectAfterLoad = false; // a review row asked for the connect step before the list loaded
 
   function resetConnections() {
     connections = null;
@@ -3570,6 +3645,7 @@
     connectionsWorkspace = '';
     connectCard = null;
     connectionBusy = '';
+    connectAfterLoad = false;
   }
 
   // connectionAgentName is the agent named on the connect card, only when the
@@ -3647,6 +3723,10 @@
       if (wsId() !== id) return;
       connections = loaded;
       connectionsLoadState = 'ready';
+      if (connectAfterLoad) {
+        connectAfterLoad = false;
+        openConnectStep();
+      }
     } catch {
       if (wsId() !== id) return;
       connectionsLoadState = 'error';

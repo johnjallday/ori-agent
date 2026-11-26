@@ -39,6 +39,11 @@ type ReviewChoice struct {
 	FingerprintKey string    `json:"fingerprint_key"`
 	Operation      Operation `json:"operation"`
 	SourceGroupID  string    `json:"source_group_id,omitempty"`
+	// ConnectionID marks a move choice as a send on that connection (see
+	// send_review.go). It counts only while the connection is on and carries the
+	// file's kind. Additive: an older build drops it, which files the file into
+	// Filed instead, never the reverse.
+	ConnectionID string `json:"connection_id,omitempty"`
 }
 
 // ReviewDraft shares the canonical scan-state atomic transaction. An invalid
@@ -102,7 +107,8 @@ func (d ReviewDraft) validate() error {
 	for _, choice := range d.Choices {
 		if !managedRootGeneration.MatchString(choice.CandidateID) || len(choice.FingerprintKey) != 32 || seen[choice.CandidateID] ||
 			(choice.Operation != OperationMove && choice.Operation != OperationTrash) ||
-			(choice.SourceGroupID != "" && !managedRootGeneration.MatchString(choice.SourceGroupID)) {
+			(choice.SourceGroupID != "" && !managedRootGeneration.MatchString(choice.SourceGroupID)) ||
+			(choice.ConnectionID != "" && (choice.Operation != OperationMove || !validConnectionID(choice.ConnectionID))) {
 			return ErrReviewDraftInvalid
 		}
 		seen[choice.CandidateID] = true
@@ -121,6 +127,14 @@ type ReviewChoiceView struct {
 	Operation     Operation `json:"operation"`
 	Category      Category  `json:"category,omitempty"`
 	SourceGroupID string    `json:"source_group_id,omitempty"`
+	// ConnectionID is set only while the choice is a send: its connection is on
+	// and carries the file's kind.
+	ConnectionID string `json:"connection_id,omitempty"`
+}
+
+// validConnectionID is the shape of a connection's ID.
+func validConnectionID(id string) bool {
+	return strings.HasPrefix(id, "connection-") && managedRootGeneration.MatchString(id)
 }
 
 type ReviewDraftGroupView struct {
@@ -145,6 +159,9 @@ type ReviewDraftView struct {
 	// itself changed or went missing since the scan. It is never serialized: the
 	// plan check uses it to say which files "changed since you looked".
 	removed []removedChoice
+	// routes are the connections that were on when this view was projected. Never
+	// serialized; the picture and the plan read them from here.
+	routes sendRoutes
 }
 
 // removedChoice is one ticked file that is no longer the file that was ticked.
@@ -230,6 +247,13 @@ func reviewDefaultsApply(state ScanState, batchID string) bool {
 // from the batch's own member lists, which are fixed when the scan creates the
 // batch, so a file that arrives later can never join.
 func defaultReviewChoices(groups ReviewGroups) []ReviewChoiceView {
+	return defaultReviewChoicesWith(groups, nil)
+}
+
+// defaultReviewChoicesWith is defaultReviewChoices with the connections that are
+// on: a confident file of a kind a connection carries opens as a send (FR 22).
+// A question group never does (FR 24).
+func defaultReviewChoicesWith(groups ReviewGroups, routes sendRoutes) []ReviewChoiceView {
 	choices := []ReviewChoiceView{}
 	for _, group := range groups.Groups {
 		if group.Kind != "filing" {
@@ -242,15 +266,25 @@ func defaultReviewChoices(groups ReviewGroups) []ReviewChoiceView {
 			if err != nil || !proposalPending(candidate) || candidate.Decision == DecisionTrash || !moveAnswered(candidate) {
 				continue
 			}
-			choices = append(choices, ReviewChoiceView{CandidateID: candidate.ID, Operation: OperationMove, Category: definition.ID, SourceGroupID: group.ID})
+			choice := ReviewChoiceView{CandidateID: candidate.ID, Operation: OperationMove, Category: definition.ID, SourceGroupID: group.ID}
+			if route, found := routes.carrying(definition.ID); found {
+				choice.ConnectionID = route.ConnectionID
+			}
+			choices = append(choices, choice)
 		}
 	}
 	return choices
 }
 
 func projectReviewDraft(state ScanState, batchID string, binding reviewDraftBinding, groups ReviewGroups) ReviewDraftView {
+	return projectReviewDraftWith(state, batchID, binding, groups, nil)
+}
+
+// projectReviewDraftWith projects the saved choices with the connections that are
+// on. With no route the view and its revision are exactly projectReviewDraft's.
+func projectReviewDraftWith(state ScanState, batchID string, binding reviewDraftBinding, groups ReviewGroups, routes sendRoutes) ReviewDraftView {
 	groupRevision := groups.Revision
-	view := ReviewDraftView{BatchID: batchID, GroupRevision: groupRevision, State: "empty", Choices: []ReviewChoiceView{}}
+	view := ReviewDraftView{BatchID: batchID, GroupRevision: groupRevision, State: "empty", Choices: []ReviewChoiceView{}, routes: routes}
 	var stored *ReviewDraft
 	duplicate := false
 	for i := range state.ReviewDrafts {
@@ -293,6 +327,11 @@ func projectReviewDraft(state ScanState, batchID string, binding reviewDraftBind
 				item := ReviewChoiceView{CandidateID: choice.CandidateID, Operation: choice.Operation, SourceGroupID: choice.SourceGroupID}
 				if choice.Operation == OperationMove {
 					item.Category = definition.ID
+					// A mark whose connection is off, or no longer carries this
+					// kind, is an ordinary move: shown kept, never counted stale.
+					if routes.sends(choice.ConnectionID, definition.ID) {
+						item.ConnectionID = choice.ConnectionID
+					}
 				}
 				view.Choices = append(view.Choices, item)
 			}
@@ -300,7 +339,7 @@ func projectReviewDraft(state ScanState, batchID string, binding reviewDraftBind
 	} else if reviewDefaultsApply(state, batchID) {
 		// Nothing has touched this scan: show the confident folders ticked. This
 		// is derived on every read and written only by the person's first edit.
-		view.State, view.Choices = "default", defaultReviewChoices(groups)
+		view.State, view.Choices = "default", defaultReviewChoicesWith(groups, routes)
 	}
 	sort.Slice(view.Choices, func(i, j int) bool { return view.Choices[i].CandidateID < view.Choices[j].CandidateID })
 	// All fields here have a bounded JSON representation. Include raw invalid
@@ -314,7 +353,12 @@ func projectReviewDraft(state ScanState, batchID string, binding reviewDraftBind
 			destinations = append(destinations, []any{candidate.ID, candidate.Category, candidate.Decision, candidate.DecisionCategory, candidate.DecisionGroupID})
 		}
 	}
-	data, err := json.Marshal([]any{ReviewDraftSchemaVersion, state.WorkspaceID, batchID, binding, groupRevision, generation, view.State, view.Choices, view.RemovedStale, stored, destinations})
+	parts := []any{ReviewDraftSchemaVersion, state.WorkspaceID, batchID, binding, groupRevision, generation, view.State, view.Choices, view.RemovedStale, stored, destinations}
+	if len(routes) > 0 {
+		// Only with a connection on: with none, the revision is exactly today's.
+		parts = append(parts, routes.key())
+	}
+	data, err := json.Marshal(parts)
 	if err != nil {
 		view.State, view.Choices = "invalid", []ReviewChoiceView{}
 		data = []byte(fmt.Sprintf("invalid:%s:%s", batchID, binding.Digest))

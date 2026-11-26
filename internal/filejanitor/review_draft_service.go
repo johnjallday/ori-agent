@@ -19,6 +19,9 @@ type ReviewDraftEdit struct {
 	GroupID               string   `json:"group_id,omitempty"`
 	CandidateIDs          []string `json:"candidate_ids,omitempty"`
 	Category              string   `json:"category,omitempty"`
+	// ConnectionID names the connection a send edit is about. Only the send
+	// actions take one; it must be a connection that is on right now.
+	ConnectionID string `json:"connection_id,omitempty"`
 }
 
 func (r ReviewDraftEdit) validate() error {
@@ -39,7 +42,22 @@ func (r ReviewDraftEdit) validate() error {
 	if group && !managedRootGeneration.MatchString(r.GroupID) {
 		return ErrInvalidAction
 	}
+	connection := r.ConnectionID != ""
+	if connection && !validConnectionID(r.ConnectionID) {
+		return ErrInvalidAction
+	}
 	valid := false
+	switch r.Action {
+	// The send actions (see send_review.go). Every other action refuses a
+	// connection ID, so nothing else can mark a send.
+	case "send_connection", "unsend_connection", "keep_connection":
+		return validIf(connection && !group && !files && !category)
+	case "send_group":
+		return validIf(connection && group && !files && !category)
+	}
+	if connection {
+		return ErrInvalidAction
+	}
 	switch r.Action {
 	case "select_group":
 		valid = group && !files
@@ -67,6 +85,13 @@ func (r ReviewDraftEdit) validate() error {
 		if _, err := LookupCategory(r.Category); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validIf(ok bool) error {
+	if !ok {
+		return ErrInvalidAction
 	}
 	return nil
 }
@@ -110,7 +135,7 @@ func (s *Service) ReadReviewDraft(ctx context.Context, owner, workspaceID, batch
 	if err != nil {
 		return ReviewDraftView{}, err
 	}
-	view := s.revalidatedReviewDraft(state, batchID, binding, groups, root)
+	view := s.revalidatedReviewDraftWith(state, batchID, binding, groups, root, s.liveSendRoutes(owner, workspaceID))
 	_, freshBinding, freshRoot, err := s.reviewDraftSnapshot(owner, workspaceID, batchID, state)
 	if err != nil || freshRoot != root || freshBinding != binding || ctx.Err() != nil {
 		return ReviewDraftView{}, ErrReviewUnavailable
@@ -132,6 +157,17 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 	if err != nil {
 		return ReviewDraftView{}, ErrReviewUnavailable
 	}
+	// The connections that are on, worked out once before any lock: the revision
+	// the person quoted binds them, so a connection that changed since is a
+	// conflict like any other change.
+	routes := s.liveSendRoutes(owner, workspaceID)
+	var route sendRoute
+	if request.ConnectionID != "" {
+		found := false
+		if route, found = routes.byID(request.ConnectionID); !found {
+			return ReviewDraftView{}, ErrReviewConflict
+		}
+	}
 	unlock := lockRoot(root.Path)
 	defer unlock()
 	var view ReviewDraftView
@@ -143,7 +179,7 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 		if currentRoot != root {
 			return ErrReviewConflict
 		}
-		before := s.revalidatedReviewDraft(*state, batchID, binding, groups, root)
+		before := s.revalidatedReviewDraftWith(*state, batchID, binding, groups, root, routes)
 		if before.Revision != request.ExpectedRevision || groups.Revision != request.ExpectedGroupRevision {
 			return ErrReviewConflict
 		}
@@ -159,8 +195,12 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 		choices := make(map[string]ReviewChoice, len(before.Choices))
 		for _, item := range before.Choices {
 			candidate := state.Candidates[byID[item.CandidateID]]
-			choices[item.CandidateID] = ReviewChoice{CandidateID: item.CandidateID, FingerprintKey: candidate.Fingerprint.Key(), Operation: item.Operation, SourceGroupID: item.SourceGroupID}
+			// The view carries a send mark only while its connection is on, so a
+			// mark whose connection ended is dropped here: the file is kept.
+			choices[item.CandidateID] = ReviewChoice{CandidateID: item.CandidateID, FingerprintKey: candidate.Fingerprint.Key(), Operation: item.Operation, SourceGroupID: item.SourceGroupID, ConnectionID: item.ConnectionID}
 		}
+		// newlySelected collects the files a filing-group tick added in this edit.
+		var newlySelected []string
 		category := Category("")
 		if strings.TrimSpace(request.Category) != "" {
 			definition, err := LookupCategory(request.Category)
@@ -276,9 +316,48 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 						return ticked, left, err
 					}
 				}
+				newlySelected = append(newlySelected, id)
 				ticked++
 			}
 			return ticked, left, nil
+		}
+		// sendCarried marks the members of the confident folders whose kind the
+		// route carries as sends: an existing move gets the mark, a file with no
+		// choice is ticked and marked. A Trash mark, an unanswered question, or a
+		// file that changed since the scan is left alone.
+		sendCarried := func() (marked, left int, err error) {
+			for _, group := range groups.Groups {
+				if group.Kind != "filing" {
+					continue
+				}
+				members, _ := groups.Members(group.ID)
+				for _, member := range members {
+					candidate := state.Candidates[byID[member.Candidate.ID]]
+					kind, kindErr := LookupCategory(string(candidate.EffectiveCategory()))
+					if kindErr != nil || !route.Carries(kind.ID) || !proposalPending(candidate) ||
+						candidate.Decision == DecisionTrash || !moveAnswered(candidate) {
+						continue
+					}
+					prior, exists := choices[candidate.ID]
+					if exists && prior.Operation != OperationMove {
+						continue
+					}
+					if !exists {
+						if err := selectMove(candidate.ID, group.ID, ""); err != nil {
+							if errors.Is(err, errMemberChanged) {
+								left++
+								continue
+							}
+							return marked, left, err
+						}
+						prior = choices[candidate.ID]
+					}
+					prior.ConnectionID = route.ConnectionID
+					choices[candidate.ID] = prior
+					marked++
+				}
+			}
+			return marked, left, nil
 		}
 		var targetGroup ReviewGroup
 		if request.GroupID != "" {
@@ -326,6 +405,77 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 						return err
 					}
 				}
+			}
+			// The same as the defaults: a newly ticked file of a kind a connection
+			// carries is a send. A file the person kept in Filed stays kept.
+			for _, id := range newlySelected {
+				choice := choices[id]
+				candidate := state.Candidates[byID[id]]
+				if kind, err := LookupCategory(string(candidate.EffectiveCategory())); err == nil {
+					if carrying, found := routes.carrying(kind.ID); found {
+						choice.ConnectionID = carrying.ConnectionID
+						choices[id] = choice
+					}
+				}
+			}
+		case "send_connection":
+			marked, left, err := sendCarried()
+			if err != nil {
+				return err
+			}
+			if marked == 0 && left > 0 {
+				return errMemberChanged
+			}
+		case "unsend_connection":
+			for id, choice := range choices {
+				if choice.ConnectionID == route.ConnectionID {
+					delete(choices, id)
+				}
+			}
+		case "keep_connection":
+			for id, choice := range choices {
+				if choice.ConnectionID == route.ConnectionID {
+					choice.ConnectionID = ""
+					choices[id] = choice
+				}
+			}
+		case "send_group":
+			// A question row answered "Send to <receiver>" (FR 27): each file's
+			// destination kind is its own when the connection carries it, otherwise
+			// the connection's first kind; the row is recorded as the answer.
+			if targetGroup.Kind != "question" {
+				return ErrInvalidAction
+			}
+			members, _ := groups.Members(targetGroup.ID)
+			ticked, left := 0, 0
+			for _, member := range members {
+				id := member.Candidate.ID
+				prior, exists := choices[id]
+				rewrite := exists && prior.Operation == OperationMove && prior.SourceGroupID == targetGroup.ID
+				if (exists && !rewrite) || member.Candidate.Decision == DecisionTrash {
+					continue
+				}
+				answer := route.Kinds[0]
+				if route.Carries(member.Candidate.Category) {
+					answer = member.Candidate.Category
+				}
+				if err := selectMove(id, targetGroup.ID, answer); err != nil {
+					if errors.Is(err, errMemberChanged) {
+						left++
+						continue
+					}
+					return err
+				}
+				candidate := &state.Candidates[byID[id]]
+				candidate.Decision, candidate.DecisionCategory, candidate.DecidedAt = DecisionMove, answer, s.clock()
+				candidate.DecisionGroupID = targetGroup.ID
+				choice := choices[id]
+				choice.ConnectionID = route.ConnectionID
+				choices[id] = choice
+				ticked++
+			}
+			if ticked == 0 && left > 0 {
+				return errMemberChanged
 			}
 		case "select_files":
 			for _, id := range request.CandidateIDs {
@@ -383,9 +533,11 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 				}
 			}
 		case "deselect_group":
+			// Unticking a Filed folder leaves the files drawn as leaving alone:
+			// those are unticked on their own card (unsend_connection).
 			members, _ := groups.Members(request.GroupID)
 			for _, member := range members {
-				if choices[member.Candidate.ID].Operation == OperationMove {
+				if choice := choices[member.Candidate.ID]; choice.Operation == OperationMove && choice.ConnectionID == "" {
 					delete(choices, member.Candidate.ID)
 				}
 			}
@@ -504,8 +656,24 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 		if err != nil || freshBinding != binding || freshRoot != root {
 			return ErrReviewConflict
 		}
-		view = s.revalidatedReviewDraft(*state, batchID, binding, freshGroups, root)
+		view = s.revalidatedReviewDraftWith(*state, batchID, binding, freshGroups, root, routes)
 		if view.State != "saved" || len(view.Choices) != len(choices) {
+			return fmt.Errorf("%w: choices need review", ErrReviewConflict)
+		}
+		// Every send mark written must read back as a send: a mark the view would
+		// show as a plain move is a choice the person did not see.
+		storedSends, viewedSends := 0, 0
+		for _, choice := range choices {
+			if choice.ConnectionID != "" {
+				storedSends++
+			}
+		}
+		for _, choice := range view.Choices {
+			if choice.ConnectionID != "" {
+				viewedSends++
+			}
+		}
+		if storedSends != viewedSends {
 			return fmt.Errorf("%w: choices need review", ErrReviewConflict)
 		}
 		return nil

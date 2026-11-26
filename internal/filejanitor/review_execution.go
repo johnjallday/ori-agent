@@ -52,6 +52,15 @@ func validExecutionCandidate(candidate JanitorCandidate, item PlanItem, approval
 	if item.Operation == OperationPlace && (approval.ReviewRevision == "" || !moveAnswered(candidate) || candidate.Decision == DecisionTrash) {
 		return false
 	}
+	// A send exists only through the one press of a saved review, for a file whose
+	// kind is still the kind its connection carries.
+	if item.Operation == OperationSend {
+		category, err := LookupCategory(string(candidate.EffectiveCategory()))
+		if approval.ReviewRevision == "" || item.ConnectionID == "" || candidate.Decision == DecisionTrash ||
+			!moveAnswered(candidate) || err != nil || category.ID != item.Category {
+			return false
+		}
+	}
 	return true
 }
 

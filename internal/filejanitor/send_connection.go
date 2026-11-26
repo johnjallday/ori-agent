@@ -232,28 +232,35 @@ func (s *Service) loadSide(owner, workspaceID string, withDisk bool) (sendSide, 
 // connectionState works out whether a stored connection is on, and if not, why
 // not. It is the one place that decides; both sides and the press ask it.
 func (s *Service) connectionState(owner string, sender sendSide, senderErr error, connection SendConnection) (on bool, ended string) {
+	_, on, ended = s.checkConnection(owner, sender, senderErr, connection)
+	return on, ended
+}
+
+// checkConnection is connectionState that also hands back the receiving side as
+// it is now, for the review and the press that need its folder.
+func (s *Service) checkConnection(owner string, sender sendSide, senderErr error, connection SendConnection) (receiver sendSide, on bool, ended string) {
 	receiverName := s.workspaceName(connection.ReceiverWorkspaceID)
 	switch {
 	case senderErr != nil && errors.Is(senderErr, ErrRootUnavailable):
-		return false, fmt.Sprintf("Ended because Ori cannot reach %s's folder.", sender.name)
+		return receiver, false, fmt.Sprintf("Ended because Ori cannot reach %s's folder.", sender.name)
 	case senderErr != nil, sender.settings.RootID != connection.SenderRootID:
-		return false, fmt.Sprintf("Ended because %s now points at a different folder, or no longer has Filing set up.", sender.name)
+		return receiver, false, fmt.Sprintf("Ended because %s now points at a different folder, or no longer has Filing set up.", sender.name)
 	}
 	receiver, err := s.loadSide(owner, connection.ReceiverWorkspaceID, true)
 	switch {
 	case errors.Is(err, ErrRootUnavailable):
-		return false, fmt.Sprintf("Ended because Ori cannot reach %s's folder.", receiverName)
+		return receiver, false, fmt.Sprintf("Ended because Ori cannot reach %s's folder.", receiverName)
 	case err != nil:
-		return false, fmt.Sprintf("Ended because %s no longer has Filing set up on its folder.", receiverName)
+		return receiver, false, fmt.Sprintf("Ended because %s no longer has Filing set up on its folder.", receiverName)
 	case receiver.settings.RootID != connection.ReceiverRootID:
-		return false, fmt.Sprintf("Ended because %s now points at a different folder.", receiverName)
+		return receiver, false, fmt.Sprintf("Ended because %s now points at a different folder.", receiverName)
 	case sender.dirID != connection.SenderRootDirID || receiver.dirID != connection.ReceiverRootDirID:
-		return false, "Ended because one of the two folders was moved or replaced."
+		return receiver, false, "Ended because one of the two folders was moved or replaced."
 	}
 	if err := s.ConditionalMoveBetween(sender.root.Path, connection.SenderRootDirID, receiver.root.Path, connection.ReceiverRootDirID); err != nil {
-		return false, "Ended because Ori can no longer move files safely between these two folders."
+		return receiver, false, "Ended because Ori can no longer move files safely between these two folders."
 	}
-	return true, ""
+	return receiver, true, ""
 }
 
 func (s *Service) viewOf(owner string, sender sendSide, senderErr error, connection SendConnection) ConnectionView {

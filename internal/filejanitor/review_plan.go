@@ -58,6 +58,20 @@ type PlanItemView struct {
 	FinalName   string    `json:"final_name,omitempty"`
 	Renamed     bool      `json:"renamed,omitempty"`
 	Size        int64     `json:"size"`
+	// ConnectionID and NameUsed are set on a send (see PreviewItem).
+	ConnectionID string `json:"connection_id,omitempty"`
+	NameUsed     bool   `json:"name_used,omitempty"`
+}
+
+// PlanSend totals the files going to one receiving workspace. NameUsed counts
+// the ones whose name is already used at the receiver's top level: they will stay
+// in this folder, and the receipt will say why (FR 25).
+type PlanSend struct {
+	ConnectionID        string `json:"connection_id"`
+	ReceiverWorkspaceID string `json:"receiver_workspace_id"`
+	ReceiverName        string `json:"receiver_name"`
+	Count               int    `json:"count"`
+	NameUsed            int    `json:"name_used"`
 }
 
 // PlanDestination totals one destination folder.
@@ -95,9 +109,14 @@ type ReviewPlan struct {
 	Revision      string `json:"revision"`
 	GroupRevision string `json:"group_revision"`
 	PlanDigest    string `json:"plan_digest"`
-	MoveCount     int    `json:"move_count"`
-	TrashCount    int    `json:"trash_count"`
-	Total         int    `json:"total"`
+	// MoveCount counts files going into this folder's Filed folders; SendCount the
+	// ones going to other workspaces. Total is moves, sends and Trash together.
+	MoveCount  int `json:"move_count"`
+	SendCount  int `json:"send_count,omitempty"`
+	TrashCount int `json:"trash_count"`
+	Total      int `json:"total"`
+	// Sends totals each receiving workspace, in connection order.
+	Sends []PlanSend `json:"sends,omitempty"`
 	// OverLimit means more than one press may file. The counts are still stated;
 	// no file was looked at and there is no digest to quote.
 	OverLimit    bool              `json:"over_limit"`
@@ -121,12 +140,14 @@ type computedPlan struct {
 	binding  reviewDraftBinding
 	settings JanitorSettings
 	root     ManagedRoot
+	routes   sendRoutes
 }
 
 func planItemView(line PreviewItem) PlanItemView {
 	view := PlanItemView{
 		CandidateID: line.CandidateID, Name: line.Name, Operation: line.Operation,
 		Category: line.Category, Renamed: line.Renamed, Size: line.Size,
+		ConnectionID: line.ConnectionID, NameUsed: line.NameUsed,
 	}
 	if line.Operation == OperationMove {
 		view.FinalName = path.Base(line.Destination)
@@ -137,12 +158,16 @@ func planItemView(line PreviewItem) PlanItemView {
 // computeReviewPlan works the plan out from one saved-state snapshot and the
 // revalidated saved choices. It is safe inside UpdateScanState: it takes no lock,
 // writes nothing, and only reads metadata.
-func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state ScanState) (computedPlan, error) {
+//
+// routes are the connections that are on, worked out by the caller outside any
+// transaction (see send_review.go). A send line needs one no-follow stat per name
+// at the receiver's top level, the only thing a plan learns about that folder.
+func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state ScanState, routes sendRoutes) (computedPlan, error) {
 	groups, binding, root, err := s.reviewDraftSnapshot(owner, workspaceID, batchID, state)
 	if err != nil {
 		return computedPlan{}, err
 	}
-	view := s.revalidatedReviewDraft(state, batchID, binding, groups, root)
+	view := s.revalidatedReviewDraftWith(state, batchID, binding, groups, root, routes)
 	if view.State == "invalid" || view.State == "stale" {
 		return computedPlan{}, ErrReviewDraftInvalid
 	}
@@ -155,21 +180,25 @@ func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state Sc
 		return computedPlan{}, ErrReviewUnavailable
 	}
 
-	out := computedPlan{view: view, binding: binding, settings: settings, root: root}
+	out := computedPlan{view: view, binding: binding, settings: settings, root: root, routes: routes}
 	out.plan = ReviewPlan{
 		BatchID: batchID, Revision: view.Revision, GroupRevision: groups.Revision,
 		Destinations: []PlanDestination{}, Trash: PlanTrash{First: []PlanItemView{}},
 		Changed: PlanChangedSet{Items: []PlanChanged{}},
 	}
-	moves, trashes := 0, 0
+	moves, sends, trashes := 0, 0, 0
 	for _, choice := range view.Choices {
-		if choice.Operation == OperationTrash {
+		switch {
+		case choice.Operation == OperationTrash:
 			trashes++
-		} else {
+		case choice.ConnectionID != "":
+			sends++
+		default:
 			moves++
 		}
 	}
-	out.plan.MoveCount, out.plan.TrashCount, out.plan.Total = moves, trashes, moves+trashes
+	// Sends count inside the one limit of files per press (FR 19).
+	out.plan.MoveCount, out.plan.SendCount, out.plan.TrashCount, out.plan.Total = moves, sends, trashes, moves+sends+trashes
 	if out.plan.Total > PlanMaxOperations {
 		out.plan.OverLimit = true
 		return out, nil
@@ -190,12 +219,22 @@ func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state Sc
 		changed = append(changed, PlanChanged{CandidateID: removed.candidateID, Name: names[removed.candidateID], Reason: removed.reason})
 	}
 	reserved := map[string]struct{}{}
+	sourceNames := map[string]string{} // send line candidate ID -> on-disk name
 	for _, candidate := range candidates {
 		choice, chosen := choices[candidate.ID]
 		if !chosen {
 			continue
 		}
-		line, planned, err := planLine(settings, root.Path, candidate, choice.Operation, string(choice.Category), reserved)
+		var line PreviewItem
+		var planned PlanItem
+		var err error
+		if choice.ConnectionID != "" {
+			route, _ := routes.byID(choice.ConnectionID) // the view shows a mark only for a route
+			line, planned, err = planSendLine(root.Path, candidate, choice.Category, route)
+			sourceNames[candidate.ID] = candidate.Name
+		} else {
+			line, planned, err = planLine(settings, root.Path, candidate, choice.Operation, string(choice.Category), reserved)
+		}
 		if err != nil {
 			var source planSourceError
 			if errors.As(err, &source) {
@@ -209,12 +248,52 @@ func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state Sc
 		out.lines = append(out.lines, line)
 		out.items = append(out.items, planned)
 	}
+	// Whether each sent file's name is free at its receiver's top level: one stat
+	// per name, never a listing. A used name stays in the plan; the press leaves
+	// that file where it is and says why.
+	if len(sourceNames) > 0 {
+		for _, route := range routes {
+			var names []string
+			for _, line := range out.lines {
+				if line.ConnectionID == route.ConnectionID {
+					names = append(names, sourceNames[line.CandidateID])
+				}
+			}
+			if len(names) == 0 {
+				continue
+			}
+			used, err := namesUsed(route.receiverRoot, route.ReceiverRootDirID, names)
+			if err != nil {
+				return computedPlan{}, ErrReviewUnavailable
+			}
+			for i := range out.lines {
+				if out.lines[i].ConnectionID == route.ConnectionID {
+					out.lines[i].NameUsed = used[sourceNames[out.lines[i].CandidateID]]
+				}
+			}
+		}
+	}
 	// What is left to file is what was worked out, not what was ticked: a changed
 	// or missing file is named, never filed and never silently dropped.
-	out.plan.MoveCount, out.plan.TrashCount = 0, 0
+	out.plan.MoveCount, out.plan.SendCount, out.plan.TrashCount = 0, 0, 0
 	byCategory := map[Category]*PlanDestination{}
+	byConnection := map[string]*PlanSend{}
 	for _, line := range out.lines {
 		item := planItemView(line)
+		if line.Operation == OperationSend {
+			out.plan.SendCount++
+			send := byConnection[line.ConnectionID]
+			if send == nil {
+				route, _ := routes.byID(line.ConnectionID)
+				send = &PlanSend{ConnectionID: route.ConnectionID, ReceiverWorkspaceID: route.ReceiverWorkspaceID, ReceiverName: route.ReceiverName}
+				byConnection[line.ConnectionID] = send
+			}
+			send.Count++
+			if line.NameUsed {
+				send.NameUsed++
+			}
+			continue
+		}
 		if line.Operation == OperationTrash {
 			out.plan.TrashCount++
 			out.plan.Trash.Count++
@@ -237,10 +316,15 @@ func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state Sc
 			destination.First = append(destination.First, item)
 		}
 	}
-	out.plan.Total = out.plan.MoveCount + out.plan.TrashCount
+	out.plan.Total = out.plan.MoveCount + out.plan.SendCount + out.plan.TrashCount
 	for _, definition := range CategoryRegistry {
 		if destination := byCategory[definition.ID]; destination != nil {
 			out.plan.Destinations = append(out.plan.Destinations, *destination)
+		}
+	}
+	for _, route := range routes {
+		if send := byConnection[route.ConnectionID]; send != nil {
+			out.plan.Sends = append(out.plan.Sends, *send)
 		}
 	}
 	sort.SliceStable(changed, func(i, j int) bool {
@@ -254,7 +338,7 @@ func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state Sc
 	if out.plan.Changed.Items == nil {
 		out.plan.Changed.Items = []PlanChanged{}
 	}
-	out.plan.PlanDigest = planDigest(workspaceID, batchID, binding.Digest, view.Revision, groups.Revision, out.lines, out.items, changed)
+	out.plan.PlanDigest = planDigest(workspaceID, batchID, binding.Digest, view.Revision, groups.Revision, out.lines, out.items, changed, routes)
 	return out, nil
 }
 
@@ -262,9 +346,25 @@ func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state Sc
 // every operation with its destination, saved fingerprint and final name, and
 // every file named as changed. Lines are sorted so the order of discovery cannot
 // change it. It contains everything PayloadHash covers.
-func planDigest(workspaceID, batchID, scope, revision, groupRevision string, lines []PreviewItem, items []PlanItem, changed []PlanChanged) string {
+//
+// A send row also binds the connection and every identity of both folders, and
+// whether the name is used at the receiver: turning the connection off, pointing
+// either workspace at another folder, replacing either folder, or a name becoming
+// used all change the digest, so a press that quoted the old one moves nothing.
+// With no send, the digest is exactly what it was before sends existed.
+func planDigest(workspaceID, batchID, scope, revision, groupRevision string, lines []PreviewItem, items []PlanItem, changed []PlanChanged, routes sendRoutes) string {
 	rows := make([]string, 0, len(lines)+len(changed))
 	for i, line := range lines {
+		if line.Operation == OperationSend {
+			route, _ := routes.byID(line.ConnectionID)
+			used := "free"
+			if line.NameUsed {
+				used = "used"
+			}
+			rows = append(rows, strings.Join([]string{line.CandidateID, string(line.Operation), string(line.Category), items[i].FingerprintKey,
+				route.ConnectionID, route.ReceiverWorkspaceID, route.ReceiverRootID, route.ReceiverRootDirID, route.SenderRootDirID, used}, "|"))
+			continue
+		}
 		finalName := ""
 		if line.Operation == OperationMove {
 			finalName = path.Base(line.Destination)
@@ -310,11 +410,12 @@ func (s *Service) PlanReview(ctx context.Context, owner, workspaceID, batchID st
 		}
 		wanted[id] = struct{}{}
 	}
+	routes := s.liveSendRoutes(owner, workspaceID)
 	state, err := s.store.loadScanState(workspaceID, true)
 	if err != nil {
 		return ReviewPlan{}, ErrReviewUnavailable
 	}
-	computed, err := s.computeReviewPlan(owner, workspaceID, batchID, state)
+	computed, err := s.computeReviewPlan(owner, workspaceID, batchID, state, routes)
 	if err != nil {
 		return ReviewPlan{}, err
 	}
