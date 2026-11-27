@@ -747,27 +747,46 @@ function resolveFetch(fetchImpl) {
   return impl;
 }
 
+function linkedRoot(owner, { id, name }) {
+  return row(owner, 'linked', id, name, {
+    dirId: id,
+    dirName: name,
+    path: '',
+    colorKey: JSON.stringify([owner, id])
+  });
+}
+
+export async function loadFilesLayout(owner, { fetchImpl } = {}) {
+  const data = await getJSON(`/api/workspaces/${enc(owner)}/files-layout`, fetchImpl);
+  return {
+    local: data.local_mac === true,
+    folders: data.folders
+      .map(ref => ({ ...linkedRoot(ref.workspace_id, ref), inside: ref.inside }))
+      .sort(byName)
+  };
+}
+
 /** Workspace detail's uncapped, read-only sections. A missing attachment is
  * kept by the management API for Locate, but has nothing for a reader. */
-export async function loadWorkspaceContents(workspaceId, sectionId, { fetchImpl } = {}) {
+export async function loadWorkspaceContents(
+  workspaceId,
+  sectionId,
+  { fetchImpl, storedOnly = false } = {}
+) {
   if (![SECTION_FILES, SECTION_NOTES].includes(sectionId))
     throw new Error('Unsupported reader section');
   const loader = LOADERS[sectionId];
   if (sectionId === SECTION_NOTES)
     return loader.shape(workspaceId, await getJSON(loader.url(workspaceId), fetchImpl));
-  const payload = await getJSON(`${loader.url(workspaceId)}?linked_sources=1`, fetchImpl);
+  const payload = await getJSON(
+    `${loader.url(workspaceId)}${storedOnly ? '' : '?linked_sources=1'}`,
+    fetchImpl
+  );
   const owned = filesToRows(workspaceId, {
     files: payload.files?.filter(entry => entry?.status !== 'missing')
   });
   const linked = (payload.linked_sources || [])
-    .map(({ id, name }) =>
-      row(workspaceId, 'linked', id, name, {
-        dirId: id,
-        dirName: name,
-        path: '',
-        colorKey: JSON.stringify([workspaceId, id])
-      })
-    )
+    .map(ref => linkedRoot(workspaceId, ref))
     .sort(byName);
   if (!linked.length && !payload.linked_sources_unavailable) return owned;
   const rows = [...linked];
@@ -812,7 +831,8 @@ export async function loadLinkedPage(parent, { fetchImpl } = {}) {
           trashSelection: entry.trash_selection,
           moveSelection: entry.move_selection,
           destinationSelection: entry.destination_selection,
-          colorKey: entry.color_key
+          colorKey: entry.color_key,
+          folderStamp: entry.folder_stamp
         }
       )
     )

@@ -29,41 +29,6 @@ type HomeMapFolders struct {
 	Remainder *int        `json:"remainder,omitempty"`
 }
 
-// homeMapMembers hydrates only descendants of this owner and Home. A listing
-// projection cannot decide which rows are anchored or linked projects.
-func (s *Store) homeMapMembers(scope Scope) (map[string]*workspace.Workspace, error) {
-	listed, err := workspace.ListActiveSummaries(s.workspaces)
-	if err != nil {
-		return nil, err
-	}
-	children := map[string][]string{}
-	for _, row := range listed {
-		if row.OwnerUserID == scope.OwnerUserID {
-			children[row.ParentID] = append(children[row.ParentID], row.ID)
-		}
-	}
-	members := map[string]*workspace.Workspace{}
-	parents := []string{scope.HomeID}
-	for len(parents) > 0 {
-		id := parents[0]
-		parents = parents[1:]
-		for _, child := range children[id] {
-			if _, seen := members[child]; seen || child == scope.HomeID {
-				continue
-			}
-			ws, err := s.workspaces.Get(child)
-			if err != nil || !ownedVisibleWorkspace(ws, child, scope.OwnerUserID) || ws.ParentID != id {
-				return nil, ErrUnavailable
-			}
-			members[child] = ws
-			if ws.Kind == "group" {
-				parents = append(parents, child)
-			}
-		}
-	}
-	return members, nil
-}
-
 func mapFolderRows(scope Scope, members map[string]*workspace.Workspace, state *workspace.AssistantProgramState) HomeMapFolders {
 	view := HomeMapFolders{Folders: []MapFolder{}}
 	lookup := workspace.LookupInWorkspaceMap(members)
@@ -165,7 +130,7 @@ func (s *Store) MapFolders(scope Scope, home *workspace.Workspace) (HomeMapFolde
 	if err != nil {
 		return HomeMapFolders{}, err
 	}
-	members, err := s.homeMapMembers(scope)
+	members, err := workspace.GroupDescendants(s.workspaces, scope.OwnerUserID, scope.HomeID)
 	if err != nil {
 		return HomeMapFolders{}, err
 	}

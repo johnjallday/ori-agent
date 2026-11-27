@@ -349,6 +349,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-command-chrome.js',
       'internal/web/static/js/modules/workspace-files-view.js',
       'internal/web/static/js/modules/workspace-files-actions.js',
+      'internal/web/static/js/modules/workspace-files-layout.js',
       'internal/web/static/js/modules/workspace-folder-colors.js',
       'internal/web/static/js/modules/workspace-panels.js',
       'internal/web/static/js/modules/workspace-overview.js',

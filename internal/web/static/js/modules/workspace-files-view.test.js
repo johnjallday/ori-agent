@@ -167,6 +167,21 @@ test('only the explicit open sends the current owner, ref and selected document,
   assert.equal(calls.length, 1);
 });
 
+test('a failed optional Home marks read leaves the directory listing and its selections alone', async () => {
+  const view = new WorkspaceFilesView({}, { id: 'home' });
+  view.controller = new AbortController();
+  view.home = true;
+  view.layout = { folders: [{ id: 'ref' }] };
+  view.marks = { can_set_up: true };
+  const state = { rows: [{ id: 'song' }] };
+  view.sections.set('folder', state);
+  view.paintTree = view.paintPreview = view.syncExpanded = () => {};
+  view.scopedFetch = () => async () => new Response(null, { status: 503 });
+  await view.readMarks();
+  assert.equal(view.marks, undefined);
+  assert.equal(view.sections.get('folder'), state);
+});
+
 test('restoring keyboard focus alone does not read the focused note', () => {
   const view = new WorkspaceFilesView({}, { id: 'album' });
   view.tree = {};

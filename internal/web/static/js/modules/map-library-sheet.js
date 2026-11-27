@@ -503,6 +503,7 @@ export function openLibrarySheet({
   homeID,
   homeName = 'this Home',
   intakeRootID = '',
+  entryID = '',
   anchor = null,
   beside = null,
   tokensFrom = null,
@@ -1226,7 +1227,8 @@ export function openLibrarySheet({
     try {
       const [result, plan] = await Promise.all([
         loadSetupRows(api, {
-          sections: true,
+          sections: !entryID,
+          entryID,
           rootID: intakeRootID,
           cursor: more ? state.nextCursor : ''
         }),

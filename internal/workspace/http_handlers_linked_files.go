@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/directoryid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/platform"
 )
@@ -81,12 +82,16 @@ func (h *HTTPHandler) ListLinkedFilePage(w http.ResponseWriter, r *http.Request)
 	type listedEntry struct {
 		DirectoryEntry
 		linkedActions
+		FolderStamp string `json:"folder_stamp,omitempty"`
 	}
 	entries := make([]listedEntry, 0, len(listing.Entries))
 	local := h.linkedDesktop && h.openFile != nil && linkedOpenLocal(r)
 	expires := time.Now().Add(linkedSelectionTTL).Unix()
 	for _, entry := range listing.Entries {
 		item := listedEntry{DirectoryEntry: entry}
+		if entry.folderVerified {
+			item.FolderStamp = directoryid.ListingStamp(source.WorkspaceID, source.ID, entry.RelativePath, listing.rootIdentity, entry.Version.Identity)
+		}
 		if local && (entry.Kind == "file" && entry.mode.IsRegular() || entry.Kind == "folder" && entry.folderVerified) {
 			item.linkedActions = h.linkedActions(source, listing.rootIdentity, entry, expires)
 		}

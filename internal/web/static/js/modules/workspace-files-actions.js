@@ -17,10 +17,11 @@ export const trashLabel = rows =>
 export function reviewItems(rows, signal, destinations = null, preferred = null) {
   const folder = rows[0].meta.dirName;
   const folders = rows.some(isFolder);
+  const song = rows.some(r => r.song) ? ' This selection includes a song on the map.' : '';
   const includes = folders ? ' Every selected folder moves with all of its contents.' : '';
   if (!destinations && rows.length === 1)
     return window.confirm(
-      `Move “${rows[0].meta.path}” from ${folder} to your Mac’s Trash?\n\nThis moves the original ${folders ? 'folder and all of its contents' : 'file'}, not just its listing in Ori.`
+      `Move “${rows[0].meta.path}” from ${folder} to your Mac’s Trash?\n\nThis moves the original ${folders ? 'folder and all of its contents' : 'file'}, not just its listing in Ori.${song}`
     );
   const dialog = document.createElement('dialog');
   dialog.className = 'wf-trash-review';
@@ -38,7 +39,7 @@ export function reviewItems(rows, signal, destinations = null, preferred = null)
   const explanation = destinations
     ? `These originals will move within ${folder}. Nothing will be overwritten.`
     : `These originals will move from ${folder} to your Mac’s Trash.`;
-  dialog.innerHTML = `<form method="dialog"><h2>${title}</h2><p>${esc(explanation + includes)}</p><ul>${rows.map(r => `<li>${esc(r.meta.path)}${isFolder(r) ? '/' : ''}</li>`).join('')}</ul>${choose}<div class="wf-actions"><button class="wf-action" value="cancel" autofocus formnovalidate>Cancel</button><button class="wf-action" value="confirm">${destinations ? 'Move here' : 'Move to Trash'}</button></div></form>`;
+  dialog.innerHTML = `<form method="dialog"><h2>${title}</h2><p>${esc(explanation + includes + song)}</p><ul>${rows.map(r => `<li>${esc(r.meta.path)}${isFolder(r) ? '/' : ''}</li>`).join('')}</ul>${choose}<div class="wf-actions"><button class="wf-action" value="cancel" autofocus formnovalidate>Cancel</button><button class="wf-action" value="confirm">${destinations ? 'Move here' : 'Move to Trash'}</button></div></form>`;
   document.body.append(dialog);
   return new Promise(resolve => {
     const cancel = () => dialog.close('cancel');

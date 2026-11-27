@@ -48,6 +48,7 @@ func RegisterRoutes(mux *http.ServeMux, h *HTTPHandler) {
 	// nested file paths; the more-specific literals (/files/tree, /files/open,
 	// /files/reveal) win over it by ServeMux precedence.
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/files/tree", h.GetWorkspaceFilesTree)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/files-layout", h.GetFilesLayout)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/folders", h.CreateWorkspaceFolder)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/folders/{folderId}", h.UpdateWorkspaceFolder)
 	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/folders/{folderId}", h.UpdateWorkspaceFolder)
