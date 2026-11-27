@@ -13891,7 +13891,9 @@ export class WorkspaceCommandView {
       runID,
       current,
       navigate: route => this.navigateTo(route),
-      onStarted: () => this.handleFolderAgentChanged(),
+      onStarted: () => {
+        if (current()) void this.handleWorkspacesChanged({});
+      },
       onClose: () => {
         this.homeFeedDialog = null;
         if (current()) this.handleFolderAgentChanged();

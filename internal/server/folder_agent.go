@@ -287,6 +287,18 @@ func (h folderAgentHomes) HomeProviderOf(_ context.Context, userID, workspaceID 
 	return provider.Key
 }
 
+func (h folderAgentHomes) WritableMapFeedProvider(owner, id string) string {
+	b := h.builder
+	if b == nil || b.workspaceStore == nil || b.sessionHandler == nil {
+		return ""
+	}
+	home, err := b.workspaceStore.Get(id)
+	if err != nil || home == nil || home.ID != id {
+		return ""
+	}
+	return b.sessionHandler.MapFeedProvider(owner, home)
+}
+
 type folderAgentWorkspaces struct{ builder *ServerBuilder }
 
 func (w folderAgentWorkspaces) CreateAnchored(ctx context.Context, req folderagent.CreateRequest) (folderagent.Created, error) {
@@ -295,7 +307,7 @@ func (w folderAgentWorkspaces) CreateAnchored(ctx context.Context, req folderage
 		return folderagent.Created{}, folderagent.ErrUnavailable
 	}
 	created, err := b.sessionHandler.CreateFolderAgentWorkspace(ctx, sessionhttp.FolderAgentWorkspaceRequest{
-		Name: req.Name, AnchorPath: req.AnchorPath, Mission: req.Mission, AgentName: req.AgentName,
+		Name: req.Name, AnchorPath: req.AnchorPath, Mission: req.Mission, AgentName: req.AgentName, ParentID: req.ParentID,
 		BindExisting: req.BindExisting, Provider: req.Provider, Model: req.Model, Mandate: req.Mandate,
 		Character: req.Character, CharacterVersion: req.CharacterVersion,
 	})
@@ -879,7 +891,7 @@ func (s folderAgentSetups) run(ctx context.Context, rec folderagent.Record, plan
 	b := s.builder
 	// Re-read the trusted anchor at the mutation boundary, before group,
 	// provider, library, placement, or capability dispatch can write anything.
-	if b.folderAgentService == nil || b.folderAgentService.CheckPlan(rec.WorkspaceID, plan) != nil {
+	if b.folderAgentService == nil || b.folderAgentService.CheckPlan(rec.WorkspaceID, plan) != nil || !b.mapFeedStillContained(rec) {
 		return personalassistant.FolderSetupStopped, personalassistant.FolderStopPlanChanged
 	}
 	lines := append([]personalassistant.FolderPlanLine(nil), plan.Lines...)

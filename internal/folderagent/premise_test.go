@@ -19,6 +19,68 @@ func (f fakeHomes) HomeProviderOf(_ context.Context, _ string, workspaceID strin
 	return f[workspaceID]
 }
 
+func (f fakeHomes) WritableMapFeedProvider(owner, id string) string {
+	if owner != "u1" {
+		return ""
+	}
+	return f[id]
+}
+
+func TestMapFeedHire_CreatesInsideTheExactHomeBeforeSetup(t *testing.T) {
+	for _, provider := range []string{"music_project_management", "manuscript_home"} {
+		t.Run(provider, func(t *testing.T) {
+			h := newHarness(t, demo(t))
+			h.svc.deps.Homes = fakeHomes{"home": provider}
+			chosen, err := h.svc.ChooseInHome(t.Context(), "u1", personalassistant.FolderChoice{Picker: true}, "home")
+			if err != nil {
+				t.Fatal(err)
+			}
+			view, err := h.svc.Start(t.Context(), "u1", chosen.Token, "", Hire{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.svc.Wait()
+			rec, err := h.svc.Record("u1", view.WorkspaceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(h.ws.created) != 1 || h.ws.created[0].ParentID != "home" || !rec.InOriginHome || rec.OriginHomeID != "home" || rec.Setup != nil || rec.AgentName == "" {
+				t.Fatal("hire did not create one managed child before setup")
+			}
+			var matching bool
+			for _, c := range rec.Candidates {
+				if c.Kind == folderlook.KindHomeProvider {
+					if c.HomeProviderKey != provider {
+						t.Fatal("setup offered a different Home")
+					}
+					matching = true
+				}
+			}
+			if matching != (provider == "music_project_management") {
+				t.Fatal("wrong Home plan for this folder")
+			}
+		})
+	}
+}
+
+func TestMapFeedHire_StaleHomeNeverFallsBackToTopLevel(t *testing.T) {
+	h := newHarness(t, demo(t))
+	homes := fakeHomes{"home": "music_project_management"}
+	h.svc.deps.Homes = homes
+	pick := personalassistant.FolderChoice{Picker: true}
+	if _, err := h.svc.ChooseInHome(t.Context(), "u1", pick, "not-my-home"); err == nil {
+		t.Fatal("invalid Home got a hire card")
+	}
+	chosen, err := h.svc.ChooseInHome(t.Context(), "u1", pick, "home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(homes, "home")
+	if _, err := h.svc.Start(t.Context(), "u1", chosen.Token, "", Hire{}); err == nil || len(h.ws.created) != 0 || len(h.tickets.opened) != 0 {
+		t.Fatal("stale hire did not fail closed")
+	}
+}
+
 // startFrom feeds the folder as the page would, from a workspace page.
 func (h *harness) startFrom(t *testing.T, from string) View {
 	t.Helper()
@@ -406,6 +468,9 @@ func TestPremise_WhenItIsNotAsked(t *testing.T) {
 	inside := newHarness(t, demo(t))
 	inside.svc.deps.Homes = fakeHomes{"music-home": "music_project_management", "writing-home": "manuscript_home"}
 	fed := inside.startFrom(t, "music-home")
+	if inside.ws.created[0].ParentID != "" {
+		t.Fatal("a drawer navigation hint must not authorize a parent")
+	}
 	v := inside.view(t, fed.WorkspaceID)
 	if v.OriginHomeID != "music-home" {
 		t.Fatalf("origin = %q", v.OriginHomeID)

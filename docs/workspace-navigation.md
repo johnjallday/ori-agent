@@ -70,7 +70,7 @@ A rendered zero must come from a successful canonical read. An idle agent's
 
 ## Folders on a Home’s map
 
-On a writable Music Production Home, **Map → + Add folder** opens the system folder picker. Hire the folder’s manager and review its plan, just as you would from **Explore a folder**. Choosing or hiring does not place the folder in the Home: that happens when you confirm the Home step. If you leave while the manager is looking, return to Map and press the pending folder’s name to reopen its card.
+On a writable Music Production Home, **Map → + Add folder** opens the system folder picker. Hire the folder’s manager and review its plan, just as you would from **Explore a folder**. Choosing alone creates nothing. **Hire & build** creates the folder workspace and its manager inside this Home immediately, on both maps. **Set up** confirms the shelf and other steps you choose; it does not move the workspace to another Home. If you leave while the manager is looking, return to Map and press the pending folder’s name to reopen its card.
 
 Press a folder’s name to select and frame its station without moving anything. The song count is what is on the map; **n to set up** opens that folder’s shelf projects. Projects from shelf-only roots remain on the Home-wide setup button. Four folders are shown by name; the rest are in **more folders**. Ordinary groups and Homes without a fed folder keep **Linked workspaces**. **Add workspace** and **Group projects by folder** are separate controls.
 

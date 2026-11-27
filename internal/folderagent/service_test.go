@@ -270,7 +270,7 @@ func TestStart_DemoFolderCreatesWorkspaceAgentTicketAndReport(t *testing.T) {
 	h.svc.Wait()
 	req := h.ws.created[0]
 	// The brief stays the agent's instruction; the workspace starts with no goal.
-	if req.Name != "Ori Music Demo" || req.AgentName != "Ori Music Demo Manager" || req.Mission != "" || !filepath.IsAbs(req.AnchorPath) {
+	if req.ParentID != "" || req.Name != "Ori Music Demo" || req.AgentName != "Ori Music Demo Manager" || req.Mission != "" || !filepath.IsAbs(req.AnchorPath) {
 		t.Fatalf("create = %+v", req)
 	}
 	if rec, _ := h.svc.Record("u1", view.WorkspaceID); rec.Brief != DefaultBrief {

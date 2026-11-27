@@ -62,6 +62,7 @@ type WorkspaceRef struct {
 // CreateRequest is the anchored workspace Start creates.
 type CreateRequest struct {
 	OwnerUserID string
+	ParentID    string // verified Home of a scoped hire; never supplied to Start by the browser
 	Name        string
 	AnchorPath  string
 	Mission     string
@@ -278,6 +279,7 @@ type choice struct {
 	// from inside, resolved on the server; empty otherwise.
 	fedFromHome  string
 	originHomeID string
+	inHome       bool // Add folder, not a navigation hint from the drawer
 	guidedReturn string
 	// policy supplies editable defaults only, never mutation authority.
 	policy folderlook.RootPolicy
@@ -288,6 +290,7 @@ type choice struct {
 // Homes, or its provider is unknown.
 type Homes interface {
 	HomeProviderOf(ctx context.Context, userID, workspaceID string) string
+	WritableMapFeedProvider(userID, workspaceID string) string
 }
 
 // NewService builds the service.
@@ -349,12 +352,40 @@ func (s *Service) ChooseForReturn(ctx context.Context, userID string, c personal
 			originHomeID = from
 		}
 	}
-	return s.choosePath(ctx, userID, path, fedFromHome, originHomeID, s.returnBinding(ctx, userID, hq, attempt)), nil
+	return s.choosePath(ctx, userID, path, choice{fedFromHome: fedFromHome, originHomeID: originHomeID, guidedReturn: s.returnBinding(ctx, userID, hq, attempt)}), nil
+}
+
+// ChooseInHome is the map's Add folder. Unlike a drawer origin hint, this
+// action must not degrade to top-level creation if the Home is unavailable.
+func (s *Service) ChooseInHome(ctx context.Context, userID string, c personalassistant.FolderChoice, homeID string) (*Chosen, error) {
+	if s == nil || s.deps.Folders == nil {
+		return nil, ErrUnavailable
+	}
+	homeID = strings.TrimSpace(homeID)
+	provider := s.writableMapFeedProvider(userID, homeID)
+	if provider == "" {
+		return nil, homeUnavailable()
+	}
+	path, chosen, err := s.deps.Folders.ChooseFolder(ctx, userID, c)
+	if err != nil || !chosen {
+		return nil, err
+	}
+	return s.choosePath(ctx, userID, path, choice{inHome: true, originHomeID: homeID, fedFromHome: provider}), nil
+}
+
+func (s *Service) writableMapFeedProvider(owner, id string) string {
+	if id == "" || s.deps.Homes == nil {
+		return ""
+	}
+	return s.deps.Homes.WritableMapFeedProvider(owner, id)
+}
+
+func homeUnavailable() error {
+	return &Refusal{Status: 409, Code: "home_unavailable", Message: "This Home is no longer available for adding a folder. Nothing was created."}
 }
 
 // choosePath issues a volatile hire card for an already host-validated path.
-// Only chooser resolution and recorded project-holder resolution call it.
-func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome, originHomeID, guidedReturn string) *Chosen {
+func (s *Service) choosePath(ctx context.Context, userID, path string, held choice) *Chosen {
 	identity := ResolveRootIdentity(path, s.deps.KnownFolderRoot)
 	purpose, brief := knownFolderHire(identity.Policy)
 	token := newToken()
@@ -365,7 +396,8 @@ func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome, ori
 			delete(s.choices, key)
 		}
 	}
-	s.choices[token] = choice{userID: userID, path: path, expires: now.Add(choiceTTL), fedFromHome: fedFromHome, originHomeID: originHomeID, guidedReturn: guidedReturn, policy: identity.Policy}
+	held.userID, held.path, held.expires, held.policy = userID, path, now.Add(choiceTTL), identity.Policy
+	s.choices[token] = held
 	s.mu.Unlock()
 	name := filepath.Base(path)
 	hire := s.hireOptions(ctx, userID, name)
@@ -375,10 +407,14 @@ func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome, ori
 	if identity.Policy.IsCatchAll() {
 		hire.Mandate = brief
 	}
+	note := "Nothing is built until you hire. It looks before it touches anything, and you confirm every step after."
+	if held.inHome {
+		note = "Hiring creates this workspace inside your Home. You review the plan before anything is set up."
+	}
 	return &Chosen{
 		Token: token, FolderName: name, Title: "Hire an agent for " + name, Field: "What should it do?",
 		Purpose: purpose, Brief: brief, BriefMax: personalassistant.BriefMaxRunes, Action: "Hire & build", ActionExisting: "Assign & build",
-		Note: "Nothing is built until you hire. It looks before it touches anything, and you confirm every step after.",
+		Note: note,
 		Hire: hire,
 	}
 }
@@ -444,6 +480,12 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 		s.mu.Unlock()
 	}
 	defer endStarting()
+	if held.inHome {
+		if held.fedFromHome == "" || s.writableMapFeedProvider(userID, held.originHomeID) != held.fedFromHome {
+			return View{}, homeUnavailable()
+		}
+		req.ParentID = held.originHomeID
+	}
 	created, err := s.deps.Workspaces.CreateAnchored(ctx, req)
 	if err != nil {
 		return View{}, err
@@ -456,7 +498,7 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 	rec := &Record{
 		WorkspaceID: created.ID, OwnerUserID: userID, FolderName: folder, WorkspaceName: created.Name,
 		AgentName: created.AgentName, TicketID: ticketID, Brief: brief, State: StateLooking,
-		AsksPremise: true, FedFromHome: held.fedFromHome, OriginHomeID: held.originHomeID, GuidedReturn: held.guidedReturn,
+		AsksPremise: true, FedFromHome: held.fedFromHome, OriginHomeID: held.originHomeID, InOriginHome: held.inHome, GuidedReturn: held.guidedReturn,
 	}
 	err = s.deps.Store.Create(rec)
 	endStarting() // only now: the record is written (or never will be)
@@ -657,7 +699,7 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	identity := s.rootIdentity(workspaceID)
 	rec.RootPolicy, rec.PolicyBinding = identity.Policy, identity.Binding
 	facts := foldermap.FactsFrom(m)
-	candidates := folderlook.CandidatesForPolicy(rec.RootPolicy, facts, ready)
+	candidates := rec.setupCandidates(facts, ready)
 	model := s.resolveModel(ctx, rec)
 	// Source (d), the marketplace search, runs only for a turn that can rank
 	// it (PRD FR23), with the table's own words.
@@ -683,7 +725,7 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 			sections.Goal, sections.Ticket, sections.TicketWhy, sections.Next = "", "", "", ""
 		}
 	}
-	required := folderlook.CandidatesForPolicy(rec.RootPolicy, facts, ready)
+	required := rec.setupCandidates(facts, ready)
 	candidates = applyRanking(append(required, found...), sections)
 	candidates = keepShown(candidates)
 	existing := s.existingMembers(rec.WorkspaceID, root, stage, facts)

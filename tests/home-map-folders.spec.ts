@@ -7,6 +7,7 @@ import { installLocalCdn } from './helpers/offline-cdn';
 // a folder or buys a model turn. Setup/placement itself is the live demo.
 const route = process.env.ORI_HOME_MAP_FOLDERS_ROUTE || '';
 const evidence = 'tasks/evidence-home-map-folders';
+const listedFolders = Number(process.env.ORI_HOME_MAP_LISTED_FOLDERS || 2);
 test.skip(!route, 'requires a disposable Home with two fully listed fed folders');
 test('Add folder requests a native choice for the page and Cancel returns focus without hiring', async ({
   page
@@ -25,7 +26,8 @@ test('Add folder requests a native choice for the page and Cancel returns focus 
   const read = page.waitForRequest(chooser);
   await add.click();
   const body = (await read).postDataJSON();
-  expect(Object.keys(body).sort()).toEqual(['from_workspace_id', 'picker']);
+  expect(Object.keys(body).sort()).toEqual(['from_workspace_id', 'in_home', 'picker']);
+  expect(body.in_home).toBe(true);
   expect(body.picker).toBe(true);
   const homeRead = await page.request.get(
     `/api/workspaces/${encodeURIComponent(body.from_workspace_id)}/assistant-program/map-folders`
@@ -51,7 +53,7 @@ test('extra folders fold into a reachable disclosure on a narrow map', async ({ 
   await page.goto(route);
   const names = page.locator('[data-cmd-folder-names]');
   const more = names.locator('summary');
-  await expect(more).toHaveText('2 more folders');
+  await expect(more).toHaveText(`${listedFolders} more folders`);
   await expect(names.locator('[data-cmd-frame-folder]:visible')).toHaveCount(4);
   await more.focus();
   await page.keyboard.press('Enter');
@@ -62,6 +64,50 @@ test('extra folders fold into a reachable disclosure on a narrow map', async ({ 
   await last.click();
   await expect(more).toBeFocused();
   await expect(names.locator('details')).not.toHaveAttribute('open', '');
+});
+
+test('a pending hire is one station inside the originating Home on both maps', async ({ page }) => {
+  const id = process.env.ORI_HOME_MAP_PENDING_ID;
+  test.skip(!id, 'requires a disposable map hire before Set up');
+  await installLocalCdn(page);
+  const view = (await (await page.request.get(`/api/personal-assistant/folder-agent/${id}`)).json())
+    .folder_agent;
+  expect(['looking', 'reported']).toContain(view.state);
+  expect(view.setup).toBeFalsy();
+  const home = view.origin_home_id;
+  const tile = page.locator(`.ws-map-tile[data-ws-id="${id}"]`);
+  await page.goto(route);
+  await expect(tile).toHaveCount(1);
+  await expect(tile).toBeVisible();
+  await expect(page.locator(`[data-cmd-home-feed="${id}"]`)).toHaveCount(1);
+  await expect(page.locator(`[data-cmd-frame-folder="${id}"]`)).toHaveCount(0);
+  await page.goto('/');
+  const district = page.locator(`.ws-map-district[data-group-id="${home}"]`);
+  await expect(tile).toHaveCount(1);
+  // Districts and tiles share a flat canvas. Check the actual drawn bounds,
+  // not only parent_id, so a misplaced tile on the global map fails too.
+  await expect
+    .poll(async () => {
+      const [t, d] = await Promise.all([tile.boundingBox(), district.boundingBox()]);
+      return (
+        !!t &&
+        !!d &&
+        t.x >= d.x - 1 &&
+        t.y >= d.y - 1 &&
+        t.x + t.width <= d.x + d.width + 1 &&
+        t.y + t.height <= d.y + d.height + 1
+      );
+    })
+    .toBe(true);
+  const tree = await (await page.request.get('/api/workspaces?tree=true')).json();
+  const roots = tree.workspaces || tree.folders;
+  expect(roots.some((w: { id: string }) => w.id === id)).toBe(false);
+  expect(
+    roots
+      .find((w: { id: string }) => w.id === home)
+      ?.children.filter((w: { id: string }) => w.id === id)
+  ).toHaveLength(1);
+  await page.screenshot({ path: join(evidence, 'pending-in-global-home.png') });
 });
 
 for (const width of [1440, 390]) {
@@ -78,7 +124,7 @@ for (const width of [1440, 390]) {
       await page.goto(route);
       const bar = page.getByRole('toolbar', { name: 'Group map controls' });
       const chips = bar.locator('[data-cmd-frame-folder]');
-      await expect(chips).toHaveCount(2);
+      await expect(chips).toHaveCount(listedFolders);
       await expect(bar.getByRole('button', { name: '+ Add folder' })).toBeVisible();
       await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
       const chip = chips.first();

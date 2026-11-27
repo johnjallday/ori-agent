@@ -72,6 +72,7 @@ type chooseRequest struct {
 	// FromWorkspaceID names the workspace page the folder is fed from; the
 	// server decides whether it is one of the owner's Homes.
 	FromWorkspaceID string `json:"from_workspace_id"`
+	InHome          bool   `json:"in_home"` // require containment, not just a drawer origin hint
 	GuidedHQ        string `json:"guided_hq"`
 	GuidedAttempt   string `json:"guided_attempt"`
 }
@@ -91,9 +92,14 @@ func (h *Handler) Choose(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "Choose a folder")
 		return
 	}
-	chosen, err := h.service.ChooseForReturn(r.Context(), userID, personalassistant.FolderChoice{
-		Chip: req.Chip, Picker: req.Picker, SelectionToken: req.SelectionToken,
-	}, req.FromWorkspaceID, req.GuidedHQ, req.GuidedAttempt)
+	choice := personalassistant.FolderChoice{Chip: req.Chip, Picker: req.Picker, SelectionToken: req.SelectionToken}
+	var chosen *folderagent.Chosen
+	var err error
+	if req.InHome {
+		chosen, err = h.service.ChooseInHome(r.Context(), userID, choice, req.FromWorkspaceID)
+	} else {
+		chosen, err = h.service.ChooseForReturn(r.Context(), userID, choice, req.FromWorkspaceID, req.GuidedHQ, req.GuidedAttempt)
+	}
 	if err != nil {
 		writeError(w, err)
 		return

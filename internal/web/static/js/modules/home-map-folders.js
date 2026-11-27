@@ -58,8 +58,8 @@ export function homeFolderChips(data, pending, memberViews = []) {
   return chips.slice(0, 4).join('') + more + other;
 }
 
-// Origin is a server-verified navigation hint. A pending hire is not a Home
-// member, and its origin does not promise where the setup will place it.
+// The report can resume even before a refreshed members tree reaches the map.
+// Membership itself always comes from the workspace tree, not the report.
 export function pendingHomeFeeds(views, homeID) {
   return views.filter(
     v =>
@@ -124,13 +124,15 @@ export function openHomeFeed({
       if (!view) showError('Folder setup is unavailable.');
     });
   } else {
-    void mountFolderAgentChoice(host, { picker: true, from_workspace_id: homeID }, options).then(
-      result => {
-        if (!active()) return;
-        if (result.cancelled) dialog.close();
-        else if (result.error) showError(result.error);
-      }
-    );
+    void mountFolderAgentChoice(
+      host,
+      { picker: true, from_workspace_id: homeID, in_home: true },
+      options
+    ).then(result => {
+      if (!active()) return;
+      if (result.cancelled) dialog.close();
+      else if (result.error) showError(result.error);
+    });
   }
   return dialog;
 }

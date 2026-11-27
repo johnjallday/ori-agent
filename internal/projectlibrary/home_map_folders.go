@@ -152,6 +152,13 @@ func (v *HomeMapFolders) addShelfCounts(doc Document, state *workspace.Assistant
 	}
 }
 
+// CanFeedHome checks the live provider and the same Home/mirror identity as
+// the map read without requiring a shelf or enumerating its projects.
+func (s *Store) CanFeedHome(scope Scope, home *workspace.Workspace) bool {
+	_, err := s.home(scope, home)
+	return err == nil && s.providerWritable(scope, home)
+}
+
 // MapFolders reads the map even when the shelf has not been initialized.
 func (s *Store) MapFolders(scope Scope, home *workspace.Workspace) (HomeMapFolders, error) {
 	state, err := s.home(scope, home)
