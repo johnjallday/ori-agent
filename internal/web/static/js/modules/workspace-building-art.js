@@ -167,6 +167,29 @@
           <path d="M42 42h25M54 38v11M50 46l4 4 4-4" fill="none" stroke="#f6f0df" stroke-opacity=".9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
         </g>`
     }),
+    // Station-only landmarks, never inferred from a workspace name.
+    tower: Object.freeze({
+      color: '#9caace',
+      markup: `
+        <path d="M17 74l38-14 47 12-39 15z" fill="currentColor" opacity=".24"/>
+        <path d="M45 38l17 6v37l-20-7z" fill="currentColor" opacity=".7"/>
+        <path d="M62 44l14-6 4 35-18 8z" fill="currentColor" opacity=".49"/>
+        <path d="M37 28l24-10 24 9v13L62 50l-25-9z" fill="currentColor"/>
+        <path d="M42 29l18 7v7l-18-6zm22 7l16-7v8l-16 7z" fill="#26363b"/>
+        <path d="M33 28l27-23 29 22-27 10z" fill="currentColor"/>
+        <path d="M60 5l2 32 27-10z" fill="#18252e" opacity=".26"/>
+        <path d="M49 55l8 3m-9 4l9 3m-10 4l10 3" stroke="#283b40" stroke-width="2"/>`
+    }),
+    notebook: Object.freeze({
+      color: '#91bda2',
+      markup: `
+        <path d="M9 68l47-15 53 14-49 20z" fill="currentColor" opacity=".22"/>
+        <path d="M22 43l35 10v26L22 67z" fill="currentColor" opacity=".58"/>
+        <path d="M57 53l40-12v24L57 79z" fill="currentColor" opacity=".75"/>
+        <path d="M70 56l14-5v17l-14 5z" fill="#1d3030"/>
+        <path d="M15 42l23-22 20 17 20-19 27 23-47 17z" fill="currentColor"/>
+        <path d="M37 25l21 18 21-20m-50 9l23 18m13-6l14-14" stroke="#203334" stroke-width="2" fill="none"/>`
+    }),
     // Station-only: the Memory station's low, wide stacks. Deliberately absent
     // from BLUEPRINT_VARIANTS so no workspace building ever takes it.
     archive: Object.freeze({
@@ -265,12 +288,11 @@
     // A station is already inside Workspace Command's theme token scope. Its
     // depot art therefore inherits the keeper accent instead of freezing the
     // catalog's curated swatch into both light and dark map themes.
+    const stationColor = ['depot', 'archive'].includes(normalized)
+      ? 'var(--ws-keeper)'
+      : `color-mix(in srgb, ${definition.color} 76%, var(--ws-ink))`;
     const color =
-      context === 'chat'
-        ? 'inherit'
-        : context === 'station'
-          ? 'var(--ws-keeper)'
-          : definition.color;
+      context === 'chat' ? 'inherit' : context === 'station' ? stationColor : definition.color;
 
     return `<svg class="${className}" data-building-variant="${normalized}" viewBox="0 0 120 88" width="112" height="92" style="color:${color}" aria-hidden="true" focusable="false">${definition.markup}</svg>`;
   }

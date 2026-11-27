@@ -60,7 +60,7 @@ export const HQ_LABELS = Object.freeze({
   // arrangement switch, and the belt's plain names.
   mapArrangement: 'Map arrangement',
   flow: 'Flow',
-  free: 'Free',
+  grounds: 'Grounds',
   whatOriReads: 'What Ori reads',
   yourLeadAgent: 'Your lead agent',
   whatNeedsYou: 'What needs you',

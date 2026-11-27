@@ -26,7 +26,7 @@ test('the map carries every plain name the HQ page needs', () => {
     // The Map (PRD 767)
     mapArrangement: 'Map arrangement',
     flow: 'Flow',
-    free: 'Free',
+    grounds: 'Grounds',
     whatOriReads: 'What Ori reads',
     yourLeadAgent: 'Your lead agent',
     whatNeedsYou: 'What needs you',

@@ -55,6 +55,7 @@ import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js'
 import { folderAgentWaiting, resolveWorkspaceNextAction } from './workspace-next-action.js';
 import { commanderWaitingForFiling } from './commander-speech.js';
 import { chatRefOf } from './folder-agent-chat.js';
+import { groundsLayout } from './hq-grounds-layout.js';
 import { stationDeferred } from './filing-station-offer.js';
 import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
 import {
@@ -320,6 +321,18 @@ function calendarOpsMeetingTimeLabel(evt) {
   } catch (_) {
     return '';
   }
+}
+
+// Only the grounds use a short sign; panels, Flow and Overview keep the full state.
+function stationGroundsSign(state, review) {
+  if (review) return `${state.reviewCount} to review`;
+  const value = String(state.value || '');
+  if (state.tone === 'loading') return value === 'Preparing…' ? value : 'Loading…';
+  if (state.tone === 'degraded')
+    return /failed|needs attention/i.test(value) ? value : 'Unavailable';
+  if (/^(set up|finish setup|not set up|setup needed)\b/i.test(value)) return 'Setup needed';
+  if (state.tone === 'attention' || state.buildPart || value === 'Preparing preview…') return value;
+  return '';
 }
 
 // Pointer travel (px) from the press origin past which a press on a station
@@ -8401,6 +8414,7 @@ export class WorkspaceCommandView {
         key: 'watchtower',
         label: 'Watchtower',
         icon: 'bi-binoculars',
+        visualVariant: 'tower',
         state: () => this.hqWatchtowerStationState(),
         action: trigger => this.openWatchtowerPanel(trigger)
       },
@@ -8408,6 +8422,7 @@ export class WorkspaceCommandView {
         key: 'email',
         label: 'Email',
         icon: 'bi-envelope',
+        visualVariant: 'mail',
         state: () => this.hqEmailStationState(),
         action: () => this.openHQEmailSetup()
       },
@@ -8415,6 +8430,7 @@ export class WorkspaceCommandView {
         key: 'calendar-ops',
         label: 'Calendar Ops',
         icon: 'bi-calendar-check',
+        visualVariant: 'calendar',
         state: () => this.hqCalendarOpsStationState(),
         action: trigger => this.openCalendarOpsPanel(trigger)
       },
@@ -8566,6 +8582,7 @@ export class WorkspaceCommandView {
       key: NOTES_STATION,
       label: 'Notes',
       icon: 'bi-journal-text',
+      visualVariant: 'notebook',
       defaultX: 0.76,
       defaultY: 0.39,
       state: () => this.notesStationState(),
@@ -9458,8 +9475,7 @@ export class WorkspaceCommandView {
   // the workspace layout, clamped to [0,1] so a stale/corrupt value can never
   // render a station off-field, else the registry-order default slot. Unknown
   // or non-finite saved values fall back to the default (FR13).
-  hqStationPosition(key) {
-    const registry = this.mapStationRegistry();
+  hqStationPosition(key, registry = this.mapStationRegistry()) {
     const index = registry.findIndex(entry => entry.key === key);
     const fallback = this.hqStationDefaultPosition(index);
     const preferredX = Number(registry[index]?.defaultX);
@@ -9482,17 +9498,18 @@ export class WorkspaceCommandView {
   // --station-x/--station-y custom props. HQ stations render only in the
   // designated HQ (FR16); every workspace has its Memory station, plus any
   // capability station it earned.
-  renderMapHQStations() {
-    return this.mapStationRegistry()
+  renderMapHQStations(registry = this.mapStationRegistry(), positions) {
+    return registry
       .map(station => {
         const state = station.state() || {};
-        const pos = this.hqStationPosition(station.key);
-        const visualVariant = String(station.visualVariant || '').trim();
+        const pos = positions?.get(station.key) || this.hqStationPosition(station.key, registry);
         const buildingArt = typeof window === 'undefined' ? null : window.OriWorkspaceBuildingArt;
-        const visualMarkup =
-          visualVariant && buildingArt && typeof buildingArt.svgForVariant === 'function'
-            ? buildingArt.svgForVariant(visualVariant, { context: 'station' })
-            : '';
+        let visualVariant = station.visualVariant || 'neutral';
+        let visualMarkup = buildingArt?.svgForVariant(visualVariant, { context: 'station' });
+        if (!visualMarkup && visualVariant !== 'neutral') {
+          visualVariant = 'neutral';
+          visualMarkup = buildingArt?.svgForVariant(visualVariant, { context: 'station' });
+        }
         const icon = station.icon
           ? '<i class="bi ' + escapeHtml(station.icon) + '" aria-hidden="true"></i>'
           : '';
@@ -9500,9 +9517,8 @@ export class WorkspaceCommandView {
         const accessibleParts = [String(station.label || '') + ' station'];
         if (location) accessibleParts.push('managed folder ' + location);
         const review = station.key === 'file-janitor' && state.reviewCount > 0;
-        const value = review
-          ? `Review ${state.reviewCount} ${state.reviewCount === 1 ? 'file' : 'files'}`
-          : String(state.value || '');
+        const value = String(state.value || '');
+        const sign = stationGroundsSign(state, review);
         const description = String(state.description || '');
         // The value is read unless it says nothing ("—"), only repeats the
         // station's name, or the description already says it ("14 entries,
@@ -9528,8 +9544,13 @@ export class WorkspaceCommandView {
           '%;--station-y:' +
           (pos.y * 100).toFixed(2) +
           '%" aria-label="' +
-          escapeHtml(accessibleParts.join(', ')) +
-          '">' +
+          escapeHtml(review ? station.label + ' · ' + sign : accessibleParts.join(', ')) +
+          '"' +
+          (review
+            ? ' aria-description="' + escapeHtml(accessibleParts.slice(1).join(', ')) + '"'
+            : '') +
+          (location ? ' title="' + escapeHtml(location) + '"' : '') +
+          '>' +
           (visualMarkup
             ? '<span class="ws-cmd-map-hq-station-visual" aria-hidden="true">' +
               visualMarkup +
@@ -9543,19 +9564,8 @@ export class WorkspaceCommandView {
           '<span class="ws-cmd-map-hq-station-label">' +
           escapeHtml(station.label) +
           '</span>' +
-          (location
-            ? '<span class="ws-cmd-map-hq-station-location" title="' +
-              escapeHtml(location) +
-              '">' +
-              escapeHtml(location) +
-              '</span>'
-            : '') +
-          '<span class="ws-cmd-map-hq-station-state">' +
-          escapeHtml(value) +
-          (review ? ' <span aria-hidden="true">→</span>' : '') +
-          '</span>' +
-          (review
-            ? '<span class="ws-cmd-map-review-note">' + escapeHtml(description) + '</span>'
+          (sign
+            ? '<span class="ws-cmd-map-hq-station-state">' + escapeHtml(sign) + '</span>'
             : '') +
           '</button>'
         );
@@ -10196,7 +10206,51 @@ export class WorkspaceCommandView {
     );
   }
 
+  renderMapGrounds(agents) {
+    const stations = this.mapStationRegistry();
+    const { rows, positions } = groundsLayout(
+      stations,
+      this.page?.workspace?.layout?.station_positions
+    );
+    const hq =
+      typeof window === 'undefined'
+        ? ''
+        : window.OriWorkspaceBuildingArt?.svgForVariant('hq', { context: 'station' });
+    const lead = agents.find(agent => agent.entry);
+    const team = agents.filter(agent => agent !== lead);
+    return (
+      '<section class="ws-cmd-map-world ws-cmd-grounds" data-map-zone="agents" aria-label="HQ grounds" style="--grounds-rows:' +
+      rows +
+      '">' +
+      '<div class="ws-cmd-grounds-court">' +
+      (hq || '') +
+      '<strong>HQ</strong>' +
+      (lead
+        ? '<button type="button" class="ws-cmd-grounds-lead" data-cmd-map-select-agent="' +
+          escapeHtml(lead.encodedName) +
+          '" data-agent-key="' +
+          escapeHtml(lead.key) +
+          '" aria-pressed="' +
+          (lead.key === this.selectedAgentKey) +
+          '">' +
+          this.agentCharacterHTML(lead, 'map') +
+          '<span><small>Lead</small>' +
+          escapeHtml(lead.name) +
+          '</span></button>'
+        : '<button type="button" class="ws-cmd-grounds-lead" data-cmd-add-agent>Hire a lead</button>') +
+      '</div>' +
+      this.renderMapHQStations(stations, positions) +
+      '</section>' +
+      (team.length
+        ? '<div class="ws-cmd-map-agent-field ws-cmd-grounds-team">' +
+          team.map((agent, i) => this.renderMapAgentUnit(agent, i, false)).join('') +
+          '</div>'
+        : '')
+    );
+  }
+
   renderMapAgentsZone(agents) {
+    if (this.isPersonalHQ() && !this.isGroupWorkspace()) return this.renderMapGrounds(agents);
     return (
       '<section class="ws-cmd-map-world" data-map-zone="agents" aria-label="Agent units">' +
       '<div class="ws-cmd-map-floor" aria-hidden="true"></div>' +
@@ -12216,10 +12270,11 @@ export class WorkspaceCommandView {
     return this.mapArrangement;
   }
 
-  // Flow is the HQ's map unless the user chose Free; a group is never Flow.
+  // Grounds retains the original 'free' storage key. Only an explicit Flow
+  // choice opens Flow; groups always keep their combined member map.
   isHQFlowMap() {
     return (
-      this.isPersonalHQ() && !this.isGroupWorkspace() && this.currentMapArrangement() !== 'free'
+      this.isPersonalHQ() && !this.isGroupWorkspace() && this.currentMapArrangement() === 'flow'
     );
   }
 
@@ -12237,8 +12292,8 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-map-seg" role="group" aria-label="' +
       escapeHtml(HQ_LABELS.mapArrangement) +
       '">' +
+      option('free', HQ_LABELS.grounds) +
       option('flow', HQ_LABELS.flow) +
-      option('free', HQ_LABELS.free) +
       '</div></div>'
     );
   }
@@ -12940,7 +12995,7 @@ export class WorkspaceCommandView {
         // A completed drag synthesizes a trailing click on the (now detached)
         // station element; swallow it so dragging never fires the action
         // (FR9). An under-threshold press leaves the flag clear and opens it.
-        if (this._suppressStationClick) {
+        if (this._suppressStationClick && event.detail !== 0) {
           this._suppressStationClick = false;
           return;
         }

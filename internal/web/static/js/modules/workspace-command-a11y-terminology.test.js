@@ -158,7 +158,7 @@ test('terminology: legacy HQ panels retain plain names and the shared Map toolba
 });
 
 test('terminology: no tactical word on the HQ map in Flow or in Free', () => {
-  const view = hqMapView();
+  const view = hqMapView({ mapArrangement: 'flow', mapArrangementFor: 'hq' });
   const flow = view.renderOperationsMap();
   assert.match(flow, /is-flow/);
   view.mapArrangement = 'free';
@@ -166,7 +166,7 @@ test('terminology: no tactical word on the HQ map in Flow or in Free', () => {
   const free = view.renderOperationsMap();
   assert.match(free, /ws-cmd-map-toolbar/);
   // The lead unit says Lead.
-  assert.match(free, /aria-label="Select Atlas, Lead · Personal HQ\. /);
+  assert.match(free, /<small>Lead<\/small>Atlas/);
   const windows = ['objective', 'objectives', 'backlog', 'inventory', 'stations'].map(key => {
     view.activeMapWindow = key;
     return view.renderOperationsMap();
@@ -178,7 +178,6 @@ test('terminology: no tactical word on the HQ map in Flow or in Free', () => {
   leaderless.mapArrangement = 'free';
   leaderless.mapArrangementFor = 'hq';
   const repair = leaderless.renderOperationsMap();
-  assert.match(repair, /No lead/);
   assert.match(repair, />Hire a lead</);
   for (const [name, html] of [
     ['flow', flow],

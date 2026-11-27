@@ -218,7 +218,7 @@ test('only the matching review-ready station replaces the routine Map card', () 
   ];
   command.mapStationRegistry = command.workspaceStationRegistry;
   assert.equal(command.renderWorkFirst(), '');
-  assert.match(command.renderMapHQStations(), /Review 10 files/);
+  assert.match(command.renderMapHQStations(), /aria-label="Filing · 10 to review"/);
   state.reviewBatchId = 'older';
   assert.match(command.renderWorkFirst(), /Next action/);
   state.reviewBatchId = 'batch';

@@ -88,7 +88,7 @@ async function briefShown(page: Page) {
 test.describe.serial('Daily Brief station in My HQ', () => {
   let slug = '';
 
-  test('the station is a building in the fourth Free Map slot and an Overview card', async ({
+  test('the station is a building on the grounds and an Overview card', async ({
     page,
     request
   }) => {
@@ -101,9 +101,7 @@ test.describe.serial('Daily Brief station in My HQ', () => {
     await expect(station.locator('[data-building-variant="briefing"]')).toHaveCount(1);
     await expect(station).toHaveAttribute('aria-label', /^Daily Brief station, /);
 
-    // Listed after the three stations that were already there, so they keep
-    // their default slots and this one takes the fourth. The Memory station
-    // every workspace has comes after it, in the fifth.
+    // Keyboard order follows the registry; geography uses named lots.
     const slots = await page
       .locator('.ws-cmd-map-hq-station')
       .evaluateAll(stations =>
@@ -113,12 +111,12 @@ test.describe.serial('Daily Brief station in My HQ', () => {
         ])
       );
     expect(slots).toEqual([
-      ['watchtower', '22.00%'],
-      ['email', '39.00%'],
-      ['calendar-ops', '56.00%'],
-      ['daily-brief', '73.00%'],
-      ['memory', '90.00%'],
-      ['second-brain', '39.00%']
+      ['watchtower', '16.67%'],
+      ['email', '83.33%'],
+      ['calendar-ops', '83.33%'],
+      ['daily-brief', '50.00%'],
+      ['memory', '16.67%'],
+      ['second-brain', '16.67%']
     ]);
 
     // This suite exercises the normal station surface. The first-visit journey
@@ -149,7 +147,7 @@ test.describe.serial('Daily Brief station in My HQ', () => {
       /Next brief .+\.|No brief scheduled\./
     );
     // The station's own status follows the brief the panel is showing.
-    await expect(page.locator(`${STATION} .ws-cmd-map-hq-station-state`)).toContainText('Ready');
+    await expect(page.locator(STATION)).toHaveAccessibleName(/Ready/i);
 
     await page.getByRole('button', { name: 'Close Daily Brief' }).click();
     await expect(page.locator(PANEL)).toBeHidden();

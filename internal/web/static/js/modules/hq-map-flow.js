@@ -297,13 +297,13 @@ export function briefScopeHasOthers(config, hqWorkspaceId) {
 
 export const MAP_ARRANGEMENT_STORAGE_PREFIX = 'oriWorkspaceMapArrangement:';
 export const MAP_ARRANGEMENTS = Object.freeze(['flow', 'free']);
-export const DEFAULT_MAP_ARRANGEMENT = 'flow';
+export const DEFAULT_MAP_ARRANGEMENT = 'free';
 
 export function mapArrangementStorageKey(slug) {
   return MAP_ARRANGEMENT_STORAGE_PREFIX + clean(slug);
 }
 
-/** The remembered arrangement for this workspace; Flow when none or unreadable. */
+/** The remembered arrangement for this workspace; Grounds ('free') when none or unreadable. */
 export function readMapArrangement(storage, slug) {
   if (!storage || !clean(slug)) return DEFAULT_MAP_ARRANGEMENT;
   try {

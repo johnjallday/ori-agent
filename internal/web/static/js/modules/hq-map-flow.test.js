@@ -278,9 +278,9 @@ function memoryStorage(initial = {}) {
   };
 }
 
-test('no stored value means Flow', () => {
-  assert.equal(DEFAULT_MAP_ARRANGEMENT, 'flow');
-  assert.equal(readMapArrangement(memoryStorage(), 'personal-hq'), 'flow');
+test('no stored value means Grounds (the legacy Free key)', () => {
+  assert.equal(DEFAULT_MAP_ARRANGEMENT, 'free');
+  assert.equal(readMapArrangement(memoryStorage(), 'personal-hq'), 'free');
 });
 
 test('a remembered Free is read back per workspace', () => {
@@ -289,21 +289,21 @@ test('a remembered Free is read back per workspace', () => {
   assert.equal(storage.data['oriWorkspaceMapArrangement:personal-hq'], 'free');
   assert.equal(mapArrangementStorageKey('personal-hq'), 'oriWorkspaceMapArrangement:personal-hq');
   assert.equal(readMapArrangement(storage, 'personal-hq'), 'free');
-  assert.equal(readMapArrangement(storage, 'other-hq'), 'flow');
+  assert.equal(readMapArrangement(storage, 'other-hq'), 'free');
   writeMapArrangement(storage, 'personal-hq', 'flow');
   assert.equal(readMapArrangement(storage, 'personal-hq'), 'flow');
 });
 
-test('a bad stored value is Flow, and a bad value is never written', () => {
+test('a bad stored value is Grounds, and a bad value is never written', () => {
   const storage = memoryStorage({ 'oriWorkspaceMapArrangement:hq': 'grid' });
-  assert.equal(readMapArrangement(storage, 'hq'), 'flow');
+  assert.equal(readMapArrangement(storage, 'hq'), 'free');
   writeMapArrangement(storage, 'hq', 'grid');
   assert.equal(storage.data['oriWorkspaceMapArrangement:hq'], 'grid');
 });
 
 test('no storage, a throwing storage or no slug never breaks', () => {
-  assert.equal(readMapArrangement(null, 'hq'), 'flow');
-  assert.equal(readMapArrangement(memoryStorage(), ''), 'flow');
+  assert.equal(readMapArrangement(null, 'hq'), 'free');
+  assert.equal(readMapArrangement(memoryStorage(), ''), 'free');
   const throwing = {
     getItem() {
       throw new Error('denied');
@@ -312,7 +312,7 @@ test('no storage, a throwing storage or no slug never breaks', () => {
       throw new Error('denied');
     }
   };
-  assert.equal(readMapArrangement(throwing, 'hq'), 'flow');
+  assert.equal(readMapArrangement(throwing, 'hq'), 'free');
   assert.doesNotThrow(() => writeMapArrangement(throwing, 'hq', 'free'));
   assert.doesNotThrow(() => writeMapArrangement(undefined, 'hq', 'free'));
 });

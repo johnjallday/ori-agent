@@ -801,13 +801,10 @@ test.describe('File Janitor capability', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(station.locator('[data-building-variant="depot"]')).toBeVisible();
     await expect(station.locator('.ws-cmd-map-hq-station-label')).toHaveText('Filing');
-    await expect(station.locator('.ws-cmd-map-hq-station-location')).toHaveAttribute(
-      'title',
-      basename(root)
-    );
-    await expect(station).toHaveAttribute(
-      'aria-label',
-      new RegExp(`managed folder ${basename(root)}.*ready for review`)
+    await expect(station).toHaveAttribute('title', basename(root));
+    await expect(station).toHaveAccessibleName('Filing · 1 to review');
+    await expect(station).toHaveAccessibleDescription(
+      new RegExp(`managed folder ${basename(root)}`)
     );
     await expect(page.locator('#fileJanitorMount')).toBeHidden();
 

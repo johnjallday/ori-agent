@@ -383,8 +383,7 @@ for (const theme of ['light', 'dark']) {
     }
   });
 
-  // PRD 767: the Personal HQ's Map opens in Flow; Free is the old field.
-  test(`Personal HQ Map: Flow lanes, Free field and the remembered arrangement (${theme})`, async ({
+  test(`Personal HQ Map: Flow lanes, Grounds and the remembered arrangement (${theme})`, async ({
     page
   }, testInfo) => {
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
@@ -445,8 +444,9 @@ for (const theme of ['light', 'dark']) {
     try {
       await openHQMap();
       const operationsMap = page.getByRole('region', { name: 'Workspace operations map' });
-      await expect(page.locator('.ws-cmd-map-shell.is-hq.is-flow')).toBeVisible();
       const arrangement = page.getByRole('group', { name: 'Map arrangement' });
+      await arrangement.getByRole('button', { name: 'Flow' }).click();
+      await expect(page.locator('.ws-cmd-map-shell.is-hq.is-flow')).toBeVisible();
       await expect(arrangement.getByRole('button', { name: 'Flow' })).toHaveAttribute(
         'aria-pressed',
         'true'
@@ -532,8 +532,8 @@ for (const theme of ['light', 'dark']) {
       }
       await page.setViewportSize({ width: 1440, height: 900 });
 
-      // Free keeps its actual buildings and arrangement, with shared destinations.
-      await arrangement.getByRole('button', { name: 'Free' }).click();
+      // Grounds keeps its buildings and shared destinations.
+      await arrangement.getByRole('button', { name: 'Grounds' }).click();
       await expect(page.locator('.ws-cmd-map-shell.is-hq:not(.is-flow)')).toBeVisible();
       await expect(operationsMap.locator('.ws-cmd-map-belt')).toHaveCount(0);
       await expect(operationsMap.locator('.ws-cmd-map-hq-station').first()).toBeFocused();
@@ -557,7 +557,7 @@ for (const theme of ['light', 'dark']) {
             };
           });
         return {
-          agents: rects('.ws-cmd-map-agent'),
+          agents: [...rects('.ws-cmd-map-agent'), ...rects('.ws-cmd-grounds-lead')],
           stations: rects('.ws-cmd-map-hq-station'),
           switches: rects('.ws-cmd-map-arrangement'),
           fixed: rects('.ws-cmd-map-toolbar')
@@ -591,7 +591,9 @@ for (const theme of ['light', 'dark']) {
       await openHQMap();
       await expect(page.locator('.ws-cmd-map-shell.is-hq:not(.is-flow)')).toBeVisible();
       await expect(
-        page.getByRole('group', { name: 'Map arrangement' }).getByRole('button', { name: 'Free' })
+        page
+          .getByRole('group', { name: 'Map arrangement' })
+          .getByRole('button', { name: 'Grounds' })
       ).toHaveAttribute('aria-pressed', 'true');
       await page
         .getByRole('group', { name: 'Map arrangement' })

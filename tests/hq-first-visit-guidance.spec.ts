@@ -21,7 +21,14 @@ test.describe.configure({ mode: 'serial' });
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
   // Tips run independently of the automatic invitation. Visit as a returning browser.
-  await page.addInitScript(id => localStorage.setItem(`ori.hq.guidedOffered.${id}`, '1'), hqID);
+  await page.addInitScript(
+    ({ id, path }) => {
+      localStorage.setItem(`ori.hq.guidedOffered.${id}`, '1');
+      const key = 'oriWorkspaceMapArrangement:' + path.split('?')[0].split('/').pop();
+      if (!localStorage.getItem(key)) localStorage.setItem(key, 'flow');
+    },
+    { id: hqID, path: mapPath }
+  );
 });
 
 async function json(
@@ -172,7 +179,9 @@ test.describe('Overview, desktop', () => {
     await expect(mark(page, 'memory')).toHaveCount(0);
     await expect(part(page, 'memory'), 'its tip is still there').toHaveCount(1);
     await part(page, 'memory').hover();
-    await expect(tip(page)).toContainText('Decisions, preferences, and rules agents should follow in this workspace.');
+    await expect(tip(page)).toContainText(
+      'Decisions, preferences, and rules agents should follow in this workspace.'
+    );
     await expect(mark(page, 'memory'), 'and does not bring the mark back').toHaveCount(0);
   });
 

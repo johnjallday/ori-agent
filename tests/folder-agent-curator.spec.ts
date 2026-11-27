@@ -114,7 +114,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
     const card = page.getByRole('dialog', { name: 'Filing', exact: true });
     await card.getByRole('button', { name: 'Build the station', exact: true }).click();
     const station = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
-    await expect(station).toContainText('Review 24 files');
+    await expect(station).toContainText('24 to review');
     if (!(await card.isVisible())) await station.click();
     const chooser = card.getByRole('region', { name: 'Filing method' });
     await chooser.getByRole('button', { name: 'By kind', exact: true }).click();
