@@ -6011,6 +6011,20 @@
     return window.workspaceOverlayCoordinator || null;
   }
 
+  const MAP_DEPOT =
+    ':is(.ws-cmd-map-hq-station, .ws-cmd-flow-node)[data-cmd-hq-station="file-janitor"]';
+
+  // Measure the free space, never move the building or pan the map to fit the panel.
+  function placeDepotPanel() {
+    const host = document.getElementById(CONSOLE_HOST_ID);
+    const depot = isInDocument(consoleTrigger) ? consoleTrigger : firstVisible(MAP_DEPOT);
+    const bounds = depot?.getBoundingClientRect?.();
+    if (!host || !bounds) return;
+    const right = document.documentElement.clientWidth - bounds.right;
+    host.setAttribute('data-fj-map-side', bounds.left > right ? 'left' : 'right');
+    host.style.setProperty('--fj-depot-space', `${Math.max(bounds.left, right)}px`);
+  }
+
   function consoleHost() {
     if (typeof document === 'undefined') return null;
     let host = document.getElementById(CONSOLE_HOST_ID);
@@ -6075,6 +6089,14 @@
     if (!host) return false;
 
     consoleTrigger = options.trigger || consoleTrigger || activeElement();
+    if (options.source === 'map-depot') {
+      host.setAttribute('data-fj-map-side', 'right');
+      placeDepotPanel();
+      window.addEventListener?.('resize', placeDepotPanel);
+    } else {
+      host.removeAttribute('data-fj-map-side');
+      window.removeEventListener?.('resize', placeDepotPanel);
+    }
     consoleTab = chooseTab(options.tab);
     consoleItem = String(options.item || '');
     if (consoleItem && consoleTab === 'review') {
@@ -6182,6 +6204,7 @@
     resetConnections();
     resetArrivals();
     consoleCloseButton = null;
+    window.removeEventListener?.('resize', placeDepotPanel);
     const host = document.getElementById(CONSOLE_HOST_ID);
     if (host) {
       host.hidden = true;
@@ -8808,6 +8831,12 @@
               tone: status.state === 'needs_attention' ? 'degraded' : ''
             };
           },
+          mapAction: trigger =>
+            controller.open({
+              source: 'map-depot',
+              tab: controller.stationState()?.actionTab || 'review',
+              trigger
+            }),
           action: trigger => {
             if (typeof controller.open === 'function') {
               const state = controller.stationState();

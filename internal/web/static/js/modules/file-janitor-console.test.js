@@ -2838,6 +2838,28 @@ test('the station keeps product identity, managed folder, depot art, and state d
   assert.equal(station.state().value, '2 files ready for review');
 });
 
+test('only the map depot opens a side panel, on Review rather than a remembered tab', () => {
+  const doc = setup();
+  panel.render(statusFixture());
+  globalThis.window.WorkspaceCapabilities = { find: () => ({ installed: true }) };
+  const station = window.WorkspaceBuiltinStationAdapters.find(
+    a => a.key === 'file-janitor'
+  ).station();
+  const trigger = doc.register('depot');
+  const host = () => doc.getElementById('fileJanitorConsole');
+  station.action(trigger);
+  assert.equal(host().getAttribute('data-fj-map-side'), undefined);
+  panel._selectTab('history');
+  panel.close();
+  station.mapAction(trigger);
+  assert.equal(host().getAttribute('data-fj-map-side'), 'right');
+  assert.equal(panel.activeTab(), 'review');
+  panel.close();
+  station.action(trigger);
+  assert.equal(host().getAttribute('data-fj-map-side'), undefined);
+  assert.equal(panel.activeTab(), 'history');
+});
+
 test('the station sends consent-required workspaces to the existing consent control', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
@@ -2865,6 +2887,10 @@ test('the station sends consent-required workspaces to the existing consent cont
 
   station.action(trigger);
 
+  assert.equal(panel.activeTab(), 'settings');
+  assert.match(surface(doc).textContent, /Confirm Example Cloud/);
+  panel.close();
+  station.mapAction(trigger);
   assert.equal(panel.activeTab(), 'settings');
   assert.match(surface(doc).textContent, /Confirm Example Cloud/);
 });

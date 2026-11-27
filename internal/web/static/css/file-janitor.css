@@ -2603,6 +2603,35 @@
   }
 }
 
+/* The depot opens this same dialog at the edge of the grounds. The marker
+   belongs to the host, so a status repaint cannot unselect a rebuilt depot. */
+body:has(.fj-console-host[data-fj-map-side]:not([hidden]))
+  :is(.ws-cmd-map-hq-station, .ws-cmd-flow-node)[data-cmd-hq-station="file-janitor"] {
+  outline: 3px solid var(--ws-keeper, currentColor);
+  outline-offset: 3px;
+}
+
+.fj-console-host[data-fj-map-side] .fj-console-backdrop {
+  background: rgb(0 0 0 / 24%);
+  overscroll-behavior: contain;
+}
+
+@media (min-width: 721px) {
+  .fj-console-host[data-fj-map-side] {
+    justify-content: flex-end;
+    padding: 0.75rem;
+  }
+
+  .fj-console-host[data-fj-map-side="left"] {
+    justify-content: flex-start;
+  }
+
+  .fj-console-host[data-fj-map-side] .fj-console {
+    width: min(40rem, 49vw, calc(var(--fj-depot-space, 50vw) - 1.5rem));
+    height: 100%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fj-console,
   .fj-console-backdrop {

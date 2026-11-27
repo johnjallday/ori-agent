@@ -66,7 +66,13 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
     'aria-selected',
     'true'
   );
-  await review.screenshot({ path: info.outputPath('review.png') });
+  const panelBox = (await review.boundingBox())!;
+  const depotBox = (await depot.boundingBox())!;
+  expect(
+    panelBox.x + panelBox.width <= depotBox.x || depotBox.x + depotBox.width <= panelBox.x
+  ).toBe(true);
+  await expect(depot).toHaveCSS('outline-style', 'solid');
+  await page.screenshot({ path: info.outputPath('depot-panel.png') });
   await page.keyboard.press('Escape');
   await expect(review).toBeHidden();
   await expect(depot).toBeFocused();
