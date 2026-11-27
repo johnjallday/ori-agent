@@ -110,6 +110,8 @@ test('the Downloads manager reviews individual destinations without moving the r
   await folder.getByRole('button', { name: 'File', exact: true }).click();
   await expect(receipt).toContainText('1 file filed');
   expect(existsSync(join(receipts, 'hotel-receipt-may.pdf'))).toBe(true);
+  const repeatFiling = (await (await request.get(base + '/filings?limit=1')).json()).filings[0]
+    .filing_id;
   expect(existsSync(join(root, 'client-proof.pdf'))).toBe(true);
   await row('unclear.pdf').getByRole('button', { name: 'Leave in Downloads' }).click();
   await expect(page.locator('.fj-batch-scan-status')).toContainText(
@@ -128,6 +130,27 @@ test('the Downloads manager reviews individual destinations without moving the r
   expect(existsSync(join(root, 'client-proof.pdf'))).toBe(false);
   expect(existsSync(join(root, 'unclear.pdf'))).toBe(true);
   expect(existsSync(join(receipts, 'hotel-receipt-may.pdf'))).toBe(true);
+
+  await page.goto(`/workspaces/${acme.slug}?view=details&panel=file-janitor&tab=review`);
+  const arrival = page.locator('#fileJanitorArrivalsHost');
+  await expect(arrival).toContainText('1 file arrived from Downloads');
+  await expect(arrival).toContainText('client-proof.pdf');
+  await arrival.screenshot({ path: `${evidence}/arrival.png` });
+  await arrival.getByRole('button', { name: 'Review local filing' }).click();
+  await expect(page.locator('#fileJanitorPicture')).toContainText('client-proof.pdf');
+  await expect(page.locator('#fileJanitorApprove')).toHaveText('File 1 file');
+  expect(existsSync(join(acmeRoot, 'client-proof.pdf'))).toBe(true);
+  expect((await (await request.get(agents + '/' + acme.id)).json()).folder_agent).toBeNull();
+  expect((await (await request.get(acme.base + '/filings')).json()).filings || []).toHaveLength(0);
+  await page.screenshot({ path: `${evidence}/local-review.png` });
+  await arrival.getByRole('button', { name: 'Undo this send' }).click();
+  await expect(arrival).toContainText('back in Downloads');
+  expect(existsSync(join(root, 'client-proof.pdf'))).toBe(true);
+  expect(existsSync(join(acmeRoot, 'client-proof.pdf'))).toBe(false);
+  const undo = await request.post(base + `/filings/${repeatFiling}/undo`);
+  expect(undo.ok(), await undo.text()).toBe(true);
+  expect(existsSync(join(root, 'hotel-receipt-may.pdf'))).toBe(true);
+  expect(existsSync(join(receipts, 'hotel-receipt-may.pdf'))).toBe(false);
 
   seed('client-proof-revised.pdf');
   await post(base + '/scan');

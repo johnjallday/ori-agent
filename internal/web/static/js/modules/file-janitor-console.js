@@ -5863,6 +5863,22 @@
       shown: arrivalsShown,
       busyId: arrivalBusy,
       message: arrivalMessage,
+      reviewBusy: busy || scanning,
+      onReview: async arrival => {
+        if (
+          id !== wsId() ||
+          !consoleOpen ||
+          consoleTab !== 'review' ||
+          busy ||
+          arrivalBusy ||
+          !arrivals.includes(arrival)
+        )
+          return;
+        const visit = consoleVisit;
+        // A local manual scan, not another press on the sender's approval.
+        await scanNow({ adoptNew: true });
+        if (id === wsId() && consoleVisit === visit && consoleTab === 'review') focusReviewStart();
+      },
       onUndo: arrival => void undoArrival(arrival),
       onDismiss: arrival => void dismissArrival(arrival),
       onShowMore: arrival => {
