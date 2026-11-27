@@ -131,6 +131,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		subPath := parts[1]
 
 		switch subPath {
+		case "documents-projects":
+			h.handleDocumentsProjects(w, r, id)
+			return
 		case "verify-documents-folder":
 			h.handleVerifyDocumentsFolder(w, r, id)
 			return

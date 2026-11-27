@@ -158,9 +158,11 @@
           </div>
           <div class="documents-look__actions">
             <button class="btn btn-primary" type="button" data-documents-action>Look around Documents</button>
+            <button class="btn btn-outline-primary" type="button" data-documents-projects hidden>Find projects in this folder</button>
             <button class="btn btn-outline-primary" type="button" data-documents-build hidden>Build a Filing station</button>
             <button class="btn btn-outline-secondary" type="button" data-documents-dismiss>Not now</button>
           </div>
+          <section data-documents-project-panel aria-label="Project discovery" class="border-top pt-3" hidden></section>
           <p class="form-text mb-0" role="status" tabindex="-1" data-documents-status></p>
         </section>
         <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->

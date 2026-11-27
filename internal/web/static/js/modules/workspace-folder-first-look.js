@@ -1,3 +1,5 @@
+import { bindProjectDiscovery } from './documents-project-discovery.js';
+
 // A review of the saved Files anchor, never a path or a filename-search grant.
 export async function folderStaffingDraft(id) {
   try {
@@ -39,6 +41,7 @@ export function renderDocumentsLook(host, page, draft, current) {
   }
   const saved = draft.look_state;
   const verify = draft.verify_folder;
+  bindProjectDiscovery(el('projects'), el('project-panel'), id, Boolean(draft.project_discovery));
   const build = el('build');
   if (build) {
     build.hidden = !draft.station_offer;

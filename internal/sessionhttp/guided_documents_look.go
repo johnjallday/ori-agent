@@ -230,6 +230,7 @@ func (h *Handler) guidedLookDraft(w http.ResponseWriter, r *http.Request, ws *wo
 		return false
 	}
 	d := map[string]any{"workspace_id": ws.ID, "owner": ws.OwnerUserID, "manager": identity, "brief": folderagent.WorkspaceManagerBrief("documents")}
+	d["project_discovery"] = look.verification == "" && look.filingBinding == ""
 	if look.verification != "" {
 		d["verify_folder"] = look.verification
 	} else if rec, e := h.folderManager.Record(ws.OwnerUserID, ws.ID); e == nil {
