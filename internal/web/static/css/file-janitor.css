@@ -1472,7 +1472,7 @@
   margin-top: 0.65rem;
 }
 
-@media (max-width: 680px) {
+@container filing-review (max-width: 680px) {
   .fj-batch-progress {
     grid-template-columns: 1fr;
   }
@@ -2388,6 +2388,7 @@
 }
 
 .fj-console {
+  container: filing-review / inline-size;
   position: relative;
   z-index: 1;
   display: flex;
@@ -2600,6 +2601,98 @@
      squeezed beside a wrapping title. */
   .fj-console-actions {
     width: 100%;
+  }
+}
+
+/* The depot opens this same dialog at the edge of the grounds. The marker
+   belongs to the host, so a status repaint cannot unselect a rebuilt depot. */
+body:has(.fj-console-host[data-fj-map-side]:not([hidden]))
+  :is(.ws-cmd-map-hq-station, .ws-cmd-flow-node)[data-cmd-hq-station="file-janitor"] {
+  outline: 3px solid var(--ws-keeper, currentColor);
+  outline-offset: 3px;
+}
+
+html:has(.fj-console-host[data-fj-map-side]:not([hidden])) {
+  overflow: hidden;
+}
+
+.fj-console-host[data-fj-map-side] .fj-console-backdrop {
+  background: rgb(0 0 0 / 24%);
+}
+
+.fj-depot-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+}
+
+.fj-depot-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 0.75rem 5.5rem;
+}
+
+.fj-depot-content .fj-console-head {
+  position: static;
+}
+
+.fj-depot-content .fj-console-body {
+  overflow: visible;
+}
+
+.fj-depot-content .fj-console-folder {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .fj-console-host[data-fj-map-side] {
+    align-items: flex-end;
+  }
+
+  .fj-console-host[data-fj-map-side] .fj-console {
+    display: flex;
+    height: 88%;
+    overflow: hidden;
+    border-radius: 1rem 1rem 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .fj-depot-content :is(.fj-console-head, .fj-console-body) {
+    padding-inline: clamp(0.5rem, 3vw, 1rem);
+  }
+
+  .fj-depot-bar .fj-btn {
+    min-height: 44px;
+  }
+}
+
+/* A large sticky footer can otherwise cover all choices at 200% zoom. */
+@media (max-height: 32rem) {
+  .fj-depot-content .fj-footer {
+    position: static;
+  }
+}
+
+@media (min-width: 721px) {
+  .fj-console-host[data-fj-map-side] {
+    justify-content: flex-end;
+    padding: 0.75rem;
+  }
+
+  .fj-console-host[data-fj-map-side="left"] {
+    justify-content: flex-start;
+  }
+
+  .fj-console-host[data-fj-map-side] .fj-console {
+    width: min(40rem, 49vw, calc(var(--fj-depot-space, 50vw) - 1.5rem));
+    height: 100%;
   }
 }
 

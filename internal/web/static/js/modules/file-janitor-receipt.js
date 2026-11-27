@@ -256,6 +256,15 @@ export function renderReceipt(doc, model, ctx = {}) {
     rows.appendChild(h('li', 'fj-receipt-row', model.trashed + ' → Trash'));
   if (rows.children.length) panel.appendChild(rows);
 
+  if (model.filedNames?.length) {
+    const details = h('details', 'fj-receipt-files');
+    details.appendChild(h('summary', 'fj-label', 'Filed files'));
+    const list = h('ul', 'fj-results-list');
+    for (const name of model.filedNames) list.appendChild(h('li', 'fj-results-item', name));
+    details.appendChild(list);
+    panel.appendChild(details);
+  }
+
   // R43: every file that did not move, with its reason.
   const notMoved = model.notMoved || [];
   if (model.notMovedTotal > 0) {

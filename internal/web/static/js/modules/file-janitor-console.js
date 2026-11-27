@@ -2550,7 +2550,7 @@
     if (!target) return;
     target.focus({ preventScroll: true });
     const rect = target.getBoundingClientRect?.();
-    const scroller = lookup('fileJanitorConsoleBody')?.getBoundingClientRect?.();
+    const scroller = consoleScroller()?.getBoundingClientRect?.();
     const footer = lookup('fileJanitorApprove')?.closest?.('.fj-footer')?.getBoundingClientRect();
     if (
       rect &&
@@ -3373,7 +3373,7 @@
         focusedReviewControl.focus({ preventScroll: true });
     };
     const fileFocus = captureFileFocus();
-    const scroller = document.getElementById('fileJanitorConsoleBody');
+    const scroller = consoleScroller();
     const scrollTop = scroller?.scrollTop;
     clear(container);
     // In the picture, #fileJanitorView-all is the header's button; in All files it
@@ -5043,11 +5043,19 @@
     const filingId = result.filing_id || '';
     const fromJournal = await readReceiptModel(scope, filingId, Boolean(result.replayed));
     if (!scopeCurrent(scope)) return;
-    renderResults({
-      kind: 'receipt',
-      filingId,
-      model: fromJournal || drawing.receiptModelFromResult(result)
-    });
+    const model = fromJournal || drawing.receiptModelFromResult(result);
+    // Identify the files on the depot receipt from actual applied outcomes,
+    // never from the proposed names, the selection, or the current batch.
+    if (document.getElementById(CONSOLE_HOST_ID)?.getAttribute('data-fj-map-side')) {
+      model.filedNames = (result.outcomes || [])
+        .filter(
+          item =>
+            item.result === 'applied' &&
+            ['move', 'place', 'deliver', 'send'].includes(item.operation)
+        )
+        .map(item => safeName(item.name));
+    }
+    renderResults({ kind: 'receipt', filingId, model });
   }
 
   // The receipt as the server's journal tells it, or null when it cannot be read.
@@ -5289,11 +5297,11 @@
   }
 
   function compactFolderName(path) {
-    const fullPath = safeName(path, 'Not connected');
-    if (fullPath === 'Not connected') return fullPath;
-    const trimmed = fullPath.replace(/[\\/]+$/, '');
-    const parts = trimmed.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? safeName(parts[parts.length - 1], fullPath) : fullPath;
+    // Extract the last component before truncating a long ancestor path.
+    const parts = String(path || '')
+      .split(/[\\/]/)
+      .filter(Boolean);
+    return safeName(parts.at(-1) || path, 'Not connected');
   }
 
   // The Details card uses the same small depot identity as the Map station,
@@ -5990,6 +5998,7 @@
   }
 
   let consoleOpen = false;
+  let consoleSuspended = false;
   let consoleVisit = 0;
   let consoleTab = 'review';
   let consoleItem = '';
@@ -6011,6 +6020,20 @@
     return window.workspaceOverlayCoordinator || null;
   }
 
+  const MAP_DEPOT =
+    ':is(.ws-cmd-map-hq-station, .ws-cmd-flow-node)[data-cmd-hq-station="file-janitor"]';
+
+  // Measure the free space, never move the building or pan the map to fit the panel.
+  function placeDepotPanel() {
+    const host = document.getElementById(CONSOLE_HOST_ID);
+    const depot = isInDocument(consoleTrigger) ? consoleTrigger : firstVisible(MAP_DEPOT);
+    const bounds = depot?.getBoundingClientRect?.();
+    if (!host || !bounds) return;
+    const right = document.documentElement.clientWidth - bounds.right;
+    host.setAttribute('data-fj-map-side', bounds.left > right ? 'left' : 'right');
+    host.style.setProperty('--fj-depot-space', `${Math.max(bounds.left, right)}px`);
+  }
+
   function consoleHost() {
     if (typeof document === 'undefined') return null;
     let host = document.getElementById(CONSOLE_HOST_ID);
@@ -6019,6 +6042,14 @@
     host = el('div', 'fj-console-host');
     host.id = CONSOLE_HOST_ID;
     host.hidden = true;
+    // Consume Escape inside this owner before the map's document-level handler
+    // can collapse a tray or close a map window behind it.
+    host.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.stopPropagation();
+      event.preventDefault();
+      if (canEscapeConsole()) close();
+    });
     document.body.appendChild(host);
     return host;
   }
@@ -6075,6 +6106,14 @@
     if (!host) return false;
 
     consoleTrigger = options.trigger || consoleTrigger || activeElement();
+    if (options.source === 'map-depot') {
+      host.setAttribute('data-fj-map-side', 'right');
+      placeDepotPanel();
+      window.addEventListener?.('resize', placeDepotPanel);
+    } else {
+      host.removeAttribute('data-fj-map-side');
+      window.removeEventListener?.('resize', placeDepotPanel);
+    }
     consoleTab = chooseTab(options.tab);
     consoleItem = String(options.item || '');
     if (consoleItem && consoleTab === 'review') {
@@ -6100,14 +6139,21 @@
         id: consoleOverlayId,
         kind: 'modal',
         container: host,
-        trigger: consoleTrigger,
-        canEscape: () => !pressing && !revokeConfirmed,
+        // Resolve after inertness is released; the original station may be gone.
+        trigger: { focus: restoreConsoleFocus },
+        canEscape: canEscapeConsole,
         onClose: info => {
           // The coordinator closes this for its own reasons too (Escape, a
           // modal that must replace it). Mirror that into local state so the
           // console never believes it is open while hidden.
-          if (info && info.reason === 'suspended') return;
-          if (consoleOpen) close({ viaCoordinator: true });
+          if (info?.reason === 'suspended') {
+            consoleSuspended = true;
+            host.hidden = true;
+          } else if (consoleOpen) close({ viaCoordinator: true });
+        },
+        onResume: () => {
+          consoleSuspended = false;
+          if (consoleOpen) renderConsole();
         }
       });
     }
@@ -6162,8 +6208,23 @@
     window.addEventListener('load', run, { once: true });
   }
 
+  function filingInFlight() {
+    return pressing || Boolean(shelfVisit?.surface?.filing?.());
+  }
+
+  function canEscapeConsole() {
+    return !filingInFlight() && !revokeConfirmed && !removalConfirming;
+  }
+
   function close(options = {}) {
-    if (!consoleOpen) return false;
+    if (!consoleOpen || (!disposed && !options.viaCoordinator && filingInFlight())) return false;
+    // Leaving a confirmation is cancellation, never a first press that can
+    // unexpectedly arm a destructive second press on the next visit.
+    if (revokeConfirmed) setSettingsMessage('');
+    revokeConfirmed = false;
+    removalConfirming = false;
+    removalCompanionChecked = false;
+    consoleSuspended = false;
     discardProtectionApproval();
     shelfVisit = null;
     methodVisit = null;
@@ -6182,22 +6243,14 @@
     resetConnections();
     resetArrivals();
     consoleCloseButton = null;
+    window.removeEventListener?.('resize', placeDepotPanel);
     const host = document.getElementById(CONSOLE_HOST_ID);
     if (host) {
       host.hidden = true;
       clear(host);
     }
     const coordinator = overlayCoordinator();
-    if (!options.viaCoordinator && coordinator && typeof coordinator.close === 'function') {
-      // The coordinator releases the background inert marking here, which has
-      // to happen BEFORE focus moves: an inert element cannot take focus, so
-      // restoring first would silently do nothing.
-      coordinator.close(consoleOverlayId);
-    }
-    // Restore focus ourselves either way. The coordinator holds the same
-    // element reference we were given, and it is just as likely to be stale —
-    // only this module knows how to find the control's live replacement.
-    restoreConsoleFocus();
+    if (!options.viaCoordinator && !coordinator?.close?.(consoleOverlayId)) restoreConsoleFocus();
     consoleOverlayId = '';
     const wasDownloads = Boolean(lastStatus?.downloads_review);
     if (!options.keepUrl) syncUrl();
@@ -6228,12 +6281,13 @@
     consoleTrigger = null;
 
     if (isVisibleFocusTarget(trigger)) {
-      trigger.focus();
+      trigger.focus({ preventScroll: true });
       return;
     }
 
-    const replacement = liveTrigger(trigger);
-    if (isVisibleFocusTarget(replacement)) replacement.focus();
+    const fromDepot = document.getElementById(CONSOLE_HOST_ID)?.getAttribute('data-fj-map-side');
+    const replacement = (fromDepot && firstVisible(MAP_DEPOT)) || liveTrigger(trigger);
+    if (isVisibleFocusTarget(replacement)) replacement.focus({ preventScroll: true });
   }
 
   function isInDocument(node) {
@@ -6300,7 +6354,15 @@
     return firstVisible('[data-cmd-view-mode="' + workspaceViewMode() + '"]');
   }
 
+  function consoleScroller() {
+    return (
+      document.getElementById('fileJanitorDepotContent') ||
+      document.getElementById('fileJanitorConsoleBody')
+    );
+  }
+
   function renderConsole() {
+    if (consoleSuspended) return;
     const host = consoleHost();
     if (!host) return;
     const status =
@@ -6335,11 +6397,22 @@
     // Labelled by the visible title, so the name a sighted user reads and the
     // name a screen reader announces are the same string (FR-119).
     dialog.setAttribute('aria-labelledby', CONSOLE_TITLE_ID);
-    dialog.appendChild(renderConsoleHeader(status));
+    // Only the title and return control need to stay pinned in the depot.
+    // Keep the folder, tabs and choices in one scroll area, even at high zoom.
+    let content = dialog;
+    let depotBar = null;
+    if (host.getAttribute('data-fj-map-side')) {
+      depotBar = el('div', 'fj-depot-bar');
+      dialog.appendChild(depotBar);
+      content = el('div', 'fj-depot-content');
+      content.id = 'fileJanitorDepotContent';
+      dialog.appendChild(content);
+    }
+    content.appendChild(renderConsoleHeader(status, depotBar));
 
     const body = el('div', 'fj-console-body');
     body.id = 'fileJanitorConsoleBody';
-    dialog.appendChild(body);
+    content.appendChild(body);
 
     // Attach BEFORE filling the body.
     //
@@ -6404,7 +6477,7 @@
     }
   }
 
-  function renderConsoleHeader(status) {
+  function renderConsoleHeader(status, depotBar) {
     const configured = isConfigured(status);
     const settings = (status && status.settings) || {};
     const header = el('header', 'fj-console-head');
@@ -6413,12 +6486,20 @@
     const title = el('h2', 'fj-console-title', 'Filing');
     title.id = CONSOLE_TITLE_ID;
     title.setAttribute('tabindex', '-1');
-    heading.appendChild(title);
+    (depotBar || heading).appendChild(title);
     if (!downloadsReviewRequested() || status?.downloads_review === 'ready') {
       // The managed folder is shown by its display name, cleaned the same way a
       // filename is: a folder can be named as adversarially as a file.
       const folder = settings.root_path ? safeName(settings.root_path) : '';
-      if (folder) heading.appendChild(el('p', 'fj-console-folder', folder));
+      if (folder) {
+        const name = el(
+          'p',
+          'fj-console-folder',
+          depotBar ? compactFolderName(settings.root_path) : folder
+        );
+        name.title = folder;
+        heading.appendChild(name);
+      }
       const privacy = compactPrivacy(status);
       heading.appendChild(
         el('p', 'fj-console-privacy', privacy.value + (privacy.note ? ' · ' + privacy.note : ''))
@@ -6458,7 +6539,7 @@
       actions.appendChild(scan);
       actions.appendChild(pauseControl(settings));
     }
-    const backToMap = workspaceViewMode() === 'map';
+    const backToMap = depotBar || workspaceViewMode() === 'map';
     const closeButton = button(backToMap ? 'Back to map' : 'Close', 'fj-btn fj-btn-secondary', () =>
       close()
     );
@@ -6466,7 +6547,7 @@
     closeButton.setAttribute('data-fj-console-close', '');
     closeButton.setAttribute('aria-label', backToMap ? 'Back to map' : 'Close Filing');
     consoleCloseButton = closeButton;
-    actions.appendChild(closeButton);
+    (depotBar || actions).appendChild(closeButton);
     header.appendChild(actions);
 
     // Before setup finishes there are no tabs: there is nothing to review, no
@@ -6600,7 +6681,19 @@
     if (url.search === before) return;
     const method = options.replace ? 'replaceState' : 'pushState';
     if (typeof window.history[method] !== 'function') return;
-    window.history[method]({ fileJanitor: consoleOpen }, '', url.toString());
+    window.history[method](consoleHistoryState(), '', url.toString());
+  }
+
+  // History can return to a depot visit; a copied URL remains an ordinary
+  // review link. Presentation never comes from an approval or query param.
+  function consoleHistoryState() {
+    return {
+      ...window.history.state,
+      fileJanitor: consoleOpen,
+      fileJanitorDepot:
+        consoleOpen &&
+        Boolean(document.getElementById(CONSOLE_HOST_ID)?.getAttribute('data-fj-map-side'))
+    };
   }
 
   // applyUrlState opens or closes the console to match the URL. It runs on load
@@ -6611,6 +6704,12 @@
     if (typeof window === 'undefined' || !window.location) return;
     const params = new URLSearchParams(window.location.search || '');
     const wants = params.get('panel') === CONSOLE_PANEL_PARAM;
+    if (consoleOpen && filingInFlight()) {
+      // Back cannot discard a pending receipt. Restore this visit in history;
+      // Back works normally again once the request settles.
+      syncUrl();
+      return;
+    }
     if (!wants) {
       if (consoleOpen) close({ keepUrl: true });
       return;
@@ -6651,7 +6750,8 @@
       renderConsole();
       return;
     }
-    open({ source: options.source || 'url', tab, item });
+    const depot = window.history?.state?.fileJanitorDepot && firstVisible(MAP_DEPOT);
+    open({ source: depot ? 'map-depot' : options.source || 'url', trigger: depot, tab, item });
     // The URL already says what it says; rewriting it here would push a
     // duplicate entry and make one Back press appear to do nothing.
     syncUrl({ replace: true });
@@ -6901,7 +7001,7 @@
       url.searchParams.delete('preparation');
       url.searchParams.delete('batch_id');
     }
-    window.history.replaceState({ fileJanitor: consoleOpen }, '', url.toString());
+    window.history.replaceState(consoleHistoryState(), '', url.toString());
   }
 
   async function requestStopBuild(operation_id) {
@@ -7896,10 +7996,17 @@
     // rather than navigating away from a page the user never left (FR-124).
     window.addEventListener('popstate', () => applyUrlState({ source: 'popstate' }));
     window.addEventListener('keydown', event => {
-      if (!consoleOpen || event.key !== 'Escape') return;
+      if (
+        !consoleOpen ||
+        consoleSuspended ||
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        document.querySelector?.('dialog:modal')
+      )
+        return;
       // A destructive confirmation owns Escape while it is on screen (FR-120), and
       // a File request that is in flight is not closed under.
-      if (pressing || revokeConfirmed) return;
+      if (!canEscapeConsole()) return;
       event.preventDefault();
       close();
     });
@@ -8664,6 +8771,8 @@
       buildObserver?.reset();
       buildProgress = null;
       consoleOpen = false;
+      consoleSuspended = false;
+      revokeConfirmed = false;
       consoleTab = 'review';
       consoleItem = '';
       consoleTrigger = null;
@@ -8808,6 +8917,12 @@
               tone: status.state === 'needs_attention' ? 'degraded' : ''
             };
           },
+          mapAction: trigger =>
+            controller.open({
+              source: 'map-depot',
+              tab: controller.stationState()?.actionTab || 'review',
+              trigger
+            }),
           action: trigger => {
             if (typeof controller.open === 'function') {
               const state = controller.stationState();

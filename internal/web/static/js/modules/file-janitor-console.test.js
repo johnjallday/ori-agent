@@ -13,6 +13,7 @@ import {
   protectionStripSentence,
   TRIP_KEY
 } from './file-janitor-protection.js';
+import { OverlayCoordinator } from './workspace-overlay-coordinator.js';
 import * as pictureModule from './file-janitor-picture.js';
 import * as receiptModule from './file-janitor-receipt.js';
 import * as connectionsModule from './file-janitor-connections.js';
@@ -2615,6 +2616,43 @@ test('closing returns focus to the control that opened it', () => {
   assert.equal(doc.activeElement, station, 'focus must go back where the user left it');
 });
 
+test('coordinated dismissal resolves the repainted depot after inertness is released', () => {
+  const doc = setup();
+  let inert = false;
+  const coordinator = new OverlayCoordinator({
+    setInert: () => {
+      inert = true;
+    },
+    releaseInert: () => {
+      inert = false;
+    },
+    restoreFocus: trigger => {
+      assert.equal(inert, false);
+      trigger.focus();
+    }
+  });
+  window.workspaceOverlayCoordinator = coordinator;
+  try {
+    panel.render(statusFixture());
+    const original = doc.register('original');
+    panel.open({ source: 'map-depot', trigger: original });
+    const host = doc.getElementById('fileJanitorConsole');
+    coordinator.open({ id: 'child', kind: 'modal', container: doc.register('child') });
+    panel.render(statusFixture());
+    assert.equal(host.hidden, true, 'a suspended console stays hidden through status refresh');
+    coordinator.close('child');
+    assert.equal(host.hidden, false);
+    original._connected = false;
+    const rebuilt = doc.register('rebuilt');
+    doc.querySelector = selector => (selector.includes('.ws-cmd-map-hq-station') ? rebuilt : null);
+    coordinator.escapeTopmost();
+    assert.equal(panel.isOpen(), false);
+    assert.equal(doc.activeElement, rebuilt);
+  } finally {
+    delete window.workspaceOverlayCoordinator;
+  }
+});
+
 test('closing during a recommendation read lands in its region, not the competing card', () => {
   const doc = setup();
   renderReview(doc);
@@ -2838,6 +2876,28 @@ test('the station keeps product identity, managed folder, depot art, and state d
   assert.equal(station.state().value, '2 files ready for review');
 });
 
+test('only the map depot opens a side panel, on Review rather than a remembered tab', () => {
+  const doc = setup();
+  panel.render(statusFixture());
+  globalThis.window.WorkspaceCapabilities = { find: () => ({ installed: true }) };
+  const station = window.WorkspaceBuiltinStationAdapters.find(
+    a => a.key === 'file-janitor'
+  ).station();
+  const trigger = doc.register('depot');
+  const host = () => doc.getElementById('fileJanitorConsole');
+  station.action(trigger);
+  assert.equal(host().getAttribute('data-fj-map-side'), undefined);
+  panel._selectTab('history');
+  panel.close();
+  station.mapAction(trigger);
+  assert.equal(host().getAttribute('data-fj-map-side'), 'right');
+  assert.equal(panel.activeTab(), 'review');
+  panel.close();
+  station.action(trigger);
+  assert.equal(host().getAttribute('data-fj-map-side'), undefined);
+  assert.equal(panel.activeTab(), 'history');
+});
+
 test('the station sends consent-required workspaces to the existing consent control', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
@@ -2865,6 +2925,10 @@ test('the station sends consent-required workspaces to the existing consent cont
 
   station.action(trigger);
 
+  assert.equal(panel.activeTab(), 'settings');
+  assert.match(surface(doc).textContent, /Confirm Example Cloud/);
+  panel.close();
+  station.mapAction(trigger);
   assert.equal(panel.activeTab(), 'settings');
   assert.match(surface(doc).textContent, /Confirm Example Cloud/);
 });
