@@ -4,6 +4,46 @@ import {
   unmountWorkspaceFolderAgent
 } from './folder-agent-card.js';
 
+import { escapeHtml } from './note-editor.js';
+
+const pendingLabel = {
+  looking: 'Looking…',
+  reported: 'Waiting on Set up',
+  setting_up: 'Setting up…',
+  failed: 'Review look'
+};
+
+// One row per folder, even during the moment a still-running setup places it.
+export function homeFolderChips(data, pending) {
+  const rows = new Map((data?.folders || []).map(row => [row.workspace_id, row]));
+  for (const v of pending)
+    rows.set(v.workspace_id, {
+      workspace_id: v.workspace_id,
+      name: v.folder_name,
+      status: pendingLabel[v.state]
+    });
+  const chips = [...rows.values()]
+    .sort((a, b) => a.name.localeCompare(b.name) || a.workspace_id.localeCompare(b.workspace_id))
+    .map(row => {
+      const name = escapeHtml(row.name),
+        id = escapeHtml(row.workspace_id);
+      if (row.status)
+        return `<button type="button" class="ws-cmd-nav-btn" data-cmd-home-feed="${id}">${name} · ${row.status}</button>`;
+      const count = `${row.songs} ${row.songs === 1 ? 'song' : 'songs'}`;
+      return `<span class="ws-map-folder-chip"><button type="button" data-cmd-frame-folder="${id}" title="Frame ${name}"><strong>${name}</strong> · ${count}${row.missing ? ' · Location missing' : ''}</button></span>`;
+    });
+  if (!chips.length) return '';
+  const more =
+    chips.length > 4
+      ? `<details class="ws-cmd-disclosure ws-home-folder-more"><summary class="ws-cmd-nav-btn">${chips.length - 4} more folders</summary><div class="ws-cmd-disclosure-body">${chips.slice(4).join('')}</div></details>`
+      : '';
+  const other =
+    data.outside > 0
+      ? `<small>${data.outside} other ${data.outside === 1 ? 'workspace' : 'workspaces'}</small>`
+      : '';
+  return chips.slice(0, 4).join('') + more + other;
+}
+
 // Origin is a server-verified navigation hint. A pending hire is not a Home
 // member, and its origin does not promise where the setup will place it.
 export function pendingHomeFeeds(views, homeID) {

@@ -27,5 +27,11 @@ func (h *Handler) GetHomeMapFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	provider, reviewed := reviewedintegration.HomeProviderFor(scope.ProviderID)
 	canAdd := reviewed && provider.ProgramID == scope.ProgramID && state.HomeProvider != nil && h.assistantLibraryProviderEvidence(scope, home)
-	_ = orihttp.RespondSuccess(w, map[string]any{"can_add_folder": canAdd})
+	view, err := h.assistantLibraryStore().MapFolders(scope, home)
+	if err != nil {
+		respondLibraryReadError(w, err)
+		return
+	}
+	view.CanAdd = canAdd
+	_ = orihttp.RespondSuccess(w, view)
 }
