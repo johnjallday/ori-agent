@@ -14,7 +14,12 @@ const pendingLabel = {
 };
 
 // One row per folder, even during the moment a still-running setup places it.
-export function homeFolderChips(data, pending) {
+export function homeFolderChips(data, pending, memberViews = []) {
+  const incomplete = new Set(
+    memberViews
+      .filter(v => v.setup?.receipt?.partial_listing || v.setup?.receipt?.unreached > 0)
+      .map(v => v.workspace_id)
+  );
   const rows = new Map((data?.folders || []).map(row => [row.workspace_id, row]));
   for (const v of pending)
     rows.set(v.workspace_id, {
@@ -30,12 +35,21 @@ export function homeFolderChips(data, pending) {
       if (row.status)
         return `<button type="button" class="ws-cmd-nav-btn" data-cmd-home-feed="${id}">${name} · ${row.status}</button>`;
       const count = `${row.songs} ${row.songs === 1 ? 'song' : 'songs'}`;
-      return `<span class="ws-map-folder-chip"><button type="button" data-cmd-frame-folder="${id}" title="Frame ${name}"><strong>${name}</strong> · ${count}${row.missing ? ' · Location missing' : ''}</button></span>`;
+      const partial = row.partial || incomplete.has(row.workspace_id);
+      let setup = '';
+      if (row.root_id && Number.isInteger(row.to_set_up)) {
+        const label =
+          partial && !row.to_set_up
+            ? 'Listing incomplete'
+            : `${partial ? 'At least ' : ''}${row.to_set_up} to set up`;
+        setup = `<button type="button" class="ws-folder-setup" data-cmd-folder-root="${escapeHtml(row.root_id)}" aria-label="${name}: ${label}">${label}</button>`;
+      }
+      return `<span class="ws-map-folder-chip"><button type="button" data-cmd-frame-folder="${id}" title="Frame ${name}"><strong>${name}</strong> · ${count}${row.missing ? ' · Location missing' : ''}</button>${setup}</span>`;
     });
   if (!chips.length) return '';
   const more =
     chips.length > 4
-      ? `<details class="ws-cmd-disclosure ws-home-folder-more"><summary class="ws-cmd-nav-btn">${chips.length - 4} more folders</summary><div class="ws-cmd-disclosure-body">${chips.slice(4).join('')}</div></details>`
+      ? `<details class="ws-cmd-disclosure ws-home-folder-more"><summary class="ws-cmd-nav-btn">${chips.length - 4} more ${chips.length === 5 ? 'folder' : 'folders'}</summary><div class="ws-cmd-disclosure-body">${chips.slice(4).join('')}</div></details>`
       : '';
   const other =
     data.outside > 0

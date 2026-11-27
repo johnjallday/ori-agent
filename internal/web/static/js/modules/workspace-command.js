@@ -737,7 +737,6 @@ export class WorkspaceCommandView {
       if (this.groupTemplateStatusToken !== token || this.workspaceId() !== workspaceId)
         return null;
       this.groupTemplateStatus = status;
-      void this.loadHomeMapFolders();
       // A managed Home's library may have projects to set up; the empty lot
       // says so (folder-to-map-handoff FR-6, FR-9).
       void this.loadLibraryEmptyState();
@@ -12757,6 +12756,17 @@ export class WorkspaceCommandView {
           ?.focus?.({ preventScroll: true });
         return;
       }
+      const folderRoot = event.target.closest('[data-cmd-folder-root]');
+      if (folderRoot) {
+        const menu = folderRoot.closest('details');
+        if (menu) menu.open = false;
+        this.openLibrarySetupSheet(
+          menu?.querySelector('summary') || folderRoot,
+          folderRoot.closest('[data-map-zone="detachment"]'),
+          folderRoot.dataset.cmdFolderRoot
+        );
+        return;
+      }
       const frame = event.target.closest('[data-cmd-frame-folder]');
       if (frame) {
         const menu = frame.closest('details');
@@ -13811,6 +13821,7 @@ export class WorkspaceCommandView {
     if (id !== this.workspaceId() || token !== this.homeMapFolderToken) return;
     this.homeMapFolders = data && { ...data, homeID: id };
     this.syncHomeFeedControls();
+    this.syncSetupProjectsChip();
   }
 
   canFeedHome() {
@@ -13854,7 +13865,11 @@ export class WorkspaceCommandView {
       const pending = this.canFeedHome()
         ? pendingHomeFeeds(this.pendingHomeFeeds || [], this.workspaceId())
         : [];
-      const chips = homeFolderChips(this.homeMapFolders, pending);
+      const chips = homeFolderChips(
+        this.homeMapFolders,
+        pending,
+        this.currentMemberFolderAgents().views
+      );
       if (chips) return chips;
     }
     return (
@@ -13937,7 +13952,7 @@ export class WorkspaceCommandView {
       // Projects on the Home's shelf not on the map yet: set up from here.
       // Its own slot, refreshed in place when the count arrives.
       '<span class="ws-cmd-map-setup-slot" data-cmd-setup-projects-slot>' +
-      setupProjectsChipHTML(this.libraryEmptyState, count) +
+      setupProjectsChipHTML(this.homeWideSetupState(), count) +
       '</span>' +
       '<span data-cmd-home-feed-slot>' +
       this.homeFeedControlsHTML() +
@@ -14185,7 +14200,7 @@ export class WorkspaceCommandView {
       // The empty lot's library count is drawn by the mount, so a changed
       // count is a reason to re-mount too.
       '::' +
-      JSON.stringify(this.libraryEmptyState || null) +
+      JSON.stringify(this.detachmentMemberCount() ? null : this.libraryEmptyState || null) +
       // A linked song's facts are drawn on its tile's meta line by the mount.
       '::' +
       JSON.stringify(this.detachmentSongFacts || {}) +
@@ -14425,6 +14440,7 @@ export class WorkspaceCommandView {
   async loadLibraryEmptyState() {
     // The same moments re-read the songs' tile facts.
     void this.loadDetachmentSongFacts();
+    const folders = this.loadHomeMapFolders();
     const workspaceId = this.workspaceId();
     const status = this.groupTemplateStatus;
     let next = null;
@@ -14439,13 +14455,14 @@ export class WorkspaceCommandView {
           // The outer map's badge reads the same count (home-library-badges.js).
           const toSetUp = libraryToSetUp(summary);
           if (toSetUp > 0) {
-            next = { shelf: Number(summary.digest.projects) || toSetUp, toSetUp };
+            next = { shelf: Number(summary.digest?.projects) || toSetUp, toSetUp };
           }
         }
       } catch (err) {
         next = null;
       }
     }
+    await folders;
     if (this.workspaceId() !== workspaceId) return;
     const arrival = this._setupArrival;
     this._setupArrival = null;
@@ -14483,16 +14500,29 @@ export class WorkspaceCommandView {
 
   // The toolbar's "N to set up" follows the shelf count in place, so an open
   // picker or menu beside it is left as it is.
+  homeWideSetupState() {
+    const data = this.homeMapFolders;
+    if (
+      data?.homeID &&
+      data.homeID === this.workspaceId() &&
+      data.folders?.length &&
+      Number.isInteger(data.remainder)
+    )
+      return { toSetUp: data.remainder };
+    return this.libraryEmptyState;
+  }
+
   syncSetupProjectsChip() {
     const slot = this.container?.querySelector?.('[data-cmd-setup-projects-slot]');
     if (!slot) return;
     const owner = this.page?.membersPanel;
     const count = owner?.group && !owner.readFailed ? this.detachmentMemberCount() : 0;
-    const html = setupProjectsChipHTML(this.libraryEmptyState, count);
+    const state = this.homeWideSetupState();
+    const html = setupProjectsChipHTML(state, count);
     // A button already there keeps its element (and so its focus, and a sheet
     // placed beside it): only its number changes.
     const number = html && slot.querySelector?.('[data-cmd-setup-projects] b');
-    if (number) number.textContent = String(this.libraryEmptyState.toSetUp);
+    if (number) number.textContent = String(state.toSetUp);
     else slot.innerHTML = html;
   }
 
@@ -15136,10 +15166,10 @@ export class WorkspaceCommandView {
     )
       void this.handleWorkspacesChanged({});
     this.pendingHomeFeeds = pending;
-    this.syncHomeFeedControls();
     const { workspaces } = this.detachmentSnapshot();
     const state = memberFolderAgentState(views, workspaces, groupId);
     this.memberFolderAgents = { waits: state.waits, lines: state.lines, views: state.views };
+    this.syncHomeFeedControls();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (map && map.folderAgentWaits && typeof map.folderAgentWaits.update === 'function') {
       map.folderAgentWaits.update(host, state.waits);

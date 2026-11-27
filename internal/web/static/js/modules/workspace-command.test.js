@@ -8920,6 +8920,26 @@ test('an unreadable group tree is unavailable, not a zero-member map', () => {
   }
 });
 
+test('a populated map keeps its mount key on a count-only change and shows only the shelf remainder', () => {
+  const c = detachmentCommandView('group');
+  c.groupTemplateStatus = { kind: 'managed_home' };
+  c.homeMapFolders = {
+    homeID: 'g',
+    folders: [{ workspace_id: 'm1', name: 'Mixing', songs: 2, to_set_up: 3, root_id: 'root' }],
+    remainder: 1
+  };
+  c.libraryEmptyState = { shelf: 6, toSetUp: 4 };
+  const rows = c.detachmentSnapshot().workspaces;
+  const before = c.detachmentMountKey(rows);
+  assert.match(c.renderDetachmentToolbar(), /<b>1<\/b> to set up/);
+  c.libraryEmptyState.toSetUp = 3;
+  c.homeMapFolders.remainder = 0;
+  assert.equal(c.detachmentMountKey(rows), before);
+  assert.doesNotMatch(c.renderDetachmentToolbar(), /to set up · Set up projects/);
+  c.page.membersPanel.readFailed = true;
+  assert.doesNotMatch(c.renderDetachmentToolbar(), /data-cmd-frame-folder/);
+});
+
 test('Add folder requires the writable owner read for this managed Home', () => {
   const c = detachmentCommandView('group');
   const hasButton = () => c.renderDetachmentToolbar().includes('+ Add folder');

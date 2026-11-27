@@ -16,13 +16,17 @@ type MapFolder struct {
 	Name        string `json:"name"`
 	Songs       int    `json:"songs"`
 	Missing     bool   `json:"missing,omitempty"`
+	RootID      string `json:"root_id,omitempty"`
+	ToSetUp     *int   `json:"to_set_up,omitempty"`
+	Partial     bool   `json:"partial,omitempty"`
 	anchor      string
 }
 
 type HomeMapFolders struct {
-	Folders []MapFolder `json:"folders"`
-	Outside int         `json:"outside"`
-	CanAdd  bool        `json:"can_add_folder"`
+	Folders   []MapFolder `json:"folders"`
+	Outside   int         `json:"outside"`
+	CanAdd    bool        `json:"can_add_folder"`
+	Remainder *int        `json:"remainder,omitempty"`
 }
 
 // homeMapMembers hydrates only descendants of this owner and Home. A listing
@@ -102,6 +106,52 @@ func mapFolderRows(scope Scope, members map[string]*workspace.Workspace, state *
 	return view
 }
 
+// addShelfCounts matches only the connected root granted for a folder, never
+// a display name or an inferred child path. The sheet accepts that same ID.
+func (v *HomeMapFolders) addShelfCounts(doc Document, state *workspace.AssistantProgramState, evidence setupEvidence) {
+	byPath := map[string]string{}
+	for _, root := range doc.Roots {
+		if digestRootActive(doc, state, root.ID) {
+			byPath[root.Path] = root.ID
+		}
+	}
+	fed := map[string]string{}
+	for i := range v.Folders {
+		f := &v.Folders[i]
+		if id := byPath[f.anchor]; id != "" {
+			f.RootID = id
+			fed[id] = f.anchor
+		}
+	}
+	tally := countShelfSetup(doc, state, evidence, fed)
+	v.Remainder = &tally.remainder
+	// A complete scan of one subfolder does not make an incomplete listing
+	// complete. Keep the latest saved result per scope of each connected root.
+	type key struct{ root, scope string }
+	latest := map[key]Scan{}
+	for _, scan := range doc.Scans {
+		k := key{scan.RootID, scan.Scope}
+		if prev, ok := latest[k]; !ok || !scan.StartedAt.Before(prev.StartedAt) {
+			latest[k] = scan
+		}
+	}
+	for i := range v.Folders {
+		f := &v.Folders[i]
+		if f.RootID == "" {
+			continue
+		}
+		n := tally.byRoot[f.RootID]
+		f.ToSetUp = &n
+		f.Partial = latest[key{f.RootID, ""}].Status != "complete"
+		for k, scan := range latest {
+			if k.root == f.RootID && scan.Status != "complete" {
+				f.Partial = true
+				break
+			}
+		}
+	}
+}
+
 // MapFolders reads the map even when the shelf has not been initialized.
 func (s *Store) MapFolders(scope Scope, home *workspace.Workspace) (HomeMapFolders, error) {
 	state, err := s.home(scope, home)
@@ -112,5 +162,19 @@ func (s *Store) MapFolders(scope Scope, home *workspace.Workspace) (HomeMapFolde
 	if err != nil {
 		return HomeMapFolders{}, err
 	}
-	return mapFolderRows(scope, members, state), nil
+	view := mapFolderRows(scope, members, state)
+	if len(view.Folders) == 0 || len(state.ProjectLibrary) == 0 || s.installed == nil {
+		return view, nil
+	}
+	doc, err := decodeDocument(state.ProjectLibrary, scope)
+	if err != nil || !inactiveRootsValid(state, doc) {
+		return HomeMapFolders{}, ErrCorrupt
+	}
+	installed, listErr := s.installed.List()
+	if listErr != nil {
+		return view, nil
+	}
+	evidence := s.setupEvidence(scope, state, installed, listErr)
+	view.addShelfCounts(doc, state, evidence)
+	return view, nil
 }

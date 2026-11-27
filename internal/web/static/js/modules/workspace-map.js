@@ -12008,10 +12008,7 @@
     if (options?.frameFolder) {
       // Navigation only. A nested folder may be drawn as a tile rather than
       // a district. Don't enter placement mode or pulse a newly built tile.
-      var box = placedBounds(
-        district ? [Object.assign({ id: id }, district)] : lastWorldLayout.nodes,
-        [id]
-      );
+      var box = placedBounds(district ? [district] : lastWorldLayout.nodes, [id]);
       if (box) {
         box.minY -= COMPACT_HOME_HEADER_CLEARANCE;
         var folderCamera = fitBounds(

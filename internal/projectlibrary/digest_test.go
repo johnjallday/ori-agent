@@ -323,15 +323,15 @@ func TestShelfToSetUp_SkipsLinkedUnavailableUnsupportedAndDisconnected(t *testin
 		},
 	}
 	evidence := setupEvidence{extensions: []string{".rpp"}}
-	if ready, choice := shelfToSetUp(doc, nil, evidence); ready != 3 || choice != 1 {
-		t.Fatalf("ready=%d choice=%d, want 3 and 1", ready, choice)
+	if tally := countShelfSetup(doc, nil, evidence, map[string]string{"a": "/Music", "b": "/Music/Nested"}); tally.ready != 3 || tally.choice != 1 || tally.byRoot["a"] != 1 || tally.byRoot["b"] != 2 || tally.remainder != 0 {
+		t.Fatalf("wrong total or nested root attribution: %+v", tally)
 	}
 	inactive := &workspace.AssistantProgramState{ProjectLibraryInactiveRoots: []string{"b"}}
-	if ready, choice := shelfToSetUp(doc, inactive, evidence); ready != 2 || choice != 0 {
-		t.Fatalf("with b inactive: ready=%d choice=%d, want 2 and 0", ready, choice)
+	if tally := countShelfSetup(doc, inactive, evidence, nil); tally.ready != 2 || tally.choice != 0 || tally.remainder != 2 {
+		t.Fatalf("with b inactive and a shelf-only root: %+v", tally)
 	}
-	if ready, _ := shelfToSetUp(doc, nil, setupEvidence{note: setupNoteProjectProviderMissing}); ready != 0 {
-		t.Fatalf("a true note still counted %d", ready)
+	if tally := countShelfSetup(doc, nil, setupEvidence{note: setupNoteProjectProviderMissing}, nil); tally.ready != 0 {
+		t.Fatalf("a true note still counted %d", tally.ready)
 	}
 }
 

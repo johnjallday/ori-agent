@@ -11088,6 +11088,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font: inherit;
   overflow-wrap: anywhere;
 }
+.ws-map-folder-chip .ws-folder-setup {
+  border-inline-start: 1px solid var(--ws-line);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  color: var(--ws-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
 .ws-map-folder-chip button:hover,
 .ws-map-folder-chip button:focus-visible {
   background: var(--ws-panel-raised, var(--ws-line));
