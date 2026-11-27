@@ -410,8 +410,23 @@ test('color and move linked folders and files in Contents, then trash a whole fo
   expect(readdirSync(root)).toEqual([dst]);
   await row(page, dst).click();
   await expect(row(page, src)).toHaveAttribute('data-folder-color', 'Purple');
-  await row(page, 'cover.txt').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to…' }).click();
+  // The live filesystem watcher can report the preceding confirmed moves
+  // between opening a menu and choosing its action. Files deliberately
+  // refuses those old tokens. Make a fresh user selection only on that exact
+  // pre-review refusal; never retry a confirmation or a mutation request.
+  const chooseCurrent = async (name: string, action: string) => {
+    const choose = async () => {
+      await row(page, name).click({ button: 'right' });
+      await page.getByRole('menuitem', { name: action, exact: true }).click();
+    };
+    await choose();
+    if (
+      (await reader(page).locator('.wf-trash-status').textContent()) ===
+      'Selection unavailable. Select the items again.'
+    )
+      await choose();
+  };
+  await chooseCurrent('cover.txt', 'Move to…');
   const picker = page.getByRole('dialog', { name: 'Move 1 file' });
   await picker.getByRole('combobox').selectOption({ label: 'Downloads' });
   await picker.getByRole('button', { name: 'Move here' }).click();
@@ -425,13 +440,12 @@ test('color and move linked folders and files in Contents, then trash a whole fo
   await row(page, 'Downloads Linked folder').click({ button: 'right' });
   await expect(page.getByRole('menuitem', { name: 'Move to Trash…' })).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await row(page, src).click({ button: 'right' });
   let warning = '';
   page.once('dialog', async d => {
     warning = d.message();
     await d.accept();
   });
-  await page.getByRole('menuitem', { name: 'Move to Trash…' }).click();
+  await chooseCurrent(src, 'Move to Trash…');
   await expect(row(page, src)).toHaveCount(0);
   expect(warning).toContain('all of its contents');
   expect(
