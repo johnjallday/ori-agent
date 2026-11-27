@@ -113,7 +113,7 @@ test('legacy Downloads keeps project evidence and opens Filing without granting 
     .filter({ hasText: 'Downloads stays an inbox' });
   await expect(report).toBeVisible({ timeout: 30_000 });
   await expect(report.locator('[data-step]')).toHaveCount(0);
-  await expect(report.getByRole('link', { name: 'Review Downloads' })).toBeVisible();
+  await expect(report.getByRole('link', { name: 'Review where downloads belong' })).toBeVisible();
   await expect(report.getByRole('link', { name: 'Explore a project folder…' })).toHaveCount(0);
   await expect(report.getByRole('button', { name: /^Set up/ })).toHaveCount(0);
   await expect(report.locator('.folder-agent-card__holder-list')).toContainText('ori-rc');
@@ -161,7 +161,7 @@ test('legacy Downloads keeps project evidence and opens Filing without granting 
   expect(stable(await (await request.get('/api/agents')).json())).toEqual(stable(agentNamesBefore));
 
   // Keyboard-native review link opens the existing Filing console without installing it.
-  const reviewLink = report.getByRole('link', { name: 'Review Downloads' });
+  const reviewLink = report.getByRole('link', { name: 'Review where downloads belong' });
   await reviewLink.focus();
   await expect(reviewLink).toBeFocused();
   await page.keyboard.press('Enter');
