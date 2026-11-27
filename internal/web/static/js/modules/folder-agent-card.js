@@ -2758,13 +2758,12 @@ export function renderFolderAgentReport(
     });
   }
   const downloadsReview =
-    !view.stationHire &&
     view.rootPolicy === 'downloads_inbox' &&
     view.route.startsWith('/workspaces/') &&
     ['reported', 'set_up'].includes(view.state);
   if (downloadsReview) {
     const actions = el(doc, 'div', 'folder-agent-card__actions');
-    const review = el(doc, 'a', 'btn btn-primary btn-sm', 'Review Downloads');
+    const review = el(doc, 'a', 'btn btn-primary btn-sm', 'Review where downloads belong');
     const route = new URL(view.route, 'http://ori.local');
     route.searchParams.set('panel', 'file-janitor');
     route.searchParams.set('review', 'downloads');
@@ -2807,7 +2806,7 @@ export function renderFolderAgentReport(
         )
       );
     }
-  } else if (downloadsReview) {
+  } else if (downloadsReview && !view.stationHire) {
     // The Filing console owns the explicit install and folder-access steps.
   } else if (view.plan && (view.plan.steps.length || view.plan.runnable)) {
     planHost = el(doc, 'div', 'folder-agent-card__plan-host');
@@ -2932,7 +2931,7 @@ export function renderFolderAgentReport(
   if (view.actions.length) {
     const actions = el(doc, 'div', 'folder-agent-card__actions');
     view.actions.forEach((action, index) => {
-      if (downloadsReview && !view.setup && action.id === 'set_up') return;
+      if (downloadsReview && !view.stationHire && !view.setup && action.id === 'set_up') return;
       const button = el(
         doc,
         'button',

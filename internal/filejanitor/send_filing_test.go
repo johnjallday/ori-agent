@@ -538,7 +538,7 @@ func TestSendPlan_SendsCountInsideThePressLimit(t *testing.T) {
 		t.Fatalf("total must count sends: %+v", plan)
 	}
 	state, _ := f.s.store.LoadScanState("ws-1")
-	computed, err := f.s.computeReviewPlan("local", "ws-1", f.batch.ID, state, f.s.liveSendRoutes("local", "ws-1"))
+	computed, err := f.s.computeScopedPlan("local", "ws-1", f.batch.ID, state, f.s.liveSendRoutes("local", "ws-1"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

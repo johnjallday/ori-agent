@@ -223,7 +223,7 @@ func ReportText(v View) string {
 	}
 	parts := []string{ReportOpening(v)}
 	if v.RootPolicy == folderlook.RootDownloads {
-		return strings.Join(append(parts, "Choose Review Downloads to open Filing. Nothing is scanned or moved just by opening the review."), "\n\n")
+		return strings.Join(append(parts, "Choose “Review where downloads belong” to open Filing. Nothing is scanned or moved just by opening the review."), "\n\n")
 	}
 	// The card under the message says why the agent could not look itself
 	// (ModelSentence) and lists the steps with their details; the message keeps

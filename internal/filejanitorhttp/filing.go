@@ -31,7 +31,7 @@ func (h *Handler) FileReviewPlan(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if r.URL.Query().Get("layout") == "shelves" {
+	if r.PathValue("connectionID") == "" && r.URL.Query().Get("layout") == "shelves" {
 		h.fileShelfPicture(w, r, workspaceID)
 		return
 	}
@@ -55,11 +55,19 @@ func (h *Handler) FileReviewPlan(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondInternalError(w, "Failed to resolve the current user")
 		return
 	}
+	send, ok := h.handoffScope(w, r, owner, workspaceID)
+	if !ok {
+		return
+	}
 	result, err := h.service.FileReviewPlan(r.Context(), owner, workspaceID, r.PathValue("batchID"), filejanitor.FileRequest{
 		ExpectedRevision: body.ExpectedRevision, ExpectedGroupRevision: body.ExpectedGroupRevision,
-		PlanDigest: body.PlanDigest, TrashAcknowledged: body.TrashAcknowledged, ClientKey: body.ClientKey,
+		PlanDigest: body.PlanDigest, TrashAcknowledged: body.TrashAcknowledged, ClientKey: body.ClientKey, SingleSend: send,
 	})
 	if err != nil {
+		if send != nil && (errors.Is(err, filejanitor.ErrReviewPlanChanged) || errors.Is(err, filejanitor.ErrReviewConflict) || errors.Is(err, filejanitor.ErrReviewUnavailable)) {
+			refuseHandoff(w)
+			return
+		}
 		h.respondFilingError(w, err, result)
 		return
 	}

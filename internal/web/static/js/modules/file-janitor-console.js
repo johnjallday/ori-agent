@@ -3086,6 +3086,88 @@
     });
     void visit.surface.load();
   }
+  function singleFileReview(binding) {
+    const { scope, batchID, revision, groupRevision } = binding;
+    const visit = consoleVisit;
+    const current = () =>
+      scopeCurrent(scope) &&
+      consoleOpen &&
+      consoleVisit === visit &&
+      consoleTab === 'review' &&
+      lastBatch?.id === batchID &&
+      reviewDraft?.revision === revision &&
+      reviewDraft?.group_revision === groupRevision;
+    const base = apiBase(scope.id) + '/batches/' + encodeURIComponent(batchID);
+    const onFiled = async result => {
+      if (!scopeCurrent(scope) || consoleVisit !== visit) return;
+      await loadBatch();
+      if (!scopeCurrent(scope) || consoleVisit !== visit) return;
+      await showReceipt(scope, result);
+      await loadHistory();
+    };
+    const folder = (selected, suggested) => {
+      if (!current()) return;
+      window.FilingFolderChoice.openFolderChoice({
+        workspace: scope.id,
+        endpoint: base + '/chosen-folder',
+        selection: { ...selected, revision: groupRevision, draft_revision: revision },
+        suggested,
+        current,
+        onFiled
+      });
+    };
+    return { folder, current, base, onFiled };
+  }
+
+  function renderDestinationReview(container) {
+    const drawing = window.DownloadsDestinationReview;
+    if (
+      !drawing ||
+      !window.FilingFolderChoice ||
+      !pictureMatchesDraft() ||
+      !reviewEditsAvailable()
+    ) {
+      const failed =
+        pictureLoadState === 'error' ||
+        draftLoadState === 'error' ||
+        ['stale', 'invalid'].includes(reviewDraft?.state);
+      container.appendChild(
+        el(
+          'p',
+          'fj-sub',
+          failed ? 'This review is unavailable. Nothing was moved.' : 'Checking destinations…'
+        )
+      );
+      if (failed) container.appendChild(button('Reload review', 'fj-btn', () => void refresh()));
+      return;
+    }
+    const binding = reviewEditBinding();
+    const one = singleFileReview(binding);
+    container.appendChild(
+      drawing.renderDownloadsReview(document, lastCandidates, picture, reviewDraft.choices, {
+        send: (file, route) => void drawing.reviewSend(file, route, one, binding),
+        folder: (file, example) => one.folder({ candidate_id: file.id }, example),
+        leave: async (file, choice) => {
+          if (!one.current()) return;
+          if (
+            choice &&
+            !(await submitReviewEdit('exclude_files', { candidate_ids: [file.id] }, null, binding))
+          ) {
+            showError('The review changed. Reload it before choosing again.');
+            return;
+          }
+          if (!scopeCurrent(binding.scope) || lastBatch?.id !== binding.batchID) return;
+          reviewStatusMessage = file.name + ' was left in Downloads.';
+          renderBatch();
+          announce(reviewStatusMessage);
+          document.getElementById('fj-route-' + file.id + '-leave')?.focus();
+        }
+      })
+    );
+    const nav = pager();
+    if (nav) container.appendChild(nav);
+  }
+
   function renderPictureView() {
     const section = el('section', 'fj-picture-host');
     const drawing = window.FileJanitorPicture;
@@ -3136,35 +3218,7 @@
         onFileChoice: (file, choice) => void answerFile(file, choice, binding),
         onChooseFolder:
           window.FilingFolderChoice && reviewEditsAvailable()
-            ? (selected, suggested) => {
-                const { scope, batchID, revision, groupRevision } = binding;
-                const current = () =>
-                  scopeCurrent(scope) &&
-                  consoleOpen &&
-                  consoleTab === 'review' &&
-                  lastBatch?.id === batchID &&
-                  reviewDraft?.revision === revision &&
-                  reviewDraft?.group_revision === groupRevision;
-                if (!current()) return;
-                window.FilingFolderChoice.openFolderChoice({
-                  workspace: scope.id,
-                  endpoint:
-                    apiBase(scope.id) +
-                    '/batches/' +
-                    encodeURIComponent(batchID) +
-                    '/chosen-folder',
-                  selection: { ...selected, revision: groupRevision, draft_revision: revision },
-                  suggested,
-                  current,
-                  onFiled: async result => {
-                    if (!scopeCurrent(scope)) return;
-                    await loadBatch();
-                    if (!scopeCurrent(scope)) return;
-                    await showReceipt(scope, result);
-                    await loadHistory();
-                  }
-                });
-              }
+            ? singleFileReview(binding).folder
             : null,
         onForgetExample: example => void editFolderExample(example, 'forget', binding.scope),
         onReviewAgain: kept => void reviewKeptAgain(kept, binding),
@@ -3415,7 +3469,16 @@
     const otherScan = otherScanLine();
     if (otherScan) container.appendChild(otherScan);
 
+    const routing =
+      consoleOpen && downloadsReviewRequested() && lastStatus?.downloads_review === 'ready';
+    if (routing && lastBatch) {
+      renderDestinationReview(container);
+      if (focusedReviewControlID.startsWith('fj-route-'))
+        document.getElementById(focusedReviewControlID)?.focus({ preventScroll: true });
+      return;
+    }
     if (
+      !routing &&
       consoleOpen &&
       window.FilingStationMethod &&
       lastStatus?.settings?.root_id &&
@@ -5808,6 +5871,22 @@
       shown: arrivalsShown,
       busyId: arrivalBusy,
       message: arrivalMessage,
+      reviewBusy: busy || scanning,
+      onReview: async arrival => {
+        if (
+          id !== wsId() ||
+          !consoleOpen ||
+          consoleTab !== 'review' ||
+          busy ||
+          arrivalBusy ||
+          !arrivals.includes(arrival)
+        )
+          return;
+        const visit = consoleVisit;
+        // A local manual scan, not another press on the sender's approval.
+        await scanNow({ adoptNew: true });
+        if (id === wsId() && consoleVisit === visit && consoleTab === 'review') focusReviewStart();
+      },
       onUndo: arrival => void undoArrival(arrival),
       onDismiss: arrival => void dismissArrival(arrival),
       onShowMore: arrival => {
@@ -6521,7 +6600,7 @@
       const scan = button('Scan now', 'fj-btn fj-btn-secondary', () => void scanNow());
       scan.id = 'fileJanitorScan';
       scan.disabled = scanning;
-      if (consoleTab === 'review' && reviewView === 'groups') {
+      if (consoleTab === 'review' && reviewView === 'groups' && !downloadsReviewRequested()) {
         const allFiles = button('All files', 'fj-btn fj-btn-secondary', () => {
           reviewView = 'all';
           renderConsole();

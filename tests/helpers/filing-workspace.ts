@@ -2,9 +2,14 @@ import { expect, type APIRequestContext } from '@playwright/test';
 
 // Seed a disposable workspace through the real manual Filing setup. Callers
 // supply only a synthetic source root; this never attaches a destination.
-export async function filingWorkspace(request: APIRequestContext, label: string, root: string) {
+export async function filingWorkspace(
+  request: APIRequestContext,
+  label: string,
+  root: string,
+  name = `${label} ${Date.now()} ${Math.random().toString(36).slice(2, 6)}`
+) {
   const created = await request.post('/api/workspaces', {
-    data: { name: `${label} ${Date.now()} ${Math.random().toString(36).slice(2, 6)}` }
+    data: { name }
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const body = await created.json();

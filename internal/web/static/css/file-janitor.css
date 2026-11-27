@@ -31,6 +31,17 @@
   padding: 0.85rem;
   min-width: 0;
 }
+.fj-route-file {
+  padding-block: 0.85rem;
+  border-top: 1px solid var(--bs-border-color);
+  overflow-wrap: anywhere;
+}
+.fj-route-file .fj-btn {
+  min-height: 44px;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .fj-method .fj-shelf {
   display: flex;
   flex-direction: column;

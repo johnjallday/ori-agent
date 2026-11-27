@@ -402,6 +402,15 @@ test('Undo this send and Dismiss are real buttons that wait while one runs (FR 3
   assert.ok(byId(busy, 'fileJanitorDismissArrival-arrival-1').disabled);
 });
 
+test('local review is a separate user action and requires no receiving agent', () => {
+  const calls = [];
+  const section = renderArrivals(doc, [arrival()], { onReview: a => calls.push(a.id) });
+  assert.match(section.textContent, /confirm separately/);
+  assert.deepEqual(calls, []);
+  buttonNamed(section, 'Review local filing').fire('click');
+  assert.deepEqual(calls, ['arrival-1']);
+});
+
 test('nothing arrived draws nothing; a result message is still said', () => {
   assert.equal(renderArrivals(doc, [], {}), null);
   const said = renderArrivals(doc, [], { message: '14 files are back in Downloads.' });

@@ -46,7 +46,8 @@ export function openFolderChoice({ workspace, endpoint, selection, current, onFi
     const reply = await res.json();
     if (!res.ok)
       throw new Error(
-        (typeof reply.error === 'string' ? reply.error : reply.error?.message) ||
+        reply.message ||
+          (typeof reply.error === 'string' ? reply.error : reply.error?.message) ||
           'The review changed. Close and try again.'
       );
     return reply;

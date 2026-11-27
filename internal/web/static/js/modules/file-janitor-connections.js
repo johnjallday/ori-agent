@@ -466,6 +466,24 @@ export function renderArrivals(doc, arrivals, ctx = {}) {
     strip.appendChild(text);
     const actions = h('div', 'fj-arrival-actions');
     const busy = Boolean(ctx.busyId);
+    if (ctx.onReview) {
+      const help = h(
+        'p',
+        'fj-arrival-help',
+        'Review local filing scans this workspace’s folder. Choose a destination here and confirm separately to move anything.'
+      );
+      help.id = 'fileJanitorArrivalReviewHelp-' + arrival.id;
+      text.appendChild(help);
+      const review = actionButton(
+        h,
+        'Review local filing',
+        'fj-btn fj-btn-secondary',
+        () => ctx.onReview(arrival),
+        busy || ctx.reviewBusy
+      );
+      review.setAttribute('aria-describedby', help.id);
+      actions.appendChild(review);
+    }
     const undo = actionButton(
       h,
       ctx.busyId === arrival.id ? 'Putting files back…' : 'Undo this send',
