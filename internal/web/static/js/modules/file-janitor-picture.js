@@ -603,6 +603,37 @@ export function renderPicture(doc, picture, ctx) {
   lead.id = 'fileJanitorLead';
   root.appendChild(lead);
 
+  if (picture.folder_suggestions?.length && ctx.onChooseFolder) {
+    const section = h('section', 'fj-frame');
+    section.appendChild(h('h3', 'fj-frame-title', 'Suggested destinations'));
+    section.appendChild(
+      h(
+        'p',
+        'fj-sub',
+        'From your confirmed examples. Nothing moves until you review and press File.'
+      )
+    );
+    for (const match of picture.folder_suggestions) {
+      const row = h('div', 'fj-decision-summary');
+      row.appendChild(h('strong', '', match.candidate_name));
+      row.appendChild(h('p', 'fj-sub', 'You filed ' + match.name + ' to ' + match.folder + '.'));
+      for (const [label, fn] of [
+        [
+          'Review suggestion',
+          () => ctx.onChooseFolder({ candidate_id: match.candidate_id }, match.action_id)
+        ],
+        ['Change folder', () => ctx.onChooseFolder({ candidate_id: match.candidate_id })],
+        ['Forget example', () => ctx.onForgetExample(match)]
+      ]) {
+        const b = h('button', 'fj-btn fj-btn-secondary', label);
+        b.type = 'button';
+        b.addEventListener('click', fn);
+        row.appendChild(b);
+      }
+      section.appendChild(row);
+    }
+    root.appendChild(section);
+  }
   const leaving = Array.isArray(picture.leaving) && picture.leaving.length > 0;
   // The agent's suggestion, above Leaving (FR 43, 47, 48). With no model the
   // console passes no agent and the server sends no suggestion: nothing is drawn.
@@ -693,6 +724,13 @@ function fileRow(h, className, file, location, fallback) {
   return row;
 }
 
+function folderChoiceButton(h, ctx, selection) {
+  const b = h('button', 'fj-btn fj-btn-quiet', 'Choose a folder…');
+  b.type = 'button';
+  b.addEventListener('click', () => ctx.onChooseFolder(selection));
+  return b;
+}
+
 function fileChoice(h, row, file, ctx) {
   const select = h('select', 'fj-row-menu fj-file-choice');
   select.id = row.id + '-choice';
@@ -746,6 +784,8 @@ function nameList(h, files, className, ctx, { location, fallback, planned: usePl
       if (expanded) {
         const choices = h('div', 'fj-inline-choice');
         choices.appendChild(fileChoice(h, item, file, ctx));
+        if (ctx.onChooseFolder)
+          choices.appendChild(folderChoiceButton(h, ctx, { candidate_id: file.id }));
         const cancel = h('button', 'fj-btn', 'Cancel');
         cancel.type = 'button';
         cancel.id = item.id + '-cancel';
@@ -807,6 +847,10 @@ function folderCard(h, folder, ctx) {
   card.appendChild(head);
   const destination = ctx.filedRoot ? ctx.filedRoot + '/' + name : folder.destination;
   card.appendChild(h('p', 'fj-folder-destination', destination));
+  if (ctx.onChooseFolder && (folder.count || folder.unfiled_count))
+    card.appendChild(
+      folderChoiceButton(h, ctx, { section: folder.count ? FILED : UNFILED, key: folder.category })
+    );
   if (unticked) card.appendChild(h('p', 'fj-not-filed', 'Not filed'));
   if (folder.count > 0) {
     card.appendChild(
@@ -1211,6 +1255,8 @@ function looseSection(h, picture, title, ctx) {
       )
     );
     box.appendChild(rowMenu(h, row, ctx));
+    if (ctx.onChooseFolder && row.loose_count)
+      box.appendChild(folderChoiceButton(h, ctx, { section: LOOSE, key: row.group_id }));
     const note = rowNote(row, ctx);
     if (note) box.appendChild(h('p', 'fj-row-note', note));
     const why = h('details', 'fj-why');

@@ -172,6 +172,7 @@ type Service struct {
 	// conditionalMover files reviewed documents into chosen folders and puts them
 	// back; the legacy category path keeps using mover.
 	conditionalMover ConditionalMover
+	exampleMemory    exampleMemory
 	// suggestionModel reaches the Filing agent's own model for "Ask <agent> what
 	// to send" (send_suggestion.go); nil leaves the agent slice unavailable.
 	suggestionModel SuggestionModel

@@ -94,6 +94,11 @@ func maybeBuildWorkspacePlanningFormResponse(ag *resolvedChatAgent, query string
 	if !looksLikeTravelPlanningRequest(trimmedQuery) {
 		return nil
 	}
+	// A hotel receipt filename is not a request for trip planning. Keep
+	// explicit trip requests, but let the Curator answer ordinary questions.
+	if !looksLikeFreshTravelPlanningRequest(trimmedQuery) && ag.WorkspaceTools.canRecallFiling() {
+		return nil
+	}
 
 	detectionContext := loadTravelPlanningDetectionContext(routeCtx, workspaceStore, sessionStore)
 	form := buildWorkspaceTravelPlanningForm(trimmedQuery, detectionContext)

@@ -86,6 +86,7 @@ type Handler struct {
 	backupAdvisorReader      backupAdvisorReader
 	workspaceProtection      workspaceProtectionReader
 	fileCuratorWelcome       fileCuratorWelcomeReader
+	filingHistory            filingHistoryReader
 	folderWelcome            folderWelcomeReader
 
 	// Project-template tool dependencies (optional; see SetProjectTemplateDeps)

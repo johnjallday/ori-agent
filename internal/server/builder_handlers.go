@@ -952,6 +952,7 @@ func (b *ServerBuilder) wireFileJanitor() {
 		return
 	}
 	service := filejanitor.NewService(filejanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
+	service.SetExampleMemory(workspace.NewMemoryStore(b.workspaceFileStore))
 	b.fileJanitorService = service
 	b.fileJanitorHandler = filejanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 	b.fileJanitorHandler.SetDownloadsRoot(func(owner, workspaceID string) (string, error) {
@@ -959,6 +960,7 @@ func (b *ServerBuilder) wireFileJanitor() {
 	})
 	if b.chatHandler != nil {
 		b.chatHandler.SetFileCuratorWelcomeReader(service)
+		b.chatHandler.SetFilingHistoryReader(service)
 	}
 	// "Ask <agent> what to send" reaches the Filing agent's own tool-capable
 	// model, resolved when the person asks (send_suggestion.go). The turn offers

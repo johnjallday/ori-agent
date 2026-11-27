@@ -113,6 +113,9 @@ func locateAfterUndo(root string, action FileAction) (location, destination stri
 		}
 		return LocationUnknown, ""
 	}
+	if action.Operation == OperationDeliver {
+		return LocationUnknown, ""
+	} // Neither a historical label nor an occupied original name proves location.
 	if action.Operation == OperationSend {
 		// A send has no destination inside this folder: it is back here, or still
 		// in the workspace it was sent to (the outcome's message names it).
@@ -257,6 +260,8 @@ func (s *Service) UndoFiling(ctx context.Context, owner, workspaceID, filingID s
 		switch action.Operation {
 		case OperationMove:
 			_, _ = s.undoMove(ctx, settings, root, action, owner)
+		case OperationDeliver:
+			_, _ = s.undoDelivery(ctx, settings, root, action, owner)
 		case OperationPlace:
 			_, _ = s.undoPlacement(ctx, settings, root, action)
 		case OperationSend:

@@ -45,7 +45,8 @@ export function receiptWhere(model, ctx) {
     const here = (model.filed || 0) - sent;
     if (here > 0)
       parts.push((here === 1 ? '1 is in ' : here + ' are in ') + folder + '/' + filing + '.');
-  } else if (!model?.shelfPicture && (model?.filed || 0) > 0)
+  } else if (model?.delivered) parts.push('Filed to the chosen folder.');
+  else if (!model?.shelfPicture && (model?.filed || 0) > 0)
     parts.push('They are in ' + folder + '/' + filing + '.');
   if (typeof model?.looseNow === 'number') {
     const loose = model.looseNow;
@@ -74,11 +75,13 @@ export function receiptModelFromReceipt(receipt) {
     shelfPicture: Boolean(receipt.shelf_picture),
     placementOffer: receipt.placement_offer,
     createdFolders: receipt.created_folders || [],
+    ...(receipt.example_offers?.length ? { examples: receipt.example_offers } : {}),
     state: receipt.state || 'done',
     filed: receipt.filed || 0,
     trashed: receipt.trashed || 0,
     completed: 0,
     sent: receipt.sent || 0,
+    ...(receipt.delivered ? { delivered: receipt.delivered } : {}),
     sends: (receipt.sends || []).map(item => ({
       workspaceId: item.receiver_workspace_id,
       receiverName: item.receiver_name || 'Another workspace',
@@ -106,14 +109,19 @@ export function receiptModelFromResult(result) {
   let trashed = 0;
   let completed = 0;
   let sent = 0;
+  let delivered = 0;
   for (const outcome of outcomes) {
     if (outcome.result === 'applied' && outcome.operation === 'trash') trashed += 1;
     else if (outcome.result === 'applied' && outcome.operation === 'send') {
       // Sent to another workspace; the receipt read names which.
       filed += 1;
       sent += 1;
-    } else if (outcome.result === 'applied' && ['move', 'place'].includes(outcome.operation)) {
+    } else if (
+      outcome.result === 'applied' &&
+      ['deliver', 'move', 'place'].includes(outcome.operation)
+    ) {
       filed += 1;
+      if (outcome.operation === 'deliver') delivered++;
       const folder = directoryOf(outcome.destination);
       if (folder) byDestination.set(folder, (byDestination.get(folder) || 0) + 1);
     } else if (outcome.result === 'applied') completed += 1;
@@ -134,6 +142,7 @@ export function receiptModelFromResult(result) {
     state: result?.interrupted ? 'interrupted' : 'done',
     replayed: Boolean(result?.replayed),
     filed,
+    ...(delivered ? { delivered } : {}),
     trashed,
     completed,
     sent,
@@ -181,6 +190,15 @@ export function renderReceipt(doc, model, ctx = {}) {
   const title = h('h3', 'fj-results-summary', receiptTitle(model) + '.');
   title.id = 'fileJanitorResultsSummary';
   panel.appendChild(title);
+  for (const example of model.examples || []) {
+    const line = h('p', 'fj-receipt-note', example.name + ' → ' + example.folder + ' ');
+    const save = h('button', 'fj-btn fj-btn-secondary', 'Suggest this folder for similar files');
+    save.type = 'button';
+    save.disabled = ctx.busy;
+    save.addEventListener('click', () => ctx.onRemember?.(example));
+    line.appendChild(save);
+    panel.appendChild(line);
+  }
   if (model.replayed)
     panel.appendChild(
       h('p', 'fj-results-replayed', 'Already completed earlier; nothing ran again.')

@@ -682,6 +682,21 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if r.URL.Query().Has("filename") {
+		w.Header().Set("Cache-Control", "no-store")
+		owner, err := h.currentOwner(r.Context())
+		if err != nil {
+			_ = orihttp.RespondForbidden(w, "Filing history unavailable.")
+			return
+		}
+		lookup, err := h.service.LookupFilingHistory(r.Context(), owner, workspaceID, r.URL.Query().Get("filename"))
+		if err != nil {
+			h.respondReviewError(w, err, "Failed to search Filing history")
+			return
+		}
+		_ = orihttp.RespondSuccess(w, lookup)
+		return
+	}
 	actions, err := h.service.ListActions(workspaceID)
 	if err != nil {
 		h.respondError(w, err, "Failed to read File Janitor history")

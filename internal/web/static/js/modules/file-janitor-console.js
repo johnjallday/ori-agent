@@ -209,6 +209,9 @@
   let historyReceivers = {};
   let historyLoaded = false;
   let historyFilter = '';
+  let historyQuery = '';
+  let historyQueryInput = '';
+  let historyLookup = null;
   // The last undo outcome, kept so the history reload that follows an undo does
   // not wipe the explanation the user needs to read.
   let historyStatusMessage = '';
@@ -290,6 +293,8 @@
     historyActions = [];
     historyLoaded = false;
     historyFilter = '';
+    historyQuery = historyQueryInput = '';
+    historyLookup = null;
     historyLoadState = 'loading';
     historyListLoadState = 'loading';
     latestReceipt = null;
@@ -3129,6 +3134,39 @@
         onSelectFile: selectFile,
         onRowChoice: (row, choice) => void answerRow(row, choice, binding),
         onFileChoice: (file, choice) => void answerFile(file, choice, binding),
+        onChooseFolder:
+          window.FilingFolderChoice && reviewEditsAvailable()
+            ? (selected, suggested) => {
+                const { scope, batchID, revision, groupRevision } = binding;
+                const current = () =>
+                  scopeCurrent(scope) &&
+                  consoleOpen &&
+                  consoleTab === 'review' &&
+                  lastBatch?.id === batchID &&
+                  reviewDraft?.revision === revision &&
+                  reviewDraft?.group_revision === groupRevision;
+                if (!current()) return;
+                window.FilingFolderChoice.openFolderChoice({
+                  workspace: scope.id,
+                  endpoint:
+                    apiBase(scope.id) +
+                    '/batches/' +
+                    encodeURIComponent(batchID) +
+                    '/chosen-folder',
+                  selection: { ...selected, revision: groupRevision, draft_revision: revision },
+                  suggested,
+                  current,
+                  onFiled: async result => {
+                    if (!scopeCurrent(scope)) return;
+                    await loadBatch();
+                    if (!scopeCurrent(scope)) return;
+                    await showReceipt(scope, result);
+                    await loadHistory();
+                  }
+                });
+              }
+            : null,
+        onForgetExample: example => void editFolderExample(example, 'forget', binding.scope),
         onReviewAgain: kept => void reviewKeptAgain(kept, binding),
         onRetry: file =>
           void submitReviewEdit('retry_files', { candidate_ids: [file.id] }, null, binding),
@@ -4660,6 +4698,57 @@
       panel.appendChild(reviews);
     }
 
+    const form = el('form', 'fj-filters');
+    form.setAttribute('role', 'search');
+    const search = el('input', 'fj-input');
+    search.type = 'search';
+    search.placeholder = 'Search by filename';
+    search.setAttribute('aria-label', 'Search Filing history by filename');
+    search.maxLength = 255;
+    search.value = historyQueryInput;
+    search.addEventListener('input', () => {
+      historyQueryInput = search.value;
+    });
+    const submit = el('button', 'fj-btn fj-btn-secondary', 'Search history');
+    submit.type = 'submit';
+    form.appendChild(search);
+    form.appendChild(submit);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      historyQuery = historyQueryInput = search.value.trim();
+      historyLookup = null;
+      void loadHistory({ refreshReceipt: false });
+    });
+    panel.appendChild(form);
+    if (historyQuery) {
+      form.appendChild(
+        button('Clear search', 'fj-btn fj-btn-quiet', () => {
+          historyQuery = historyQueryInput = '';
+          void loadHistory({ refreshReceipt: false });
+        })
+      );
+      const note =
+        historyListLoadState === 'unavailable'
+          ? 'Search unavailable. Try again.'
+          : historyLookup?.note || 'Searching retained history…';
+      const status = el('p', 'fj-muted', note);
+      status.setAttribute('role', 'status');
+      panel.appendChild(status);
+      const results = el('ul', 'fj-history-list');
+      for (const match of historyLookup?.matches || []) {
+        results.appendChild(
+          el(
+            'li',
+            'fj-history-item',
+            `${match.name} · ${new Date(match.when).toLocaleString()} — ${match.outcome}`
+          )
+        );
+      }
+      panel.appendChild(results);
+      host.appendChild(panel);
+      return;
+    }
+
     const bar = el('div', 'fj-filters');
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Filter history');
@@ -4787,8 +4876,13 @@
     const sequence = ++historyRequest;
     const current = () => scopeCurrent(scope) && sequence === historyRequest;
     const option = HISTORY_FILTERS.find(entry => entry.id === historyFilter);
-    const query = option && option.query ? '?' + option.query : '';
+    const query = historyQuery
+      ? '?filename=' + encodeURIComponent(historyQuery)
+      : option && option.query
+        ? '?' + option.query
+        : '';
     historyListLoadState = 'loading';
+    if (historyQuery) renderHistory();
     const read = async () => {
       const response = await fetch(apiBase(scope.id) + '/history' + query);
       if (!response.ok) throw new Error('history failed');
@@ -4803,6 +4897,7 @@
     try {
       const body = await listRead;
       if (!current()) return;
+      historyLookup = historyQuery ? body : null;
       historyActions = Array.isArray(body.actions) ? body.actions : [];
       historyReceivers =
         body.receivers && typeof body.receivers === 'object' ? { ...body.receivers } : {};
@@ -4818,6 +4913,7 @@
     } catch (_) {
       if (!current()) return;
       historyListLoadState = 'unavailable';
+      historyLookup = null;
       historyStatusMessage =
         'History unavailable. Showing last known records; retry to check current results.';
       historyLoaded = true;
@@ -4866,6 +4962,37 @@
   // renderResults reports what happened per file. Operation evidence comes
   // from each authoritative outcome: an applied Trash is never called "filed",
   // and an older response without operation data gets neutral wording.
+  async function editFolderExample(example, choice, scope, filingId) {
+    if (!scopeCurrent(scope) || receiptBusy) return;
+    receiptBusy = true;
+    try {
+      const res = await fetch(
+        apiBase(scope.id) + '/history/' + encodeURIComponent(example.action_id) + '/example',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ choice })
+        }
+      );
+      if (!res.ok) throw new Error('The example changed or is unavailable. Review it again.');
+      if (!scopeCurrent(scope)) return;
+      await loadReviewPicture();
+      if (filingId && scopeCurrent(scope) && lastResults?.filingId === filingId)
+        await showReceipt(scope, { filing_id: filingId });
+      if (scopeCurrent(scope))
+        announce(
+          choice === 'forget'
+            ? 'Suggestion forgotten. No files moved.'
+            : 'Example saved. Similar files will need your review.'
+        );
+    } catch (e) {
+      if (scopeCurrent(scope)) showError(e.message);
+    } finally {
+      receiptBusy = false;
+      if (scopeCurrent(scope) && lastResults) renderResults(lastResults, { focus: false });
+    }
+  }
+
   function renderResults(view, { focus = true } = {}) {
     // Kept so a redraw of the console (a status refresh that lands after the press)
     // shows the same account again instead of wiping it.
@@ -4876,6 +5003,7 @@
     const drawing = window.FileJanitorReceipt;
     if (!drawing || !view) return;
 
+    const receiptScope = requestScope();
     const offer = view.model?.placementOffer;
     if (offer && !view.chosen)
       view.chosen = new Set(offer.rows.filter(r => r.count >= 2).map(r => r.id));
@@ -4884,6 +5012,8 @@
       savingPlacements: view.savingPlacements,
       placementMessage: view.placementMessage,
       onChoosePlacements: (id, on) => (on ? view.chosen.add(id) : view.chosen.delete(id)),
+      onRemember: example =>
+        void editFolderExample(example, 'remember', receiptScope, view.filingId),
       folderName: compactFolderName(lastStatus?.settings?.root_path),
       filingRoot: lastStatus?.settings?.filing_root_name || 'Filed',
       busy: receiptBusy,
@@ -5529,6 +5659,10 @@
         );
       return;
     }
+    if (!status && !stationBuildOpen()) {
+      host.appendChild(el('p', 'fj-sub', 'Loading Filing…'));
+      return;
+    }
     if (
       ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state) ||
       !isConfigured(status)
@@ -5950,6 +6084,8 @@
       pageOffset = 0;
     }
     if (consoleTab === 'history' && consoleItem) {
+      historyQuery = historyQueryInput = '';
+      historyLookup = null;
       // A result link names an actual receipt, not whichever filter was last used.
       historyFilter = '';
       historyLoaded = false;

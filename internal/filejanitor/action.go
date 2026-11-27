@@ -71,6 +71,8 @@ type FileAction struct {
 	// connection. Additive: an older build drops it on rewrite, and this build then
 	// refuses to validate or undo the action, so a send can only lose its undo.
 	Send *SentTo `json:"send,omitempty"`
+	// Delivery names the reviewed folders by identity, not an agent directory grant.
+	Delivery *DeliveredTo `json:"delivery,omitempty"`
 
 	// BeforeFingerprint is the file state the user approved. It is rechecked
 	// immediately before the mutation; a mismatch makes the action stale.
@@ -125,6 +127,8 @@ const (
 	// Like OperationPlace it is never requested by a client, never dispatched to
 	// the filesystem connector, and refused by an older build's validation.
 	OperationSend Operation = "send"
+	// OperationDeliver is a reviewed move into an existing picked folder.
+	OperationDeliver Operation = "deliver"
 )
 
 // ValidOperations is the complete set a client may ask for. There is no
@@ -265,9 +269,15 @@ func (a FileAction) Validate() error {
 		return fmt.Errorf("%w: candidate id is required", ErrInvalidAction)
 	}
 	switch a.Operation {
-	case OperationMove, OperationTrash, OperationPlace, OperationSend:
+	case OperationMove, OperationTrash, OperationPlace, OperationSend, OperationDeliver:
 	default:
 		return fmt.Errorf("%w: unknown operation %q", ErrInvalidAction, a.Operation)
+	}
+	if (a.Operation == OperationDeliver) != (a.Delivery != nil) {
+		return fmt.Errorf("%w: invalid chosen destination", ErrInvalidAction)
+	}
+	if a.Delivery != nil && (!a.Delivery.valid() || a.BeforeFingerprint.FileID == "" || validateDestinationRelative(a.DestinationRelative) != nil || path.Base(a.DestinationRelative) != a.SourceName) {
+		return fmt.Errorf("%w: invalid delivery", ErrInvalidAction)
 	}
 	if (a.Operation == OperationPlace) != (a.Place != nil) {
 		return fmt.Errorf("%w: only a placement records the folders it verified", ErrInvalidAction)
@@ -405,6 +415,9 @@ func (a FileAction) Undoable() bool {
 	// (an older build dropped them, or the move was never verified) there is
 	// nothing safe to reverse, and every Undo entry point stays closed.
 	if a.Operation == OperationPlace && (a.Place == nil || a.AfterFingerprint.FileID == "") {
+		return false
+	}
+	if a.Operation == OperationDeliver && (a.Delivery == nil || !a.Delivery.valid() || a.AfterFingerprint.FileID == "") {
 		return false
 	}
 	// A send is reversed the same way, between the two folders it recorded.
