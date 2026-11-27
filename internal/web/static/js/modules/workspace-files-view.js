@@ -29,6 +29,7 @@ import {
 import { openRowMenu, closeRowMenu } from './home-tree-menu.js';
 import { escapeHtml as esc, renderMarkdown } from './note-editor.js';
 
+import { workspacePageURL } from './workspace-routes.js';
 import { diskLayout, placedEntries } from './workspace-files-layout.js';
 
 const sections = [
@@ -1113,8 +1114,11 @@ export class WorkspaceFilesView {
       if (row.song) {
         const member = this.members.get(row.song);
         const notes = this.value?.notes;
+        const open = member?.folder_slug
+          ? ` · <a href="${esc(workspacePageURL(member.folder_slug))}">Open workspace</a>`
+          : '';
         body.innerHTML = member
-          ? `<p>Song on the map · <a href="/workspaces/${encodeURIComponent(member.folder_slug || member.id)}">Open workspace</a></p><h3>Notes</h3>${this.error ? '<p>Notes unavailable.</p><button type="button" data-retry-preview>Retry</button>' : !notes ? '<p>Loading notes…</p>' : notes.length ? `<ul>${notes.map(n => `<li>${esc(n.label)}</li>`).join('')}</ul>` : '<p>No notes yet</p>'}`
+          ? `<p>Song on the map${open}</p><h3>Notes</h3>${this.error ? '<p>Notes unavailable.</p><button type="button" data-retry-preview>Retry</button>' : !notes ? '<p>Loading notes…</p>' : notes.length ? `<ul>${notes.map(n => `<li>${esc(n.label)}</li>`).join('')}</ul>` : '<p>No notes yet</p>'}`
           : '';
       } else
         body.innerHTML = `<p>Project not set up</p>${this.marks?.can_set_up ? '<button type="button" class="wf-action" data-files-setup>Set up this project</button>' : ''}`;
