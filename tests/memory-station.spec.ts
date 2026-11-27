@@ -56,7 +56,7 @@ test.describe.serial('Memory station', () => {
     const album = await albumWorkspace(page);
     await openMap(page, album.folder_slug);
     await expect(page.locator(building)).toHaveAttribute('data-station-visual', 'archive');
-    await expect(badge(page)).toHaveText('Empty');
+    await expect(badge(page)).toHaveCount(0);
     await expect(page.locator(building)).toHaveAttribute(
       'aria-label',
       'Agent memory station, Empty, nothing recorded yet'
@@ -65,7 +65,7 @@ test.describe.serial('Memory station', () => {
     await addEntry(page, album.id, 'Build baseline is about 7 minutes.', 'watch');
     await addEntry(page, album.id, 'Masters at -14 LUFS.');
     await page.reload();
-    await expect(badge(page)).toHaveText('2 entries');
+    await expect(badge(page)).toHaveCount(0);
     await expect(page.locator(building)).toHaveAttribute(
       'aria-label',
       'Agent memory station, 2 entries, 1 watching'
@@ -89,7 +89,8 @@ test.describe.serial('Memory station', () => {
     // Opening the panel is looking: the count is plain again afterwards.
     await page.locator(building).click();
     await page.keyboard.press('Escape');
-    await expect(badge(page)).toHaveText('3 entries');
+    await expect(page.locator(building)).toHaveAccessibleName(/3 entries/);
+    await expect(badge(page)).toHaveCount(0);
   });
 
   test('a dragged Memory building keeps its place after a reload', async ({ page }) => {

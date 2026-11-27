@@ -443,9 +443,9 @@ test('HQ Overview saves to the personal Inbox and its Map station opens the inve
   await expect(noteList(page).getByRole('button', { name: /idea-from-hq/i })).toBeVisible();
   await capture(page, '10-hq-note-in-personal-inbox');
   // On the map, Notes opens the note inventory over it: no navigation, and
-  // closing puts focus back on the node or building that opened it. The HQ
-  // map opens in Flow.
+  // closing puts focus back on the node or building that opened it.
   await page.goto(base + '?mode=map');
+  await page.locator('[data-cmd-map-arrangement="flow"]').click();
   const mapURL = page.url();
   const inventory = page.getByRole('dialog', { name: 'Note inventory' });
   const flowNode = page.locator('.ws-cmd-flow-node[data-cmd-hq-station="second-brain"]');

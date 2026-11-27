@@ -55,6 +55,7 @@ import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js'
 import { folderAgentWaiting, resolveWorkspaceNextAction } from './workspace-next-action.js';
 import { commanderWaitingForFiling } from './commander-speech.js';
 import { chatRefOf } from './folder-agent-chat.js';
+import { groundsLayout } from './hq-grounds-layout.js';
 import { stationDeferred } from './filing-station-offer.js';
 import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
 import {
@@ -9474,8 +9475,7 @@ export class WorkspaceCommandView {
   // the workspace layout, clamped to [0,1] so a stale/corrupt value can never
   // render a station off-field, else the registry-order default slot. Unknown
   // or non-finite saved values fall back to the default (FR13).
-  hqStationPosition(key) {
-    const registry = this.mapStationRegistry();
+  hqStationPosition(key, registry = this.mapStationRegistry()) {
     const index = registry.findIndex(entry => entry.key === key);
     const fallback = this.hqStationDefaultPosition(index);
     const preferredX = Number(registry[index]?.defaultX);
@@ -9498,11 +9498,11 @@ export class WorkspaceCommandView {
   // --station-x/--station-y custom props. HQ stations render only in the
   // designated HQ (FR16); every workspace has its Memory station, plus any
   // capability station it earned.
-  renderMapHQStations() {
-    return this.mapStationRegistry()
+  renderMapHQStations(registry = this.mapStationRegistry(), positions) {
+    return registry
       .map(station => {
         const state = station.state() || {};
-        const pos = this.hqStationPosition(station.key);
+        const pos = positions?.get(station.key) || this.hqStationPosition(station.key, registry);
         const buildingArt = typeof window === 'undefined' ? null : window.OriWorkspaceBuildingArt;
         let visualVariant = station.visualVariant || 'neutral';
         let visualMarkup = buildingArt?.svgForVariant(visualVariant, { context: 'station' });
@@ -10206,7 +10206,51 @@ export class WorkspaceCommandView {
     );
   }
 
+  renderMapGrounds(agents) {
+    const stations = this.mapStationRegistry();
+    const { rows, positions } = groundsLayout(
+      stations,
+      this.page?.workspace?.layout?.station_positions
+    );
+    const hq =
+      typeof window === 'undefined'
+        ? ''
+        : window.OriWorkspaceBuildingArt?.svgForVariant('hq', { context: 'station' });
+    const lead = agents.find(agent => agent.entry);
+    const team = agents.filter(agent => agent !== lead);
+    return (
+      '<section class="ws-cmd-map-world ws-cmd-grounds" data-map-zone="agents" aria-label="HQ grounds" style="--grounds-rows:' +
+      rows +
+      '">' +
+      '<div class="ws-cmd-grounds-court">' +
+      (hq || '') +
+      '<strong>HQ</strong>' +
+      (lead
+        ? '<button type="button" class="ws-cmd-grounds-lead" data-cmd-map-select-agent="' +
+          escapeHtml(lead.encodedName) +
+          '" data-agent-key="' +
+          escapeHtml(lead.key) +
+          '" aria-pressed="' +
+          (lead.key === this.selectedAgentKey) +
+          '">' +
+          this.agentCharacterHTML(lead, 'map') +
+          '<span><small>Lead</small>' +
+          escapeHtml(lead.name) +
+          '</span></button>'
+        : '<button type="button" class="ws-cmd-grounds-lead" data-cmd-add-agent>Hire a lead</button>') +
+      '</div>' +
+      this.renderMapHQStations(stations, positions) +
+      '</section>' +
+      (team.length
+        ? '<div class="ws-cmd-map-agent-field ws-cmd-grounds-team">' +
+          team.map((agent, i) => this.renderMapAgentUnit(agent, i, false)).join('') +
+          '</div>'
+        : '')
+    );
+  }
+
   renderMapAgentsZone(agents) {
+    if (this.isPersonalHQ() && !this.isGroupWorkspace()) return this.renderMapGrounds(agents);
     return (
       '<section class="ws-cmd-map-world" data-map-zone="agents" aria-label="Agent units">' +
       '<div class="ws-cmd-map-floor" aria-hidden="true"></div>' +
@@ -12226,10 +12270,11 @@ export class WorkspaceCommandView {
     return this.mapArrangement;
   }
 
-  // Flow is the HQ's map unless the user chose Free; a group is never Flow.
+  // Grounds retains the original 'free' storage key. Only an explicit Flow
+  // choice opens Flow; groups always keep their combined member map.
   isHQFlowMap() {
     return (
-      this.isPersonalHQ() && !this.isGroupWorkspace() && this.currentMapArrangement() !== 'free'
+      this.isPersonalHQ() && !this.isGroupWorkspace() && this.currentMapArrangement() === 'flow'
     );
   }
 
@@ -12247,8 +12292,8 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-map-seg" role="group" aria-label="' +
       escapeHtml(HQ_LABELS.mapArrangement) +
       '">' +
+      option('free', HQ_LABELS.grounds) +
       option('flow', HQ_LABELS.flow) +
-      option('free', HQ_LABELS.free) +
       '</div></div>'
     );
   }
@@ -12950,7 +12995,7 @@ export class WorkspaceCommandView {
         // A completed drag synthesizes a trailing click on the (now detached)
         // station element; swallow it so dragging never fires the action
         // (FR9). An under-threshold press leaves the flag clear and opens it.
-        if (this._suppressStationClick) {
+        if (this._suppressStationClick && event.detail !== 0) {
           this._suppressStationClick = false;
           return;
         }

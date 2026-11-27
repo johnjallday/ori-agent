@@ -288,12 +288,11 @@
     // A station is already inside Workspace Command's theme token scope. Its
     // depot art therefore inherits the keeper accent instead of freezing the
     // catalog's curated swatch into both light and dark map themes.
+    const stationColor = ['depot', 'archive'].includes(normalized)
+      ? 'var(--ws-keeper)'
+      : `color-mix(in srgb, ${definition.color} 76%, var(--ws-ink))`;
     const color =
-      context === 'chat'
-        ? 'inherit'
-        : context === 'station'
-          ? 'var(--ws-keeper)'
-          : definition.color;
+      context === 'chat' ? 'inherit' : context === 'station' ? stationColor : definition.color;
 
     return `<svg class="${className}" data-building-variant="${normalized}" viewBox="0 0 120 88" width="112" height="92" style="color:${color}" aria-hidden="true" focusable="false">${definition.markup}</svg>`;
   }

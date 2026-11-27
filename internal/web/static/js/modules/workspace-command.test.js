@@ -428,9 +428,7 @@ test('an ordinary workspace renders the Details markup it always has (FR1)', () 
 });
 
 // --- Map snapshots (PRD 767 FR1) ----------------------------------------------
-// Flow is the HQ Map's new default; an ordinary workspace's Map and the HQ Map
-// in Free must render what they rendered before. The HQ's Free map gains only
-// the "Map arrangement" control row (FR2), which is cut before comparing.
+// Pin the ordinary map and HQ grounds separately; the switch is tested below.
 // Regenerate with UPDATE_SNAPSHOTS=1 only for a deliberate change.
 
 const MAP_SNAPSHOTS = {
@@ -520,7 +518,7 @@ test('an ordinary workspace renders the Map markup it always has (767 FR1)', () 
   assertSnapshot('plain', markup);
 });
 
-test('the HQ Map in Free renders the markup it always has, plus the switch (767 FR1)', () => {
+test('the saved Free preference renders the HQ grounds, plus the switch', () => {
   const markup = mapMarkup({ hq: true });
   assert.equal(mapMarkup({ hq: true }), markup);
   assert.doesNotMatch(markup, /is-flow/);
@@ -528,19 +526,24 @@ test('the HQ Map in Free renders the markup it always has, plus the switch (767 
   assertSnapshot('hqFree', withoutArrangementRow(markup));
 });
 
-test('the HQ Map opens in Flow with three labelled lanes and the switch (767 FR2, FR5)', () => {
+test('the HQ opens in Grounds unless Flow was selected; Flow keeps its lanes and switch', () => {
   const view = Object.create(WorkspaceCommandView.prototype);
   Object.assign(view, {
     selectedAgentKey: '',
     activeMapWindow: '',
     page: { workspace: { id: 'hq-1', designation: 'personal_hq' }, tasks: [] }
   });
+  assert.match(
+    view.renderOperationsMap(),
+    /data-cmd-map-arrangement="free" aria-pressed="true">Grounds</
+  );
+  view.mapArrangement = 'flow';
   const html = view.renderOperationsMap();
   assert.match(html, /class="ws-cmd-map-shell is-hq is-flow"/);
   assert.match(html, /role="region" aria-label="Workspace operations map"/);
   assert.match(html, /role="group" aria-label="Map arrangement"/);
   assert.match(html, /data-cmd-map-arrangement="flow" aria-pressed="true">Flow</);
-  assert.match(html, /data-cmd-map-arrangement="free" aria-pressed="false">Free</);
+  assert.match(html, /data-cmd-map-arrangement="free" aria-pressed="false">Grounds</);
   const lanes = [
     ...html.matchAll(/<section class="ws-cmd-flow-lane[^"]*" aria-labelledby="([^"]+)"/g)
   ];
@@ -604,7 +607,7 @@ test('switching the arrangement remembers it and redraws the map alone (767 FR2,
           selector === '.ws-cmd-map-shell' ? shell : { focus: () => focused.push(selector) }
       }
     });
-    assert.equal(view.currentMapArrangement(), 'flow');
+    assert.equal(view.currentMapArrangement(), 'free');
     view.setMapArrangement('free');
     assert.equal(stored['oriWorkspaceMapArrangement:hq'], 'free');
     assert.equal(view.currentMapArrangement(), 'free');
@@ -685,6 +688,8 @@ test('the Needs you window shows the HQ panel and hands focus back on close', ()
   const view = Object.create(WorkspaceCommandView.prototype);
   Object.assign(view, {
     selectedAgentKey: '',
+    mapArrangement: 'flow',
+    mapArrangementFor: 'hq',
     activeMapWindow: 'needs-you',
     page: { workspace: { id: 'hq', designation: 'personal_hq' }, tasks: [] }
   });
@@ -6675,7 +6680,9 @@ test('renderOperationsMap adds is-hq to the map shell only for the designated HQ
       buildAgentGroups: () => []
     }
   });
-  // The HQ Map opens in Flow (PRD 767): stations are lane nodes, not buildings.
+  // With Flow selected, stations are lane nodes, not buildings.
+  commandView.mapArrangement = 'flow';
+  commandView.mapArrangementFor = 'ws-1';
   const flowHTML = commandView.renderOperationsMap();
   assert.match(flowHTML, /ws-cmd-map-shell is-hq is-flow/);
   assert.match(flowHTML, /class="ws-cmd-flow-node[^"]*" data-cmd-hq-station="email"/);
@@ -10738,7 +10745,7 @@ test('first-visit tips: they run on the Details view and the Flow Map of the HQ 
   assert.equal(scope('pending'), 'overview');
   assert.equal(scope('done'), '');
   assert.equal(scope(''), '');
-  assert.equal(scope('pending', { viewMode: 'map' }), 'flow');
+  assert.equal(scope('pending', { viewMode: 'map', isHQFlowMap: () => true }), 'flow');
   assert.equal(scope('done', { viewMode: 'map' }), '');
   assert.equal(
     scope('pending', { viewMode: 'map', isHQFlowMap: () => false }),
@@ -11280,7 +11287,7 @@ function flowTipView({ store = tipStore(), notes = TIP_NOTES.created, free = fal
     // page; this fixture has no page to repaint.
     render() {}
   });
-  if (free) Object.assign(view, { mapArrangement: 'free', mapArrangementFor: 'hq-1' });
+  Object.assign(view, { mapArrangement: free ? 'free' : 'flow', mapArrangementFor: 'hq-1' });
   return view;
 }
 

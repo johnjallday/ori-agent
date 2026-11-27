@@ -393,7 +393,8 @@ test.describe('File Janitor console accessibility', () => {
 
     await page.getByRole('button', { name: 'Map', exact: true }).click();
     const station = page.getByRole('button', {
-      name: new RegExp(`Filing station, managed folder ${basename(root)}, 1 file ready for review`)
+      name: 'Filing · 1 to review',
+      exact: true
     });
     await expect(station).toBeVisible();
     await station.focus();
@@ -753,7 +754,10 @@ test.describe('Filing picture accessibility', () => {
   test.describe('Possible-copy decision controls', () => {
     test.use({ hasTouch: true });
     for (const theme of ['light', 'dark']) {
-      test(`stay reachable with a coarse pointer and zoom-equivalent reflow (${theme})`, async ({ page, request }) => {
+      test(`stay reachable with a coarse pointer and zoom-equivalent reflow (${theme})`, async ({
+        page,
+        request
+      }) => {
         const names = ['Reader guide.pdf', 'Reader guide (2).pdf', 'photo.png'];
         await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
         await page.setViewportSize({ width: 390, height: 844 });
@@ -768,7 +772,9 @@ test.describe('Filing picture accessibility', () => {
         expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
         expect((await jump.boundingBox())!.height).toBeGreaterThanOrEqual(44);
         await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
-        await page.addScriptTag({ path: fileURLToPath(new URL('../node_modules/axe-core/axe.min.js', import.meta.url)) });
+        await page.addScriptTag({
+          path: fileURLToPath(new URL('../node_modules/axe-core/axe.min.js', import.meta.url))
+        });
         expect(await axeViolations(page, '#fileJanitorPicture')).toEqual([]);
 
         await jump.focus();
@@ -791,11 +797,17 @@ test.describe('Filing picture accessibility', () => {
           const focused = await choice.boundingBox();
           const footer = await review.locator('.fj-footer').boundingBox();
           expect(focused!.y + focused!.height).toBeLessThanOrEqual(footer!.y);
-          expect(await picture.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+          expect(await picture.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(
+            true
+          );
         }
         const evidence = 'tasks/evidence-downloads-review-decisions';
         mkdirSync(evidence, { recursive: true });
-        await page.screenshot({ path: join(evidence, `04-zoom-equivalent-${theme}.png`), mask: [review.locator('.fj-console-folder')], maskColor: '#888' });
+        await page.screenshot({
+          path: join(evidence, `04-zoom-equivalent-${theme}.png`),
+          mask: [review.locator('.fj-console-folder')],
+          maskColor: '#888'
+        });
       });
     }
   });

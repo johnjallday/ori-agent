@@ -445,8 +445,9 @@ for (const theme of ['light', 'dark']) {
     try {
       await openHQMap();
       const operationsMap = page.getByRole('region', { name: 'Workspace operations map' });
-      await expect(page.locator('.ws-cmd-map-shell.is-hq.is-flow')).toBeVisible();
       const arrangement = page.getByRole('group', { name: 'Map arrangement' });
+      await arrangement.getByRole('button', { name: 'Flow' }).click();
+      await expect(page.locator('.ws-cmd-map-shell.is-hq.is-flow')).toBeVisible();
       await expect(arrangement.getByRole('button', { name: 'Flow' })).toHaveAttribute(
         'aria-pressed',
         'true'
@@ -533,7 +534,7 @@ for (const theme of ['light', 'dark']) {
       await page.setViewportSize({ width: 1440, height: 900 });
 
       // Free keeps its actual buildings and arrangement, with shared destinations.
-      await arrangement.getByRole('button', { name: 'Free' }).click();
+      await arrangement.getByRole('button', { name: 'Grounds' }).click();
       await expect(page.locator('.ws-cmd-map-shell.is-hq:not(.is-flow)')).toBeVisible();
       await expect(operationsMap.locator('.ws-cmd-map-belt')).toHaveCount(0);
       await expect(operationsMap.locator('.ws-cmd-map-hq-station').first()).toBeFocused();
@@ -591,7 +592,9 @@ for (const theme of ['light', 'dark']) {
       await openHQMap();
       await expect(page.locator('.ws-cmd-map-shell.is-hq:not(.is-flow)')).toBeVisible();
       await expect(
-        page.getByRole('group', { name: 'Map arrangement' }).getByRole('button', { name: 'Free' })
+        page
+          .getByRole('group', { name: 'Map arrangement' })
+          .getByRole('button', { name: 'Grounds' })
       ).toHaveAttribute('aria-pressed', 'true');
       await page
         .getByRole('group', { name: 'Map arrangement' })
