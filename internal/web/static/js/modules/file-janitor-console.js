@@ -5043,11 +5043,19 @@
     const filingId = result.filing_id || '';
     const fromJournal = await readReceiptModel(scope, filingId, Boolean(result.replayed));
     if (!scopeCurrent(scope)) return;
-    renderResults({
-      kind: 'receipt',
-      filingId,
-      model: fromJournal || drawing.receiptModelFromResult(result)
-    });
+    const model = fromJournal || drawing.receiptModelFromResult(result);
+    // Identify the files on the depot receipt from actual applied outcomes,
+    // never from the proposed names, the selection, or the current batch.
+    if (document.getElementById(CONSOLE_HOST_ID)?.getAttribute('data-fj-map-side')) {
+      model.filedNames = (result.outcomes || [])
+        .filter(
+          item =>
+            item.result === 'applied' &&
+            ['move', 'place', 'deliver', 'send'].includes(item.operation)
+        )
+        .map(item => safeName(item.name));
+    }
+    renderResults({ kind: 'receipt', filingId, model });
   }
 
   // The receipt as the server's journal tells it, or null when it cannot be read.
@@ -5289,11 +5297,11 @@
   }
 
   function compactFolderName(path) {
-    const fullPath = safeName(path, 'Not connected');
-    if (fullPath === 'Not connected') return fullPath;
-    const trimmed = fullPath.replace(/[\\/]+$/, '');
-    const parts = trimmed.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? safeName(parts[parts.length - 1], fullPath) : fullPath;
+    // Extract the last component before truncating a long ancestor path.
+    const parts = String(path || '')
+      .split(/[\\/]/)
+      .filter(Boolean);
+    return safeName(parts.at(-1) || path, 'Not connected');
   }
 
   // The Details card uses the same small depot identity as the Map station,
@@ -6212,6 +6220,7 @@
     if (!consoleOpen || (!disposed && !options.viaCoordinator && filingInFlight())) return false;
     // Leaving a confirmation is cancellation, never a first press that can
     // unexpectedly arm a destructive second press on the next visit.
+    if (revokeConfirmed) setSettingsMessage('');
     revokeConfirmed = false;
     removalConfirming = false;
     removalCompanionChecked = false;
@@ -6483,7 +6492,11 @@
       // filename is: a folder can be named as adversarially as a file.
       const folder = settings.root_path ? safeName(settings.root_path) : '';
       if (folder) {
-        const name = el('p', 'fj-console-folder', depotBar ? compactFolderName(folder) : folder);
+        const name = el(
+          'p',
+          'fj-console-folder',
+          depotBar ? compactFolderName(settings.root_path) : folder
+        );
         name.title = folder;
         heading.appendChild(name);
       }

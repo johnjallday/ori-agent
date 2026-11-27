@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { mkdtemp, readFile, readdir, realpath, utimes, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { freshGuidedHQ } from './helpers/fresh-guided-hq';
+import { filingWorkspace } from './helpers/filing-workspace';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 // scripts/e2e-fresh.sh --sandbox-env GROUNDS_SANDBOX tests/hq-grounds.spec.ts -- --workers=1
@@ -9,17 +10,22 @@ const sandbox = process.env.GROUNDS_SANDBOX;
 test.skip(!sandbox, 'requires a fresh isolated demo server');
 test.use({ viewport: { width: 1280, height: 900 }, hasTouch: true });
 
-test('HQ grounds: review without filing, place a building, remember Flow', async ({
-  page,
-  request
-}, info) => {
-  test.setTimeout(90_000);
-  await page.emulateMedia({ reducedMotion: 'reduce' });
+async function ownedSandbox() {
   const home = await realpath(sandbox!);
   expect(basename(home)).toMatch(/^ori-e2e\./);
   expect(await readFile(join(home, '.ori-demo-owner'), 'utf8')).toBe(
     `worktree=${await realpath(process.cwd())}\n`
   );
+  return home;
+}
+
+test('HQ grounds: review beside the depot, remember the map, file only on request', async ({
+  page,
+  request
+}, info) => {
+  test.setTimeout(90_000);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const home = await ownedSandbox();
   const path = await freshGuidedHQ(request);
   const post = async (url: string, data = {}) => {
     const r = await request.post(url, { data });
@@ -107,6 +113,12 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
   await expect(depot).toBeFocused();
   await page.goForward();
   await expect(review.locator('.fj-depot-bar')).toBeVisible();
+  await review.getByRole('tab', { name: 'Settings' }).click();
+  await review.getByRole('button', { name: 'Stop using this folder' }).click();
+  await expect(review).toContainText('again to confirm');
+  await page.keyboard.press('Escape');
+  await expect(review).toBeVisible();
+  // A deliberate exit cancels the first press; it never revokes the folder.
   await review.getByRole('button', { name: 'Back to map' }).click();
   await expect(depot).toBeFocused();
   for (const name of files)
@@ -215,6 +227,8 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
   await expect(receipt).toContainText('1 file stays loose');
   await expect(receipt).toContainText('Filed/Documents');
   await expect(receipt).toContainText('Filed/Images');
+  await receipt.getByText('Filed files', { exact: true }).tap();
+  await expect(receipt.locator('.fj-receipt-files li')).toHaveText(['brief.pdf', 'map.png']);
   await page.screenshot({ path: info.outputPath('depot-receipt.png') });
   expect(fileRequests).toHaveLength(1);
   expect((await readdir(root)).sort()).toEqual(['Filed', loose].sort());
@@ -227,8 +241,67 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
   }
   expect(await readFile(join(root, loose), 'utf8')).toBe('Example: ' + loose);
 
+  await review.getByRole('button', { name: 'Back to map' }).tap();
+  await expect(depot).toBeFocused();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.locator('[data-cmd-view-mode="details"]').click();
+  const overview = page
+    .getByRole('region', { name: 'Stations', exact: true })
+    .getByRole('button', { name: /Filing/ });
+  await overview.click();
+  await expect(review.getByRole('button', { name: 'Close Filing' })).toBeVisible();
+  await expect(review.locator('.fj-depot-bar')).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath('overview-console.png') });
+  await review.getByRole('button', { name: 'Close Filing' }).click();
+  await page.goto(path + '?mode=map&panel=file-janitor&tab=review');
+  await expect(review.getByRole('tab', { name: 'Review' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  );
+  await expect(review.locator('.fj-depot-bar')).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath('linked-review.png') });
+  expect(fileRequests).toHaveLength(1);
+
   const ordinary = (await (await post('/api/workspaces', { name: 'Archive only' })).json()).folder;
   await page.goto(`/workspaces/${ordinary.folder_slug}?mode=map`);
   await expect(page.locator('[data-cmd-hq-station="memory"]')).toBeVisible();
   await expect(page.locator('[data-station-visual="depot"], .ws-cmd-grounds')).toHaveCount(0);
+});
+
+test('a long depot review keeps the last page and way out reachable at high zoom', async ({
+  page,
+  request
+}, info) => {
+  const root = await mkdtemp(join(await ownedSandbox(), 'sheet-inbox-'));
+  const names = Array.from({ length: 55 }, (_, i) => `study-${String(i).padStart(2, '0')}.png`);
+  const old = new Date(Date.now() - 3600000);
+  for (const name of names) {
+    await writeFile(join(root, name), name);
+    await utimes(join(root, name), old, old);
+  }
+  expect((await request.post('/api/onboarding/skip', { data: {} })).ok()).toBeTruthy();
+  const ws = await filingWorkspace(request, 'Reflow', root);
+  await installLocalCdn(page);
+  const nudge = page.locator('#workspace-detail-task-confirm-modal');
+  await page.addLocatorHandler(nudge, () =>
+    nudge.getByRole('button', { name: 'Not now', exact: true }).click()
+  );
+  await page.goto(`/workspaces/${ws.slug}?mode=map`);
+  const depot = page.locator('.ws-cmd-map-hq-station[data-cmd-hq-station="file-janitor"]');
+  await depot.click();
+  const review = page.getByRole('dialog', { name: 'Filing', exact: true });
+  await review.getByRole('button', { name: 'All files', exact: true }).click();
+  await expect(review.getByRole('button', { name: 'File 55 files', exact: true })).toBeEnabled();
+  await page.setViewportSize({ width: 195, height: 422 });
+  await review.getByRole('button', { name: 'Next', exact: true }).tap();
+  const last = review.getByRole('checkbox', { name: 'Select study-54.png' });
+  await last.uncheck();
+  const file = review.getByRole('button', { name: 'File 54 files', exact: true });
+  await file.scrollIntoViewIfNeeded();
+  await expect(file).toBeInViewport();
+  await expect(review.getByRole('button', { name: 'Back to map' })).toBeInViewport();
+  await page.screenshot({ path: info.outputPath('long-review-zoom.png') });
+  await review.getByRole('button', { name: 'Back to map' }).tap();
+  await expect(depot).toBeFocused();
+  expect((await readdir(root)).filter(name => name.endsWith('.png')).sort()).toEqual(names);
 });
