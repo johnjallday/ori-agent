@@ -420,6 +420,7 @@ export function placeCommanderMap(
     pinLine,
     onDismiss,
     onNarrow: ownNarrow,
+    inlineOnNarrow = false,
     doc = globalThis.document,
     win = globalThis.window
   } = {}
@@ -427,7 +428,7 @@ export function placeCommanderMap(
   const balloon = commanderBalloon(key, { doc });
   const narrow = () => {
     const width = Number(win?.innerWidth) || 0;
-    return width > 0 && width < BALLOON_NARROW_PX;
+    return !inlineOnNarrow && width > 0 && width < BALLOON_NARROW_PX;
   };
   const anchor = () => homeTileAnchor(root(), workspaceID);
   const visibleArea = () =>

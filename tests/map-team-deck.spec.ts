@@ -64,6 +64,23 @@ test('a nested group has its own map team; disclosure and chat are separate door
     await expect(tab).toBeFocused();
     await expect(deck).toBeHidden();
   }
+  const moved: string[] = [];
+  page.on('request', r => {
+    if (r.method() !== 'GET' && r.url().includes('/layout')) moved.push(r.method());
+  });
+  const camera = () => page.evaluate(() => (window as any).OriWorkspaceMap.getCamera());
+  const before = await camera();
+  await tab.click();
+  await tab.click();
+  expect(await camera()).toEqual(before);
+  await tab.click();
+  await deck.getByRole('button', { name: /Edit room/ }).click();
+  await expect(deck).toBeHidden();
+  await expect(page.locator(`[data-ws-id="${room.id}"][aria-pressed="true"]`)).toBeVisible();
+  expect((await camera()).zoom).toBeGreaterThanOrEqual(0.65);
+  expect(moved).toEqual([]);
+  await expect(page.locator('.is-just-placed')).toHaveCount(0);
+  await page.screenshot({ path: 'tasks/evidence-map-agent-deck/selected-place.png' });
   await page.locator('#personalAssistantLauncher').click();
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   await expect(tab).toBeHidden();

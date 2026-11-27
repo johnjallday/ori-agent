@@ -14658,7 +14658,10 @@ export class WorkspaceCommandView {
       if (took) event?.preventDefault?.();
     });
     // A mount draws its marks afresh and without aria-expanded.
-    host.addEventListener('ori:map-mounted', () => this.memberCommanders?.syncMarks());
+    host.addEventListener('ori:map-mounted', () => {
+      this.memberCommanders?.syncMarks();
+      this.mapTeamDeck?.update();
+    });
     this.detachmentMapEl = host;
     return host;
   }
@@ -15177,6 +15180,7 @@ export class WorkspaceCommandView {
     const { workspaces } = this.detachmentSnapshot();
     const state = memberFolderAgentState(views, workspaces, groupId);
     this.memberFolderAgents = { waits: state.waits, lines: state.lines, views: state.views };
+    this.mapTeamDeck?.update();
     this.syncHomeFeedControls();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (map && map.folderAgentWaits && typeof map.folderAgentWaits.update === 'function') {

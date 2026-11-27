@@ -1098,7 +1098,29 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
 .map-team-deck p {
   margin: 8px 4px 0;
 }
-.map-team-card {
+.map-team-deck [role="status"]:empty {
+  display: none;
+}
+.map-team-deck button {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.map-team-deck button:hover {
+  background: var(--ori-paper);
+}
+.map-team-places {
+  padding-inline-start: 40px;
+  list-style: none;
+}
+.map-team-wait {
+  color: var(--ori-accent-text);
+  font-weight: 700;
+}
+.map-team-deck .map-team-card {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1116,8 +1138,16 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
 .map-team-face .ws-map-av-label {
   display: none;
 }
-.map-team-face .ws-map-av,
-.map-team-face .ws-cmd-character {
+.map-team-face > :is(.ws-map-av, .ws-cmd-character) {
+  width: 40px;
+  min-width: 0;
+  height: 40px;
+  margin: 0;
+  place-items: center;
+}
+.map-team-face .ws-map-av-figure {
+  width: 30px;
+  height: 36px;
   margin: 0;
 }
 .map-team-card small {

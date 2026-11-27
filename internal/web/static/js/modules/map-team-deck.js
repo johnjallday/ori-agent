@@ -41,11 +41,33 @@ export function teamSnapshot(view) {
   return { cards, incomplete: !group };
 }
 
-function cardHTML(view, card) {
+function destination(card, place) {
+  return place.own ? { unitName: card.name } : { id: place.id };
+}
+
+function cardHTML(view, card, expanded) {
+  const map = globalThis.window?.OriWorkspaceMap;
+  const waits = view.currentMemberFolderAgents().waits;
+  const waiting = p => keyOf(waits[p.id]?.agent) === card.key;
+  const available = p => map?.canRevealTeamPlace(view.detachmentMapEl, destination(card, p));
+  const many = card.places.length > 1;
+  const key = escapeHtml(card.key);
   const portrait = card.places[0].own
     ? view.agentCharacterHTML({ name: card.name }, 'map')
     : view.memberAgentPortraitHTML(card.name, false);
-  return `<div class="map-team-card"><span class="map-team-face" aria-hidden="true">${portrait}</span><span><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.where)}</small></span></div>`;
+  const button = `<button type="button" class="map-team-card" data-team-agent="${key}" ${many ? `aria-expanded="${expanded}"` : ''}><span class="map-team-face" aria-hidden="true">${portrait}</span><span><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.where)}</small>${card.places.some(waiting) ? '<small class="map-team-wait">Has a question for you</small>' : ''}${!many && !available(card.places[0]) ? '<small>Cannot show on the map right now</small>' : ''}</span></button>`;
+  if (!many || !expanded) return button;
+  return (
+    button +
+    '<ul class="map-team-places">' +
+    card.places
+      .map(
+        p =>
+          `<li><button type="button" data-team-agent="${key}" data-team-place="${escapeHtml(p.own ? '' : p.id)}">${escapeHtml(p.name)}${waiting(p) ? ' · Has a question for you' : ''}${available(p) ? '' : ' · Cannot show on the map right now'}</button></li>`
+      )
+      .join('') +
+    '</ul>'
+  );
 }
 
 export function mountMapTeamDeck(view, dock) {
@@ -61,6 +83,9 @@ export function mountMapTeamDeck(view, dock) {
   list.hidden = true;
   dock.append(tab, list);
   let previous = '';
+  let expanded = '';
+  const status = document.createElement('p');
+  status.setAttribute('role', 'status');
 
   // Find clear vertical space on the pill's side. A selected song's card and
   // the map controls remain usable, even when the page is scrolled on a phone.
@@ -95,23 +120,69 @@ export function mountMapTeamDeck(view, dock) {
     if (list.hidden) return;
     const html =
       '<h2>Map team</h2>' +
-      cards.map(card => cardHTML(view, card)).join('') +
+      cards.map(card => cardHTML(view, card, card.key === expanded)).join('') +
       (incomplete
         ? '<p>Linked workspace membership is unavailable.</p>'
         : !cards.length
           ? '<p>No other agents work here.</p>'
           : '');
     if (html !== previous) {
+      const focus = list.contains(document.activeElement) ? document.activeElement.dataset : null;
       list.innerHTML = html;
+      list.append(status);
       previous = html;
+      if (focus) {
+        const next = [...list.querySelectorAll('button')].find(
+          el => el.dataset.teamAgent === focus.teamAgent && el.dataset.teamPlace === focus.teamPlace
+        );
+        (next || tab).focus({ preventScroll: true });
+      }
     }
     position();
   }
   function close(focus = false) {
     list.hidden = true;
+    expanded = '';
+    status.textContent = '';
     tab.setAttribute('aria-expanded', 'false');
     if (focus) tab.focus({ preventScroll: true });
   }
+  list.addEventListener('click', event => {
+    const el = event.target.closest('button[data-team-agent]');
+    if (!el) return;
+    // Re-resolve by identity, never by a stale array offset.
+    const { cards } = teamSnapshot(view);
+    const card = cards.find(c => c.key === el.dataset.teamAgent);
+    const requested = el.dataset.teamPlace;
+    if (card && requested === undefined && card.places.length > 1) {
+      expanded = expanded === card.key ? '' : card.key;
+      status.textContent = '';
+      update();
+      return;
+    }
+    const place =
+      requested === undefined
+        ? card?.places[0]
+        : card?.places.find(p => (p.own ? '' : p.id) === requested);
+    if (
+      !place ||
+      !window.OriWorkspaceMap?.revealTeamPlace(view.detachmentMapEl, destination(card, place))
+    ) {
+      update();
+      status.textContent = 'Cannot show this place on the map right now.';
+      return;
+    }
+    close(true);
+    view.detachmentMapEl.scrollIntoView({ block: 'center', behavior: 'instant' });
+    if (place.own) {
+      view.selectedAgentKey = view.normalizeAgentKey(card.name);
+      view.agentSelectionInitialized = true;
+    }
+    const state = view.currentMemberFolderAgents();
+    if (keyOf(state.waits[place.id]?.agent) === card.key) {
+      view.memberCommanderSet().show({ workspaceId: place.id, count: 1, fromDeck: true }, state);
+    }
+  });
   const click = () => {
     if (!list.hidden) return close(true);
     list.hidden = false;

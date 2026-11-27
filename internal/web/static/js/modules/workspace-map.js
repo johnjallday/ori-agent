@@ -11990,6 +11990,39 @@
 
   // Reveal a real building or district (including an empty/collapsed Home).
   // Navigation is not a layout write, nor consent to complete a move.
+  // Team lookup is deliberately scoped to this mounted map, not a layout
+  // position saved for a now-hidden member. No Move, placement or unit sheet.
+  function teamTarget(host, place) {
+    if (
+      !host ||
+      lastMount?.container !== host ||
+      !scopeGroupId ||
+      host.inert ||
+      moveModeEnabled ||
+      moveState ||
+      placementSession ||
+      layoutState.status !== 'ready'
+    )
+      return null;
+    if (place.unitName)
+      return lastWorldLayout?.units?.find(record => record.unit.name === place.unitName);
+    return renderedDistrict(place.id) || lastWorldLayout?.nodes?.find(node => node.id === place.id);
+  }
+
+  function frameReadable(container, target) {
+    var box = placedBounds([target], [target.id]);
+    box.minY -= COMPACT_HOME_HEADER_CLEARANCE;
+    var viewport = viewportSize(container.querySelector('[data-ws-map-viewport]'));
+    var framed = fitBounds(box, viewport, 40);
+    // Lead with a large district's label rather than distant, tiny tiles.
+    if (framed.zoom < 0.65) {
+      framed.zoom = 0.65;
+      framed.centerY = box.minY + viewport.height / (2 * framed.zoom) - 20;
+    }
+    framed.zoom = Math.min(1, framed.zoom);
+    setCamera(framed, container, { persist: false });
+  }
+
   function reveal(workspaceId, options) {
     var container = lastMount && lastMount.container;
     var id = String(workspaceId || '').trim();
@@ -12008,27 +12041,7 @@
     if (options?.frameFolder) {
       // Navigation only. A nested folder may be drawn as a tile rather than
       // a district. Don't enter placement mode or pulse a newly built tile.
-      var box = placedBounds(district ? [district] : lastWorldLayout.nodes, [id]);
-      if (box) {
-        box.minY -= COMPACT_HOME_HEADER_CLEARANCE;
-        var folderCamera = fitBounds(
-          box,
-          viewportSize(container.querySelector('[data-ws-map-viewport]')),
-          40
-        );
-        // A large district can be bigger than the viewport at a legible zoom.
-        // In that case lead with its label instead of distant tiny tiles.
-        if (folderCamera.zoom < 0.65) {
-          folderCamera.zoom = 0.65;
-          folderCamera.centerY =
-            box.minY +
-            viewportSize(container.querySelector('[data-ws-map-viewport]')).height /
-              (2 * folderCamera.zoom) -
-            20;
-        }
-        folderCamera.zoom = Math.min(1, folderCamera.zoom);
-        setCamera(folderCamera, container, { persist: false });
-      }
+      frameReadable(container, district || lastWorldLayout.nodes.find(node => node.id === id));
     } else if (district && district.width < 320 && template && template.kind === 'managed_home') {
       // Show the empty Home, not a tiny district left at Fit-all's zoom. Its
       // identity/actions must remain reachable on narrow screens. Reserve the
@@ -13203,6 +13216,20 @@
     // Arrow keys move it and Enter saves; Escape or leaving writes nothing.
     beginMove: beginMove,
     reveal: reveal,
+    canRevealTeamPlace: (host, place) => Boolean(teamTarget(host, place)),
+    revealTeamPlace: function (host, place) {
+      var target = teamTarget(host, place);
+      if (!target) return false;
+      if (!place.unitName)
+        return reveal(target.id, { frameFolder: true, onSelect: lastMount.state.onSelect });
+      applySelection(host, lastMount.state.workspaces, '', { onSelect: lastMount.state.onSelect });
+      frameReadable(host, target);
+      this.updateUnits(
+        host,
+        scopeUnits.map(unit => ({ ...unit, selected: unit.id === target.id }))
+      );
+      return true;
+    },
     frameHQCreation: frameHQCreation,
     playHQAssembly: playHQAssembly,
     playAssembly: playAssembly,
