@@ -27,10 +27,14 @@ func placeFolderWorkspaceInHome(store folderHomePlacementStore, workspaceID, hom
 			return err
 		}
 	}
+	promoteFolderInHome(store, workspaceID, homeID)
+	return nil
+}
+
+func promoteFolderInHome(store workspace.PromoteStore, workspaceID, homeID string) {
 	if _, err := workspace.PromoteWorkspaceToGroup(store, workspaceID); err != nil {
 		logger.Warn("Folder workspace stays a plain workspace inside its Home", logger.Fields{
 			"workspace_id": workspaceID, "home_id": homeID, "error": err,
 		})
 	}
-	return nil
 }

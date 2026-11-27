@@ -931,6 +931,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/commit", s.Handlers.Session.CommitAssistantProviderUpgrade)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/outcome", s.Handlers.Session.OutcomeAssistantProviderUpgrade)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/roots", s.Handlers.Session.ListAssistantLibraryRoots)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/map-folders", s.Handlers.Session.GetHomeMapFolders)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/summary", s.Handlers.Session.GetAssistantLibrarySummary)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/roster", s.Handlers.Session.GetAssistantLibraryRoster)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/song-card", s.Handlers.Session.GetSongCard)

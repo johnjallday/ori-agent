@@ -26,20 +26,7 @@ func CoveringFolderWorkspace(workspaces []*Workspace, lookup WorkspaceLookup, st
 	anchors := make(map[string]string, len(workspaces))
 	byID := make(map[string]*Workspace, len(workspaces))
 	for _, candidate := range workspaces {
-		if candidate == nil || candidate.ID == stationID || candidate.Status == StatusTrashed || candidate.Status == StatusMissing ||
-			candidate.AssistantProgramState != nil || candidate.AssistantProjectLink != nil ||
-			!ParentInsideStation(lookup, candidate.ID, candidate.ParentID, stationID) {
-			continue
-		}
-		anchorID := candidate.AnchorDirectoryReferenceID()
-		if anchorID == "" {
-			continue
-		}
-		reference, err := candidate.GetDirectoryReference(anchorID)
-		if err != nil || reference == nil {
-			continue
-		}
-		if anchor := comparablePath(reference.Path); anchor != "" {
+		if anchor := StationFolderAnchor(lookup, candidate, stationID); anchor != "" {
 			anchors[candidate.ID] = anchor
 			byID[candidate.ID] = candidate
 		}
@@ -48,6 +35,23 @@ func CoveringFolderWorkspace(workspaces []*Workspace, lookup WorkspaceLookup, st
 		return byID[id]
 	}
 	return nil
+}
+
+// StationFolderAnchor is the single fed-folder rule for placement and the Home
+// map. Its result is a server-only comparison key, never a path grant.
+func StationFolderAnchor(lookup WorkspaceLookup, candidate *Workspace, stationID string) string {
+	if candidate == nil || candidate.Status == StatusTrashed || candidate.Status == StatusMissing || candidate.AssistantProgramState != nil || candidate.AssistantProjectLink != nil || !WorkspaceInsideStation(lookup, candidate, stationID) {
+		return ""
+	}
+	id := candidate.AnchorDirectoryReferenceID()
+	if id == "" {
+		return ""
+	}
+	ref, err := candidate.GetDirectoryReference(id)
+	if err != nil || ref == nil {
+		return ""
+	}
+	return comparablePath(ref.Path)
 }
 
 // deepestCoveringAnchor picks, among id → anchor path, the deepest anchor

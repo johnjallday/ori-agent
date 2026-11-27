@@ -12005,7 +12005,31 @@
     applySelection(container, (lastMount.state && lastMount.state.workspaces) || [], id, options);
     var anchor = selectedNodeAnchor();
     var template = district && district.ws && district.ws.group_template;
-    if (district && district.width < 320 && template && template.kind === 'managed_home') {
+    if (options?.frameFolder) {
+      // Navigation only. A nested folder may be drawn as a tile rather than
+      // a district. Don't enter placement mode or pulse a newly built tile.
+      var box = placedBounds(district ? [district] : lastWorldLayout.nodes, [id]);
+      if (box) {
+        box.minY -= COMPACT_HOME_HEADER_CLEARANCE;
+        var folderCamera = fitBounds(
+          box,
+          viewportSize(container.querySelector('[data-ws-map-viewport]')),
+          40
+        );
+        // A large district can be bigger than the viewport at a legible zoom.
+        // In that case lead with its label instead of distant tiny tiles.
+        if (folderCamera.zoom < 0.65) {
+          folderCamera.zoom = 0.65;
+          folderCamera.centerY =
+            box.minY +
+            viewportSize(container.querySelector('[data-ws-map-viewport]')).height /
+              (2 * folderCamera.zoom) -
+            20;
+        }
+        folderCamera.zoom = Math.min(1, folderCamera.zoom);
+        setCamera(folderCamera, container, { persist: false });
+      }
+    } else if (district && district.width < 320 && template && template.kind === 'managed_home') {
       // Show the empty Home, not a tiny district left at Fit-all's zoom. Its
       // identity/actions must remain reachable on narrow screens. Reserve the
       // badge line even if its asynchronous read has not returned yet.

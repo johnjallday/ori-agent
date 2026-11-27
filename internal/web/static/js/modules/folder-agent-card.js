@@ -3729,6 +3729,11 @@ export function followFolderAgent(
 const reportFollows = new WeakMap();
 const workspacePermissionWatches = new WeakMap();
 
+export function unmountWorkspaceFolderAgent(host) {
+  workspacePermissionWatches.get(host)?.();
+  workspacePermissionWatches.delete(host);
+}
+
 // mountFolderAgentReports draws every folder agent report among Today items
 // into host, wiring the actions. onDone runs after an action posted and when
 // a followed look or run ends. A run watched to its end opens the place.
@@ -4040,6 +4045,7 @@ export async function mountWorkspaceFolderAgent(
   };
   doc.addEventListener?.('ori:file-janitor-changed', permissionChanged);
   workspacePermissionWatches.set(host, () => {
+    stop();
     stopped = true;
     doc.removeEventListener?.('ori:file-janitor-changed', permissionChanged);
   });

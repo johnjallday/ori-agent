@@ -11046,6 +11046,67 @@ button.ws-cmd-rpg-class-card:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
 }
+.ws-home-feed {
+  width: min(36rem, calc(100% - 2rem));
+  max-height: 85dvh;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+.ws-home-feed::backdrop {
+  background: rgba(0, 0, 0, 0.48);
+}
+.ws-home-feed > button {
+  display: block;
+  margin: 0 0 0.5rem auto;
+}
+.ws-map-folder-names {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.ws-map-folder-chip {
+  display: inline-flex;
+  align-items: stretch;
+  max-width: 100%;
+  border: 1px solid var(--ws-line);
+  border-radius: 0.5rem;
+  color: var(--ws-ink);
+}
+.ws-map-folder-chip button {
+  border: 0;
+  background: transparent;
+  border-radius: inherit;
+  padding: 0.35rem 0.55rem;
+  color: inherit;
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.ws-map-folder-chip .ws-folder-setup {
+  border-inline-start: 1px solid var(--ws-line);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  color: var(--ws-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ws-map-folder-chip button:hover,
+.ws-map-folder-chip button:focus-visible {
+  background: var(--ws-panel-raised, var(--ws-line));
+}
+.ws-home-folder-more .ws-cmd-disclosure-body {
+  z-index: 8;
+  max-height: 48vh;
+  overflow: auto;
+}
+[data-cmd-home-feed-slot]:empty {
+  display: none;
+}
 /* Toolbar space is outside the canvas: do not cover or relocate saved stations. */
 .ws-cmd-map-toolbar,
 .ws-cmd-map-group-bar {

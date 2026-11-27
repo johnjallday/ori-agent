@@ -3,6 +3,7 @@ package folderagent
 import (
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -18,6 +19,18 @@ const (
 	// MaxScopedScans bounds the scoped scans one Set it up commits.
 	MaxScopedScans = 48
 )
+
+// A scoped look can offer local tools or an in-place group, but never offer
+// the model or the owner a Home step that would relocate their workspace.
+func (rec *Record) setupCandidates(facts foldermap.Facts, ready folderlook.Readiness) []folderlook.Candidate {
+	candidates := folderlook.CandidatesForPolicy(rec.RootPolicy, facts, ready)
+	if rec.InOriginHome {
+		candidates = slices.DeleteFunc(candidates, func(c folderlook.Candidate) bool {
+			return c.Kind == folderlook.KindHomeProvider && c.HomeProviderKey != rec.FedFromHome
+		})
+	}
+	return candidates
+}
 
 // LibraryScope is one scope the Home's library issued for the root: its id
 // and its folder relative to the root.
@@ -181,8 +194,12 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 			Name:   fmt.Sprintf("Looks into %d %s for %s", n, plural(n, "folder", "folders"), foldermap.ShapeNoun(folderdigest.Shape(shapeOf(rec)), 2)),
 			Detail: "Only the folders the walk found holding them, within the library's own scan limits."})
 	}
+	placement := "Places " + rec.WorkspaceName + " inside your " + name
+	if rec.InOriginHome {
+		placement = "Prepares " + rec.WorkspaceName + " to hold projects"
+	}
 	lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanPlace,
-		Name:   "Places " + rec.WorkspaceName + " inside your " + name,
+		Name:   placement,
 		Detail: rec.AgentName + " stays its agent; the Home's Library Manager keeps the shelf up to date."})
 	return lines
 }

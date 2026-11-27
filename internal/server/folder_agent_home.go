@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // folderAgentRootResolver hands the library the folder agent's own anchored
@@ -55,6 +56,18 @@ type homeStageStop struct {
 
 func (s *homeStageStop) Error() string { return s.reason + ": " + s.cause.Error() }
 
+// A saved origin alone is not authority to write a Home or move a child back.
+func (b *ServerBuilder) mapFeedStillContained(rec folderagent.Record) bool {
+	if !rec.InOriginHome {
+		return true
+	}
+	if rec.OriginHomeID == "" || rec.FedFromHome == "" || (folderAgentHomes{b}).WritableMapFeedProvider(rec.OwnerUserID, rec.OriginHomeID) != rec.FedFromHome {
+		return false
+	}
+	child, err := b.workspaceStore.Get(rec.WorkspaceID)
+	return err == nil && child != nil && child.OwnerUserID == rec.OwnerUserID && child.ParentID == rec.OriginHomeID && child.GetStatus() != workspace.StatusTrashed && child.GetStatus() != workspace.StatusMissing
+}
+
 // runFolderAgentHome is the Home stage (PRD FR37, FR38, FR39): the provider at
 // its reviewed release, the user's Home (found, or created through the
 // reviewed Home creation with its required roles), the library on, the fed
@@ -85,7 +98,7 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 			provider = candidate
 		}
 	}
-	if provider.Key == "" {
+	if provider.Key == "" || (rec.InOriginHome && provider.Key != rec.FedFromHome) {
 		return stop(personalassistant.FolderStopPlanChanged, errors.New("unknown Home provider"))
 	}
 	owner, key := rec.OwnerUserID, "folder-agent-"+rec.WorkspaceID
@@ -153,6 +166,9 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	if err != nil {
 		setLine(homeLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, err)
+	}
+	if rec.InOriginHome && (station == nil || station.ID != rec.OriginHomeID || !b.mapFeedStillContained(rec)) {
+		return stop(personalassistant.FolderStopPlanChanged, errors.New("the folder's Home changed"))
 	}
 	homeID := ""
 	created := false
@@ -282,8 +298,10 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 
 	// The listings: the root, then the scopes leading to the songs.
 	rec.Facts = plan.ListingFacts(rec.Facts)
+	// The arrival sheet belongs to this feed, including a flat folder with
+	// no branch choices. Other roots on the shelf are not part of this run.
+	receipt.rootID = rootID
 	if plan.BranchLook != "" {
-		receipt.rootID = rootID
 		key += "-" + plan.Digest[:16]
 	}
 	listing, err := listFolderAgentSongs(ctx, b.sessionHandler, rec, owner, homeID, rootID, key,
@@ -301,17 +319,23 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	// No goal is written: the agent's suggested goal is offered once the run
 	// is done, and only the owner's answer sets one.
 	placeLine := line(folderagent.FolderPlanPlace)
-	setLine(placeLine, personalassistant.FolderLineWorking, "Placing "+rec.WorkspaceName)
+	setLine(placeLine, personalassistant.FolderLineWorking, "Preparing "+rec.WorkspaceName)
 	store, ok := b.workspaceStore.(folderHomePlacementStore)
 	if !ok {
 		setLine(placeLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, errors.New("the workspace cannot be moved"))
 	}
-	if err := placeFolderWorkspaceInHome(store, rec.WorkspaceID, homeID); err != nil {
+	if rec.InOriginHome {
+		if !b.mapFeedStillContained(rec) {
+			setLine(placeLine, personalassistant.FolderLineFailed, "")
+			return stop(personalassistant.FolderStopPlanChanged, errors.New("the folder's Home changed"))
+		}
+		promoteFolderInHome(store, rec.WorkspaceID, homeID)
+	} else if err := placeFolderWorkspaceInHome(store, rec.WorkspaceID, homeID); err != nil {
 		setLine(placeLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, err)
 	}
-	setLine(placeLine, personalassistant.FolderLineDone, "Placed "+rec.WorkspaceName+" inside your "+homeName)
+	setLine(placeLine, personalassistant.FolderLineDone, rec.WorkspaceName+" is inside your "+homeName)
 	if assistantStop != nil {
 		return receipt, assistantStop
 	}

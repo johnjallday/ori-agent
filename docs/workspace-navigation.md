@@ -68,6 +68,12 @@ an explicit unknown/unavailable state and an existing retry/repair destination.
 A rendered zero must come from a successful canonical read. An idle agent's
 **Ready to help** is not proof that a workspace has no queued work.
 
+## Folders on a Home’s map
+
+On a writable Music Production Home, **Map → + Add folder** opens the system folder picker. Hire the folder’s manager and review its plan, just as you would from **Explore a folder**. Choosing alone creates nothing. **Hire & build** creates the folder workspace and its manager inside this Home immediately, on both maps. **Set up** confirms the shelf and other steps you choose; it does not move the workspace to another Home. If you leave while the manager is looking, return to Map and press the pending folder’s name to reopen its card.
+
+Press a folder’s name to select and frame its station without moving anything. The song count is what is on the map; **n to set up** opens that folder’s shelf projects. Projects from shelf-only roots remain on the Home-wide setup button. Four folders are shown by name; the rest are in **more folders**. Ordinary groups and Homes without a fed folder keep **Linked workspaces**. **Add workspace** and **Group projects by folder** are separate controls.
+
 ## Files inside a workspace
 
 Open the workspace’s **Files** tab, then expand **Files** in Contents. A folder marked **Linked folder** shows the originals in a folder already connected to this workspace. Expand one folder at a time. **Stored in Ori** distinguishes the workspace’s own files when both are present. From a group, expand **Linked workspaces → member → Files** to browse that member without leaving the group or losing your place on Map.

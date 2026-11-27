@@ -101,6 +101,7 @@ import {
   memberFolderAgentState,
   memberSetupsFinished
 } from './member-folder-agents.js';
+import { openHomeFeed, pendingHomeFeeds, homeFolderChips } from './home-map-folders.js';
 import { memberCommanders } from './member-commanders.js';
 import { nodeAgentNames } from './linked-agents.js';
 import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
@@ -12755,6 +12756,39 @@ export class WorkspaceCommandView {
           ?.focus?.({ preventScroll: true });
         return;
       }
+      const folderRoot = event.target.closest('[data-cmd-folder-root]');
+      if (folderRoot) {
+        const menu = folderRoot.closest('details');
+        if (menu) menu.open = false;
+        this.openLibrarySetupSheet(
+          menu?.querySelector('summary') || folderRoot,
+          folderRoot.closest('[data-map-zone="detachment"]'),
+          folderRoot.dataset.cmdFolderRoot
+        );
+        return;
+      }
+      const frame = event.target.closest('[data-cmd-frame-folder]');
+      if (frame) {
+        const menu = frame.closest('details');
+        if (menu) {
+          menu.open = false;
+          menu.querySelector('summary')?.focus();
+        }
+        this.closeMusicFolders();
+        if (
+          !window.OriWorkspaceMap?.reveal(frame.dataset.cmdFrameFolder, {
+            frameFolder: true,
+            onSelect: (id, row) => this.selectDetachmentMember(id, row)
+          })
+        )
+          this.announceDetachment('This folder is not visible on the map yet.');
+        return;
+      }
+      const feed = event.target.closest('[data-cmd-home-feed]');
+      if (feed) {
+        this.openHomeMapFeed(feed.dataset.cmdHomeFeed);
+        return;
+      }
       const resources = event.target.closest('[data-cmd-map-resources]');
       if (resources) {
         this.openWorkspacePanel('resources', resources);
@@ -13768,6 +13802,106 @@ export class WorkspaceCommandView {
     });
   }
 
+  async loadHomeMapFolders() {
+    const id = this.workspaceId();
+    const token = (this.homeMapFolderToken || 0) + 1;
+    this.homeMapFolderToken = token;
+    let data = null;
+    if (this.groupTemplateStatus?.kind === 'managed_home' && id) {
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(id)}/assistant-program/map-folders`,
+          { cache: 'no-store' }
+        );
+        if (response.ok) data = await response.json();
+      } catch {
+        /* Failed reads offer no controls. */
+      }
+    }
+    if (id !== this.workspaceId() || token !== this.homeMapFolderToken) return;
+    this.homeMapFolders = data && { ...data, homeID: id };
+    this.syncHomeFeedControls();
+    this.syncSetupProjectsChip();
+  }
+
+  canFeedHome() {
+    return (
+      this.groupTemplateStatus?.kind === 'managed_home' &&
+      this.homeMapFolders?.can_add_folder === true &&
+      this.homeMapFolders.homeID === this.workspaceId()
+    );
+  }
+
+  homeFeedControlsHTML() {
+    if (!this.canFeedHome()) return '';
+    return '<button type="button" class="ws-cmd-nav-btn" data-cmd-home-feed="">+ Add folder</button>';
+  }
+
+  syncHomeFeedControls() {
+    const slot = this.container?.querySelector?.('[data-cmd-home-feed-slot]');
+    const html = this.homeFeedControlsHTML();
+    if (slot && slot.innerHTML !== html) slot.innerHTML = html;
+    const names = this.container?.querySelector?.('[data-cmd-folder-names]');
+    if (names) {
+      const markup = this.mapFolderNamesHTML();
+      if (names._folderMarkup !== markup) {
+        const wasOpen = names.querySelector('details')?.open;
+        names.innerHTML = markup;
+        names._folderMarkup = markup;
+        const more = names.querySelector('details');
+        if (more && wasOpen) more.open = true;
+      }
+    }
+  }
+
+  mapFolderNamesHTML() {
+    const owner = this.page?.membersPanel;
+    const count = owner?.group && !owner.readFailed ? this.detachmentMemberCount() : null;
+    if (
+      count !== null &&
+      this.homeMapFolders?.homeID === this.workspaceId() &&
+      this.groupTemplateStatus?.kind === 'managed_home'
+    ) {
+      const pending = this.canFeedHome()
+        ? pendingHomeFeeds(this.pendingHomeFeeds || [], this.workspaceId())
+        : [];
+      const chips = homeFolderChips(
+        this.homeMapFolders,
+        pending,
+        this.currentMemberFolderAgents().views
+      );
+      if (chips) return chips;
+    }
+    return (
+      '<span class="ws-cmd-map-group-bar-label">Linked workspaces</span>' +
+      `<span class="ws-cmd-map-zone-count" title="Members" aria-label="${count === null ? 'Workspace count unavailable' : count + (count === 1 ? ' member' : ' members')}">${count ?? '—'}</span>`
+    );
+  }
+
+  openHomeMapFeed(runID) {
+    if (!this.canFeedHome() || this.homeFeedDialog?.open) return;
+    const homeID = this.workspaceId();
+    const current = () =>
+      this.active &&
+      this.viewMode === 'map' &&
+      !this.page?._destroyed &&
+      this.workspaceId() === homeID;
+    this.homeFeedDialog = openHomeFeed({
+      homeID,
+      runID,
+      current,
+      navigate: route => this.navigateTo(route),
+      onStarted: () => {
+        if (current()) void this.handleWorkspacesChanged({});
+      },
+      onClose: () => {
+        this.homeFeedDialog = null;
+        if (current()) this.handleFolderAgentChanged();
+      },
+      restoreFocus: () => this.container?.querySelector?.('[data-cmd-home-feed=""]')?.focus()
+    });
+  }
+
   detachmentMemberCount() {
     const panel = this.page && this.page.membersPanel;
     const group = panel && panel.group;
@@ -13785,6 +13919,7 @@ export class WorkspaceCommandView {
     const created = String((event && event.detail && event.detail.workspaceId) || '');
     if (created) this.pendingDetachmentSelectionId = created;
     await panel.reload();
+    void this.loadHomeMapFolders();
     void this.detachmentFolderSelection?.refresh();
     this.render();
   }
@@ -13808,13 +13943,8 @@ export class WorkspaceCommandView {
       (count === 0 ? ' is-empty' : '') +
       '" data-map-zone="detachment" role="toolbar" aria-label="Group map controls">' +
       '<button type="button" class="ws-cmd-nav-btn" data-cmd-map-resources aria-haspopup="dialog">Resources</button>' +
-      '<span class="ws-cmd-map-group-bar-label">Linked workspaces</span>' +
-      '<span class="ws-cmd-map-zone-count" title="Members" aria-label="' +
-      (count === null
-        ? 'Workspace count unavailable'
-        : count + (count === 1 ? ' member' : ' members')) +
-      '">' +
-      (count === null ? '—' : count) +
+      '<span class="ws-map-folder-names" data-cmd-folder-names>' +
+      this.mapFolderNamesHTML() +
       '</span>' +
       '<span data-cmd-folder-toggle-slot' +
       (this.canBrowseMusicFolders() ? '' : ' hidden') +
@@ -13824,7 +13954,10 @@ export class WorkspaceCommandView {
       // Projects on the Home's shelf not on the map yet: set up from here.
       // Its own slot, refreshed in place when the count arrives.
       '<span class="ws-cmd-map-setup-slot" data-cmd-setup-projects-slot>' +
-      setupProjectsChipHTML(this.libraryEmptyState, count) +
+      setupProjectsChipHTML(this.homeWideSetupState(), count) +
+      '</span>' +
+      '<span data-cmd-home-feed-slot>' +
+      this.homeFeedControlsHTML() +
       '</span>' +
       addWorkspaceMenuHTML(this) +
       (count === null
@@ -14069,7 +14202,7 @@ export class WorkspaceCommandView {
       // The empty lot's library count is drawn by the mount, so a changed
       // count is a reason to re-mount too.
       '::' +
-      JSON.stringify(this.libraryEmptyState || null) +
+      JSON.stringify(this.detachmentMemberCount() ? null : this.libraryEmptyState || null) +
       // A linked song's facts are drawn on its tile's meta line by the mount.
       '::' +
       JSON.stringify(this.detachmentSongFacts || {}) +
@@ -14309,6 +14442,7 @@ export class WorkspaceCommandView {
   async loadLibraryEmptyState() {
     // The same moments re-read the songs' tile facts.
     void this.loadDetachmentSongFacts();
+    const folders = this.loadHomeMapFolders();
     const workspaceId = this.workspaceId();
     const status = this.groupTemplateStatus;
     let next = null;
@@ -14323,13 +14457,14 @@ export class WorkspaceCommandView {
           // The outer map's badge reads the same count (home-library-badges.js).
           const toSetUp = libraryToSetUp(summary);
           if (toSetUp > 0) {
-            next = { shelf: Number(summary.digest.projects) || toSetUp, toSetUp };
+            next = { shelf: Number(summary.digest?.projects) || toSetUp, toSetUp };
           }
         }
       } catch (err) {
         next = null;
       }
     }
+    await folders;
     if (this.workspaceId() !== workspaceId) return;
     const arrival = this._setupArrival;
     this._setupArrival = null;
@@ -14367,16 +14502,29 @@ export class WorkspaceCommandView {
 
   // The toolbar's "N to set up" follows the shelf count in place, so an open
   // picker or menu beside it is left as it is.
+  homeWideSetupState() {
+    const data = this.homeMapFolders;
+    if (
+      data?.homeID &&
+      data.homeID === this.workspaceId() &&
+      data.folders?.length &&
+      Number.isInteger(data.remainder)
+    )
+      return { toSetUp: data.remainder };
+    return this.libraryEmptyState;
+  }
+
   syncSetupProjectsChip() {
     const slot = this.container?.querySelector?.('[data-cmd-setup-projects-slot]');
     if (!slot) return;
     const owner = this.page?.membersPanel;
     const count = owner?.group && !owner.readFailed ? this.detachmentMemberCount() : 0;
-    const html = setupProjectsChipHTML(this.libraryEmptyState, count);
+    const state = this.homeWideSetupState();
+    const html = setupProjectsChipHTML(state, count);
     // A button already there keeps its element (and so its focus, and a sheet
     // placed beside it): only its number changes.
     const number = html && slot.querySelector?.('[data-cmd-setup-projects] b');
-    if (number) number.textContent = String(this.libraryEmptyState.toSetUp);
+    if (number) number.textContent = String(state.toSetUp);
     else slot.innerHTML = html;
   }
 
@@ -14919,6 +15067,7 @@ export class WorkspaceCommandView {
   }
 
   unmountDetachmentMap() {
+    this.homeFeedDialog?.close();
     this.closeMusicFolders();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (this.detachmentMapEl && map && typeof map.unmount === 'function') {
@@ -15011,9 +15160,18 @@ export class WorkspaceCommandView {
       }
     }
     this.memberFolderAgentEmpties = 0;
+    const pending = pendingHomeFeeds(views, groupId);
+    if (
+      this.pendingHomeFeeds?.some(
+        v => v.state === 'setting_up' && !pending.some(next => next.workspace_id === v.workspace_id)
+      )
+    )
+      void this.handleWorkspacesChanged({});
+    this.pendingHomeFeeds = pending;
     const { workspaces } = this.detachmentSnapshot();
     const state = memberFolderAgentState(views, workspaces, groupId);
     this.memberFolderAgents = { waits: state.waits, lines: state.lines, views: state.views };
+    this.syncHomeFeedControls();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (map && map.folderAgentWaits && typeof map.folderAgentWaits.update === 'function') {
       map.folderAgentWaits.update(host, state.waits);
@@ -15029,7 +15187,8 @@ export class WorkspaceCommandView {
     const setups = memberSetupsFinished(this.memberFolderAgentSetups ?? null, state.views);
     this.memberFolderAgentSetups = setups.next;
     if (setups.finished) void this.handleWorkspacesChanged({});
-    if (state.fast) retry();
+    if (state.fast || this.pendingHomeFeeds.some(v => ['looking', 'setting_up'].includes(v.state)))
+      retry();
   }
 
   renderDetachmentPanel() {

@@ -295,38 +295,59 @@ func (s *Store) Summary(scope Scope) (LibrarySummary, error) {
 	if s.installed != nil {
 		installed, listErr := s.installed.List()
 		if evidence := s.setupEvidence(scope, state, installed, listErr); evidence.note != setupNoteUnchecked {
-			ready, choice := shelfToSetUp(doc, state, evidence)
-			summary.ToSetUp, summary.NeedsFileChoice = &ready, &choice
+			tally := countShelfSetup(doc, state, evidence, nil)
+			summary.ToSetUp, summary.NeedsFileChoice = &tally.ready, &tally.choice
 		}
 	}
 	return summary, nil
 }
 
-// shelfToSetUp counts, from the stored entries alone, the projects without a
+type shelfSetupTally struct {
+	ready, choice, remainder int
+	byRoot                   map[string]int
+}
+
+// countShelfSetup counts, from the stored entries alone, the projects without a
 // link whose observation on a connected root is available (or ambiguous, a
 // file choice) in a format the evidence's tools attach. It reads no folder;
 // the sheet's per-project review repeats every check before anything is made.
-func shelfToSetUp(doc Document, state *workspace.AssistantProgramState, evidence setupEvidence) (ready, choice int) {
+func countShelfSetup(doc Document, state *workspace.AssistantProgramState, evidence setupEvidence, fedRoots map[string]string) shelfSetupTally {
+	tally := shelfSetupTally{byRoot: map[string]int{}}
 	if evidence.note != "" {
-		return 0, 0
+		return tally
 	}
 	for _, entry := range doc.Entries {
 		if entry.Link != nil {
 			continue
 		}
+		eligible, ambiguous, rootID := false, false, ""
 		for _, obs := range entry.Observations {
 			if !digestRootActive(doc, state, obs.RootID) ||
 				(obs.Availability != "available" && obs.Availability != "ambiguous") || !evidence.supports(obs.Alternates) {
 				continue
 			}
-			ready++
-			if obs.Availability == "ambiguous" {
-				choice++
+			if !eligible {
+				ambiguous = obs.Availability == "ambiguous"
 			}
-			break
+			eligible = true
+			// Prefer the deepest fed root that actually observed this entry.
+			if path := fedRoots[obs.RootID]; path != "" && (len(path) > len(fedRoots[rootID]) || (len(path) == len(fedRoots[rootID]) && obs.RootID < rootID)) {
+				rootID = obs.RootID
+			}
+		}
+		if eligible {
+			tally.ready++
+			if ambiguous {
+				tally.choice++
+			}
+			if rootID != "" {
+				tally.byRoot[rootID]++
+			} else {
+				tally.remainder++
+			}
 		}
 	}
-	return ready, choice
+	return tally
 }
 
 // digestWithLinks presents a stored digest against the Home's current links. A
