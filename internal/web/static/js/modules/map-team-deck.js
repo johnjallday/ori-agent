@@ -31,9 +31,12 @@ export function teamSnapshot(view) {
   const page = view.page;
   const panel = page.membersPanel;
   const group = !panel?.readFailed && panel?.group?.id === view.workspaceId() ? panel.group : null;
+  const own = view.agentGroups().agents;
   const cards = deckMembers({
-    own: view.agentGroups().agents,
-    commander: page.workspace?.entry_agent_name,
+    own,
+    commander:
+      own.find(agent => page.isWorkspaceEntryAgent?.(agent.name))?.name ||
+      page.workspace?.entry_agent_name,
     group,
     groupName: page.workspace?.name || 'This group',
     songIds: new Set((panel?.songRosterRows || []).map(row => row.workspace_id))
@@ -45,7 +48,7 @@ export function teamSnapshot(view) {
 // cross-scope flags. A label alone is never permission to create an agent.
 export function deckSlots(view) {
   const roster = view.roleRoster;
-  if (roster?.workspace_id !== view.workspaceId()) return [];
+  if (!roster || roster.workspace_id !== view.workspaceId()) return [];
   const ws = view.page?.workspace;
   const status = view.groupTemplateStatus;
   const readOnly =
@@ -143,7 +146,14 @@ export function mountMapTeamDeck(view, dock) {
     const height = view.detachmentMapEl?.clientHeight || 380;
     list.style.maxHeight = `${Math.min(height, b - a, 380)}px`;
   };
+  let memberDock;
   function update() {
+    const nextDock = view.container.querySelector('.ws-cmd-map-quest-dock');
+    if (memberDock !== nextDock) {
+      if (memberDock) observer.unobserve(memberDock);
+      memberDock = nextDock;
+      if (memberDock) observer.observe(memberDock);
+    }
     const { cards, incomplete } = teamSnapshot(view);
     tab.textContent = `Team ${cards.length}`;
     if (list.hidden) return;

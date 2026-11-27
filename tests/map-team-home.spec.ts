@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
 
-// Read-only replay: real page, member tree, waits, camera and roster. See
+// Real page, member tree, waits, camera and roster. Only the opt-in Hire case writes. See
 // the manual guide for the preconditions. Does not scan folders or call a model.
 const route = process.env.ORI_MAP_TEAM_HOME || '';
 test.skip(!route, 'requires the prepared, isolated music Home');
@@ -40,6 +40,31 @@ test('Hire uses the existing role form and the filled slot becomes a navigable u
   await expect(page.locator('.ws-cmd-map-window')).toHaveCount(0);
 });
 
+test('Move mode and the folder view refuse team jumps without moving the camera', async ({
+  page
+}) => {
+  await installLocalCdn(page);
+  await page.goto(route);
+  const tab = page.locator('.map-team-tab');
+  const deck = page.getByRole('region', { name: 'Map team' });
+  const camera = () => page.evaluate(() => (window as any).OriWorkspaceMap.getCamera());
+  const move = page.locator('[data-map-drag]');
+  const folders = page.locator('[data-cmd-by-folder]');
+  for (const control of [move, folders]) {
+    await control.click();
+    const before = await camera();
+    await tab.click();
+    const target = deck.getByRole('button', { name: /Recordings Manager/ });
+    await expect(target).toContainText('Cannot show');
+    await target.click();
+    await expect(deck.getByRole('status')).toContainText('Cannot show');
+    expect(await camera()).toEqual(before);
+    await page.keyboard.press('Escape');
+    await expect(tab).toBeFocused();
+    await control.click();
+  }
+});
+
 for (const width of [1440, 390]) {
   for (const theme of ['dark', 'light']) {
     test(`a question and a shared agent on a ${width}px ${theme} map`, async ({ page }) => {
@@ -76,6 +101,31 @@ for (const width of [1440, 390]) {
       await expect(deck).toBeHidden();
       await expect(page.locator('.ws-map-tile[aria-pressed="true"]')).toContainText('After Hours');
       expect(new URL(page.url()).pathname).toBe(new URL(route, 'http://localhost').pathname);
+      await tab.click();
+      // Even after a selection paints the dock, Team must not obscure it or
+      // the move/zoom strip. Inspect geometry, not just a visible CSS class.
+      await expect
+        .poll(() =>
+          deck.evaluate(el => {
+            const d = el.getBoundingClientRect();
+            return [
+              ...document.querySelectorAll(
+                '.ws-map-control-dock,.ws-cmd-map-quest-dock > :not([hidden])'
+              )
+            ].every(node => {
+              const r = node.getBoundingClientRect();
+              return (
+                !r.width ||
+                !r.height ||
+                d.bottom <= r.top ||
+                d.top >= r.bottom ||
+                d.right <= r.left ||
+                d.left >= r.right
+              );
+            });
+          })
+        )
+        .toBe(true);
     });
   }
 }
