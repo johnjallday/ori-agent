@@ -282,8 +282,10 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 
 	// The listings: the root, then the scopes leading to the songs.
 	rec.Facts = plan.ListingFacts(rec.Facts)
+	// The arrival sheet belongs to this feed, including a flat folder with
+	// no branch choices. Other roots on the shelf are not part of this run.
+	receipt.rootID = rootID
 	if plan.BranchLook != "" {
-		receipt.rootID = rootID
 		key += "-" + plan.Digest[:16]
 	}
 	listing, err := listFolderAgentSongs(ctx, b.sessionHandler, rec, owner, homeID, rootID, key,

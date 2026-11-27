@@ -96,5 +96,5 @@ func (s *Service) ChooseProjectHolder(ctx context.Context, userID, workspaceID, 
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, &Refusal{Code: "holder_unavailable", Status: http.StatusConflict, Message: "That project folder is no longer here. Look further to refresh the report."}
 	}
-	return s.choosePath(ctx, userID, path, "", ""), nil
+	return s.choosePath(ctx, userID, path, "", "", ""), nil
 }

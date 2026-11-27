@@ -8920,6 +8920,22 @@ test('an unreadable group tree is unavailable, not a zero-member map', () => {
   }
 });
 
+test('Add folder requires the writable owner read for this managed Home', () => {
+  const c = detachmentCommandView('group');
+  const hasButton = () => c.renderDetachmentToolbar().includes('+ Add folder');
+  c.groupTemplateStatus = { kind: 'managed_home' };
+  assert.equal(hasButton(), false);
+  c.homeMapFolders = { can_add_folder: true, homeID: 'other' };
+  assert.equal(hasButton(), false);
+  c.homeMapFolders.homeID = 'g';
+  assert.equal(hasButton(), true);
+  c.homeMapFolders.can_add_folder = false;
+  assert.equal(hasButton(), false);
+  c.homeMapFolders.can_add_folder = true;
+  c.groupTemplateStatus = { kind: 'ordinary' };
+  assert.equal(hasButton(), false);
+});
+
 test('a Home with members sets up its shelf projects from its own map', () => {
   const c = detachmentCommandView('group', [{ id: 'albums', name: 'Albums' }]);
   c.groupTemplateStatus = { kind: 'managed_home' };

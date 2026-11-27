@@ -28,6 +28,7 @@ const (
 // Every string names folders by name and never by path.
 type View struct {
 	WorkspaceID   string `json:"workspace_id"`
+	OriginHomeID  string `json:"origin_home_id,omitempty"`
 	WorkspaceName string `json:"workspace_name"`
 	Route         string `json:"route,omitempty"`
 	FolderName    string `json:"folder_name"`
@@ -248,7 +249,7 @@ func planViewOf(plan Plan) *PlanView {
 func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	rec = s.effectiveRecord(rec)
 	v := View{
-		WorkspaceID: rec.WorkspaceID, WorkspaceName: rec.WorkspaceName, FolderName: rec.FolderName,
+		WorkspaceID: rec.WorkspaceID, OriginHomeID: rec.OriginHomeID, WorkspaceName: rec.WorkspaceName, FolderName: rec.FolderName,
 		AgentName: rec.AgentName, TicketID: rec.TicketID, Brief: rec.Brief, State: rec.State,
 		Progress: rec.Progress, Setup: rec.Setup, Failure: rec.Failure, UpdatedAt: rec.UpdatedAt,
 	}

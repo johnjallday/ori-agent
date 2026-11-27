@@ -320,6 +320,9 @@ type Record struct {
 	// FedFromHome is the Home provider key of the Home the folder was fed from
 	// inside; empty when it was fed from anywhere else (PRD FR8).
 	FedFromHome string `json:"fed_from_home,omitempty"`
+	// OriginHomeID lets the originating map resume the report before placement.
+	// It never determines which Home, if any, the setup will join.
+	OriginHomeID string `json:"origin_home_id,omitempty"`
 	// Premise is the owner's answer to "This looks like a <kind> folder";
 	// nil while unanswered.
 	Premise *PremiseAnswer `json:"premise,omitempty"`

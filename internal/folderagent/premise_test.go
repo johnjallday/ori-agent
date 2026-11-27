@@ -407,6 +407,9 @@ func TestPremise_WhenItIsNotAsked(t *testing.T) {
 	inside.svc.deps.Homes = fakeHomes{"music-home": "music_project_management", "writing-home": "manuscript_home"}
 	fed := inside.startFrom(t, "music-home")
 	v := inside.view(t, fed.WorkspaceID)
+	if v.OriginHomeID != "music-home" {
+		t.Fatalf("origin = %q", v.OriginHomeID)
+	}
 	if v.Premise != nil {
 		t.Fatalf("fed from inside the matching Home: %+v", v.Premise)
 	}
@@ -426,7 +429,7 @@ func TestPremise_WhenItIsNotAsked(t *testing.T) {
 	// A page that is not a Home is an ordinary feed.
 	plain := newHarness(t, demo(t))
 	plain.svc.deps.Homes = fakeHomes{}
-	if v := plain.view(t, plain.startFrom(t, "some-workspace").WorkspaceID); v.Premise == nil {
+	if v := plain.view(t, plain.startFrom(t, "some-workspace").WorkspaceID); v.Premise == nil || v.OriginHomeID != "" {
 		t.Fatal("fed from a plain workspace page must ask")
 	}
 

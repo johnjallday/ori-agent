@@ -11046,6 +11046,26 @@ button.ws-cmd-rpg-class-card:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
 }
+.ws-home-feed {
+  width: min(36rem, calc(100% - 2rem));
+  max-height: 85dvh;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+.ws-home-feed::backdrop {
+  background: rgba(0, 0, 0, 0.48);
+}
+.ws-home-feed > button {
+  display: block;
+  margin: 0 0 0.5rem auto;
+}
+[data-cmd-home-feed-slot]:empty {
+  display: none;
+}
 /* Toolbar space is outside the canvas: do not cover or relocate saved stations. */
 .ws-cmd-map-toolbar,
 .ws-cmd-map-group-bar {

@@ -277,6 +277,7 @@ type choice struct {
 	// fedFromHome is the Home provider key of the Home the folder was chosen
 	// from inside, resolved on the server; empty otherwise.
 	fedFromHome  string
+	originHomeID string
 	guidedReturn string
 	// policy supplies editable defaults only, never mutation authority.
 	policy folderlook.RootPolicy
@@ -341,16 +342,19 @@ func (s *Service) ChooseForReturn(ctx context.Context, userID string, c personal
 	if err != nil || !chosen {
 		return nil, err
 	}
-	fedFromHome := ""
+	fedFromHome, originHomeID := "", ""
 	if from := strings.TrimSpace(fromWorkspaceID); from != "" && s.deps.Homes != nil {
 		fedFromHome = s.deps.Homes.HomeProviderOf(ctx, userID, from)
+		if fedFromHome != "" {
+			originHomeID = from
+		}
 	}
-	return s.choosePath(ctx, userID, path, fedFromHome, s.returnBinding(ctx, userID, hq, attempt)), nil
+	return s.choosePath(ctx, userID, path, fedFromHome, originHomeID, s.returnBinding(ctx, userID, hq, attempt)), nil
 }
 
 // choosePath issues a volatile hire card for an already host-validated path.
 // Only chooser resolution and recorded project-holder resolution call it.
-func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome, guidedReturn string) *Chosen {
+func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome, originHomeID, guidedReturn string) *Chosen {
 	identity := ResolveRootIdentity(path, s.deps.KnownFolderRoot)
 	purpose, brief := knownFolderHire(identity.Policy)
 	token := newToken()
@@ -361,7 +365,7 @@ func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome, gui
 			delete(s.choices, key)
 		}
 	}
-	s.choices[token] = choice{userID: userID, path: path, expires: now.Add(choiceTTL), fedFromHome: fedFromHome, guidedReturn: guidedReturn, policy: identity.Policy}
+	s.choices[token] = choice{userID: userID, path: path, expires: now.Add(choiceTTL), fedFromHome: fedFromHome, originHomeID: originHomeID, guidedReturn: guidedReturn, policy: identity.Policy}
 	s.mu.Unlock()
 	name := filepath.Base(path)
 	hire := s.hireOptions(ctx, userID, name)
@@ -452,7 +456,7 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 	rec := &Record{
 		WorkspaceID: created.ID, OwnerUserID: userID, FolderName: folder, WorkspaceName: created.Name,
 		AgentName: created.AgentName, TicketID: ticketID, Brief: brief, State: StateLooking,
-		AsksPremise: true, FedFromHome: held.fedFromHome, GuidedReturn: held.guidedReturn,
+		AsksPremise: true, FedFromHome: held.fedFromHome, OriginHomeID: held.originHomeID, GuidedReturn: held.guidedReturn,
 	}
 	err = s.deps.Store.Create(rec)
 	endStarting() // only now: the record is written (or never will be)
