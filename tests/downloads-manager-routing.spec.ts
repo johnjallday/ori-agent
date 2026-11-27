@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { existsSync, mkdirSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { freshGuidedHQ } from './helpers/fresh-guided-hq';
+import { filingWorkspace } from './helpers/filing-workspace';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 const evidence = 'tasks/evidence-downloads-manager-routing';
@@ -91,6 +92,18 @@ test('the Downloads manager reviews individual destinations without moving the r
   await expect(repeat).toContainText('You filed hotel-receipt.pdf in Travel/Receipts.');
   await expect(repeat.getByRole('button', { name: 'Choose another folder' })).toBeVisible();
   await page.screenshot({ path: `${evidence}/remembered-folder.png` });
+  const acmeRoot = join(home, 'Acme');
+  mkdirSync(acmeRoot);
+  const acme = await filingWorkspace(request, 'Acme', acmeRoot, 'Acme');
+  const { connections } = await post(base + '/connections', {
+    receiver_workspace_id: acme.id,
+    kinds: ['documents']
+  });
+  const connection = connections.sends_to[0].id;
+  await page.goto(url!);
+  await expect(repeat).toContainText('Is this for your travel records or for Acme?');
+  await expect(repeat).toContainText('top level');
+  await page.screenshot({ path: `${evidence}/two-destinations.png` });
   await repeat.getByRole('button', { name: 'Review filing' }).click();
   await expect(folder).toContainText('File to Travel/Receipts?');
   expect(existsSync(join(root, 'hotel-receipt-may.pdf'))).toBe(true);
@@ -103,4 +116,34 @@ test('the Downloads manager reviews individual destinations without moving the r
     'unclear.pdf was left in Downloads.'
   );
   expect(existsSync(join(root, 'unclear.pdf'))).toBe(true);
+  const proof = row('client-proof.pdf');
+  await proof.getByRole('button', { name: 'Send to Acme' }).click();
+  const send = page.getByRole('dialog', { name: 'Send client-proof.pdf to Acme?' });
+  await expect(send).toContainText('top level of Acme');
+  expect(existsSync(join(root, 'client-proof.pdf'))).toBe(true);
+  await send.screenshot({ path: `${evidence}/confirm-send.png` });
+  await send.getByRole('button', { name: 'Confirm send' }).click();
+  await expect(receipt).toContainText('1 went to Acme');
+  expect(existsSync(join(acmeRoot, 'client-proof.pdf'))).toBe(true);
+  expect(existsSync(join(root, 'client-proof.pdf'))).toBe(false);
+  expect(existsSync(join(root, 'unclear.pdf'))).toBe(true);
+  expect(existsSync(join(receipts, 'hotel-receipt-may.pdf'))).toBe(true);
+
+  seed('client-proof-revised.pdf');
+  await post(base + '/scan');
+  await page.goto(url!);
+  await row('client-proof-revised.pdf').getByRole('button', { name: 'Send to Acme' }).click();
+  const check = page.getByRole('button', { name: 'Confirm send' });
+  await expect(check).toBeVisible();
+  const before = (await (await request.get(base + '/filings')).json()).filings;
+  const revoke = await request.post(acme.base + `/connections/${connection}/turn-off`);
+  expect(revoke.ok(), await revoke.text()).toBe(true);
+  await check.click();
+  await expect(
+    page.getByRole('dialog', { name: 'Send client-proof-revised.pdf to Acme?' })
+  ).toContainText('Nothing was sent');
+  await page.screenshot({ path: `${evidence}/revoked.png` });
+  expect(existsSync(join(root, 'client-proof-revised.pdf'))).toBe(true);
+  expect(existsSync(join(acmeRoot, 'client-proof-revised.pdf'))).toBe(false);
+  expect((await (await request.get(base + '/filings')).json()).filings).toEqual(before);
 });

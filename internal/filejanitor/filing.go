@@ -85,7 +85,8 @@ type FilingRecord struct {
 	NewShelves []FilingDestination `json:"new_shelves,omitempty"`
 	// DecisionID is the one organizing decision this filing belongs to, fixed at
 	// admission so the decision can be written after the move and backfilled.
-	DecisionID string `json:"decision_id,omitempty"`
+	DecisionID string      `json:"decision_id,omitempty"`
+	SingleSend *SingleSend `json:"single_send,omitempty"` // binds a retry to the same handoff
 }
 
 // FilingDestination is the folder a named filing put files into, with the
@@ -108,6 +109,9 @@ func (f FilingRecord) validate() error {
 		!clientKeyPattern.MatchString(f.ClientKey) || f.AdmittedAt.IsZero() ||
 		f.PlannedMoves < 0 || f.PlannedTrash < 0 || f.PlannedMoves+f.PlannedTrash > PlanMaxOperations {
 		return fmt.Errorf("%w: invalid filing record", ErrInvalidCandidate)
+	}
+	if send := f.SingleSend; send != nil && (!validConnectionID(send.ConnectionID) || !managedRootGeneration.MatchString(send.CandidateID) || f.PlannedMoves != 1 || f.PlannedTrash != 0 || f.DecisionID != "") {
+		return fmt.Errorf("%w: invalid handoff record", ErrInvalidCandidate)
 	}
 	if len(f.NewShelves) > f.PlannedMoves || (len(f.NewShelves) > 0 && !f.ShelfPicture) {
 		return fmt.Errorf("%w: invalid shelf count", ErrInvalidCandidate)
@@ -169,7 +173,8 @@ type FileRequest struct {
 	// and ticked "Yes, move N files to Trash" for. It must equal the plan's count.
 	TrashAcknowledged int
 	// ClientKey makes a retry report the first result instead of filing twice.
-	ClientKey string
+	ClientKey  string
+	SingleSend *SingleSend
 }
 
 // FilingResult is what a press did, built from the journal so the first answer
@@ -231,7 +236,7 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 	if !sameRoutes(routes0, routes) {
 		fresh := ReviewPlan{}
 		if state, err := s.store.LoadScanState(workspaceID); err == nil {
-			if computed, err := s.computeReviewPlan(owner, workspaceID, batchID, state, routes); err == nil {
+			if computed, err := s.computeScopedPlan(owner, workspaceID, batchID, state, routes, req.SingleSend); err == nil {
 				fresh = computed.plan
 			}
 		}
@@ -247,7 +252,9 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 	_, err = s.store.UpdateScanState(workspaceID, func(state *ScanState) error {
 		for _, existing := range state.Filings {
 			if existing.ClientKey == req.ClientKey {
-				if existing.Owner != owner || existing.BatchID != batchID || existing.DecisionID != "" {
+				if existing.Owner != owner || existing.BatchID != batchID || existing.DecisionID != "" ||
+					(existing.SingleSend == nil) != (req.SingleSend == nil) ||
+					(req.SingleSend != nil && (*existing.SingleSend != *req.SingleSend || existing.PlanDigest != req.PlanDigest)) {
 					return ErrReviewConflict
 				}
 				admitted.record = existing
@@ -259,7 +266,7 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 				state.Filings[i].Interrupted = true // the process died after admitting it
 			}
 		}
-		computed, err := s.computeReviewPlan(owner, workspaceID, batchID, *state, routes)
+		computed, err := s.computeScopedPlan(owner, workspaceID, batchID, *state, routes, req.SingleSend)
 		if err != nil {
 			return err
 		}
@@ -297,7 +304,7 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 		admitted.record = FilingRecord{
 			ID: filingID, Owner: owner, BatchID: batchID, RootID: root.Generation, ClientKey: req.ClientKey,
 			PlanDigest: computed.plan.PlanDigest, PlannedMoves: computed.plan.MoveCount + computed.plan.SendCount, PlannedTrash: computed.plan.TrashCount,
-			AdmittedAt: now,
+			AdmittedAt: now, SingleSend: req.SingleSend,
 		}
 		admitted.items = computed.items
 		state.Approvals = append(state.Approvals, admitted.approval)

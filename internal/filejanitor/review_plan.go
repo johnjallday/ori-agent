@@ -47,6 +47,7 @@ type ReviewPlanQuery struct {
 	// planned lines: how the picture learns the final name of each file it shows,
 	// whichever five a card lists. At most PlanItemsPageMax, no duplicates.
 	CandidateIDs []string
+	SingleSend   *SingleSend
 }
 
 // PlanItemView is one planned operation, path-free.
@@ -155,14 +156,32 @@ func planItemView(line PreviewItem) PlanItemView {
 	return view
 }
 
-// computeReviewPlan works the plan out from one saved-state snapshot and the
-// revalidated saved choices. It is safe inside UpdateScanState: it takes no lock,
-// writes nothing, and only reads metadata.
-//
-// routes are the connections that are on, worked out by the caller outside any
-// transaction (see send_review.go). A send line needs one no-follow stat per name
-// at the receiver's top level, the only thing a plan learns about that folder.
-func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state ScanState, routes sendRoutes) (computedPlan, error) {
+// SingleSend narrows one explicit confirmation to a candidate and an enabled
+// connection. Neither an absent draft tick nor a revoked route means file locally.
+type SingleSend struct {
+	CandidateID  string `json:"candidate_id"`
+	ConnectionID string `json:"connection_id"`
+}
+
+func (send SingleSend) choice(state ScanState, batchID string, view ReviewDraftView) (ReviewChoiceView, error) {
+	c, ok := state.Candidate(send.CandidateID)
+	kind, err := LookupCategory(string(c.EffectiveCategory()))
+	if !ok || c.BatchID != batchID || c.WorkspaceID != state.WorkspaceID || !proposalPending(c) ||
+		c.Decision == DecisionTrash || state.IsSkipped(c.Fingerprint) || !moveAnswered(c) || err != nil || !view.routes.sends(send.ConnectionID, kind.ID) {
+		return ReviewChoiceView{}, ErrReviewPlanChanged
+	}
+	for _, ch := range view.Choices {
+		if ch.CandidateID == c.ID && ch.Operation == OperationTrash {
+			return ReviewChoiceView{}, ErrReviewPlanChanged
+		}
+	}
+	return ReviewChoiceView{CandidateID: c.ID, Operation: OperationMove, Category: kind.ID, ConnectionID: send.ConnectionID}, nil
+}
+
+// computeScopedPlan works from one saved snapshot and revalidated routes. It
+// takes no locks or writes; supplying a handoff replaces, never extends, the
+// bulk selection before any plan lines or digest are computed.
+func (s *Service) computeScopedPlan(owner, workspaceID, batchID string, state ScanState, routes sendRoutes, send *SingleSend) (computedPlan, error) {
 	groups, binding, root, err := s.reviewDraftSnapshot(owner, workspaceID, batchID, state)
 	if err != nil {
 		return computedPlan{}, err
@@ -178,6 +197,15 @@ func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state Sc
 	resolved, err := s.scannerFor().ResolveRoot(settings)
 	if err != nil || resolved != root.Path || settings.RootID != root.Generation {
 		return computedPlan{}, ErrReviewUnavailable
+	}
+
+	if send != nil {
+		choice, err := send.choice(state, batchID, view)
+		if err != nil {
+			return computedPlan{}, err
+		}
+		view.Choices = []ReviewChoiceView{choice}
+		view.removed = nil
 	}
 
 	out := computedPlan{view: view, binding: binding, settings: settings, root: root, routes: routes}
@@ -339,6 +367,12 @@ func (s *Service) computeReviewPlan(owner, workspaceID, batchID string, state Sc
 		out.plan.Changed.Items = []PlanChanged{}
 	}
 	scope := binding.Digest
+	if send != nil {
+		if out.plan.Total != 1 || out.plan.SendCount != 1 {
+			return computedPlan{}, ErrReviewPlanChanged
+		}
+		scope += "/single-send" // even a one-line batch press is a different intent
+	}
 	if settings.MethodRevision != "" {
 		scope += "/" + settings.MethodRevision
 	}
@@ -419,7 +453,7 @@ func (s *Service) PlanReview(ctx context.Context, owner, workspaceID, batchID st
 	if err != nil {
 		return ReviewPlan{}, ErrReviewUnavailable
 	}
-	computed, err := s.computeReviewPlan(owner, workspaceID, batchID, state, routes)
+	computed, err := s.computeScopedPlan(owner, workspaceID, batchID, state, routes, query.SingleSend)
 	if err != nil {
 		return ReviewPlan{}, err
 	}

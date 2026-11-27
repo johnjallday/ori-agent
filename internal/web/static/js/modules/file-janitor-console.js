@@ -3145,6 +3145,7 @@
     const one = singleFileReview(binding);
     container.appendChild(
       drawing.renderDownloadsReview(document, lastCandidates, picture, reviewDraft.choices, {
+        send: (file, route) => void drawing.reviewSend(file, route, one, binding),
         folder: (file, example) => one.folder({ candidate_id: file.id }, example),
         leave: async (file, choice) => {
           if (!one.current()) return;
