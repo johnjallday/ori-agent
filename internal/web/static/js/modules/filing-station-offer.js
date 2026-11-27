@@ -33,6 +33,7 @@ export function stationPile(raw) {
   return { count: raw.count, names: raw.names };
 }
 export function stationPileLine(view) {
+  if (!view.filingPile) return `Build Filing for ${view.folder}`;
   const n = view.filingPile.count;
   return `${n} loose ${n === 1 ? 'file' : 'files'} in ${view.folder}`;
 }
@@ -72,9 +73,10 @@ export function filingStationOffer(doc, view) {
     title.textContent = stationPileLine(view);
     box.appendChild(title);
     const list = doc.createElement('p');
-    list.textContent =
-      view.filingPile.names.join(' · ') +
-      (view.filingPile.count > 6 ? ` · and ${view.filingPile.count - 6} more` : '');
+    list.textContent = view.filingPile
+      ? view.filingPile.names.join(' · ') +
+        (view.filingPile.count > 6 ? ` · and ${view.filingPile.count - 6} more` : '')
+      : 'Build the station to scan loose files directly in this folder. No need to explore its subfolders. Nothing moves until you press File.';
     box.appendChild(list);
     const primary = control('Build a Filing station', 'btn btn-sm btn-primary', b =>
       openBuild(view, b)
@@ -95,7 +97,7 @@ export function drawFilingPlot(anchor, view) {
   const host = anchor?.parentElement;
   if (!host?.querySelector) return;
   let plot = host.querySelector('.filing-station-plot');
-  if (!view?.filingPile || stationDeferred(view.workspaceID)) {
+  if (!view?.stationOffer || stationDeferred(view.workspaceID)) {
     plot?.remove();
     return;
   }
@@ -105,5 +107,5 @@ export function drawFilingPlot(anchor, view) {
     plot.setAttribute('aria-hidden', 'true');
     host.appendChild(plot);
   }
-  plot.textContent = String(view.filingPile.count);
+  plot.textContent = view.filingPile ? String(view.filingPile.count) : '';
 }

@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/directoryid"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -217,6 +218,7 @@ type Deps struct {
 	// replaces the legacy Documents placement inference, not its saved views.
 	StationPlacements func(owner, id string, names []string) (map[string]string, bool)
 	// StationAnchor resolves only metadata for an ordinary hired folder. It is not DocumentsAccess and cannot authorize a content read.
+	GuidedStation func(owner, id string) (filejanitor.StationLook, bool)
 	StationAnchor func(owner, id, lead string) (StationAnchor, bool)
 	InboxStation  func(owner, id string) (InboxStation, bool)
 	// ReleasedAdviceReceipt verifies display of an old guided recommendation only.

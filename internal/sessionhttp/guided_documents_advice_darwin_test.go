@@ -69,6 +69,14 @@ func TestReleasedGuidedAdviceShowsOnlyItsReceipt(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The independent Build projection comes from workspace creation, not the
+	// advice receipt. Removing that projection below leaves the receipt inert.
+	if look, ok := h.GuidedStation("local", id); !ok || look.ReferenceID != ws.AnchorDirectoryReferenceID() || look.Manager != agent || look.Witness == "" {
+		t.Fatal("missing independently verified Build", look)
+	}
+	if _, ok := h.GuidedStation("someone else", id); ok {
+		t.Fatal("foreign owner offered Build")
+	}
 	v, err := s.View(t.Context(), "local", id)
 	if err != nil || v.State != folderagent.StateSetUp || !v.FilingRecommendationDone || v.FilingReviewHint != "partial" || v.Plan != nil || len(v.Actions) != 0 || v.FilingPile != nil || v.ProjectHolders != nil || v.OrganizationReview {
 		t.Fatalf("expected a finished, read-only partial receipt: %+v %v", v, err)
@@ -90,6 +98,9 @@ func TestReleasedGuidedAdviceShowsOnlyItsReceipt(t *testing.T) {
 	}
 	if err := os.Mkdir(root, 0750); err != nil {
 		t.Fatal(err)
+	}
+	if _, ok := h.GuidedStation("local", id); ok {
+		t.Fatal("Build survived replacing the anchor")
 	}
 	if _, err := s.View(t.Context(), "local", id); err == nil {
 		t.Fatal("receipt survived replacing the anchor")

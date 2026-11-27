@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestHiredStationNeedsTheSameLeadAnchorAndCompleteLook(t *testing.T) {
+func TestHiredStationNeedsTheSameLeadAndAnchorButNotACount(t *testing.T) {
 	root := build(t, "cover.png", "sound.mp3", "one.pdf")
 	h := downloadsHarness(t, root)
 	anchor := StationAnchor{root, "ref", "lead"}
@@ -37,7 +37,17 @@ func TestHiredStationNeedsTheSameLeadAnchorAndCompleteLook(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "new.txt"), []byte("new"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	v, err = h.svc.View(t.Context(), "u1", v.WorkspaceID)
+	if err != nil || look() != nil || !v.StationOffer || v.FilingPile != nil {
+		t.Fatalf("a changed inventory hides only the count: %+v, %v", v, err)
+	}
+	if err := os.Rename(root, root+"-old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(root, 0750); err != nil {
+		t.Fatal(err)
+	}
 	if look() == nil {
-		t.Fatal("adopted stale pile")
+		t.Fatal("offered a replaced directory")
 	}
 }

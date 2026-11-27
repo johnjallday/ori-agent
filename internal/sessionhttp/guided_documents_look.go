@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/diridentity"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -55,6 +57,36 @@ func (h *Handler) ReleasedDocumentsAdviceReceipt(ctx context.Context, owner, id,
 	}
 	look, ok := h.checkGuidedDocumentsLook(ctx, ws, folderagent.ReleasedFirstLookRecipe)
 	return ok && look.agent == agent && look.link == link && look.verification == "" && look.filingBinding == ""
+}
+
+// GuidedStation verifies the original workspace creation, not a folder report or its
+// file count. The result can review a new metadata-only grant; it is never
+// accepted by the manager's look, Documents review, or content tools.
+func (h *Handler) GuidedStation(owner, id string) (filejanitor.StationLook, bool) {
+	var no filejanitor.StationLook
+	if h.workspaceStore == nil || owner == "" {
+		return no, false
+	}
+	ws, err := h.workspaceStore.Get(id)
+	if err != nil || ws == nil || ws.ID != id || ws.OwnerUserID != owner {
+		return no, false
+	}
+	ref, err := ws.GetDirectoryReference(ws.AnchorDirectoryReferenceID())
+	if err != nil || ref == nil {
+		return no, false
+	}
+	info, err := os.Lstat(ref.Path) // #nosec G304 G703 -- stored workspace anchor; metadata only, verified against the original creation below.
+	if err != nil || diridentity.Of(info) == "" {
+		return no, false
+	}
+	look, ok := h.checkGuidedDocumentsLook(context.Background(), ws, func(w *workspace.Workspace, lead, binding string) bool {
+		return folderagent.ListingPinAllowed(w, lead, binding) || folderagent.ReleasedFirstLookRecipe(w, lead, binding)
+	})
+	if !ok || look.verification != "" || look.filingBinding != "" || look.root != ref.Path {
+		return no, false
+	}
+	hash := sha256.Sum256([]byte(strings.Join([]string{owner, id, look.op, look.agent, look.link, look.witness}, "\x00")))
+	return filejanitor.StationLook{ReferenceID: ref.ID, Manager: look.agent, Witness: diridentity.Of(info), Revision: hex.EncodeToString(hash[:])}, true
 }
 
 type guidedPinCheck func(*workspace.Workspace, string, string) bool
@@ -204,6 +236,7 @@ func (h *Handler) guidedLookDraft(w http.ResponseWriter, r *http.Request, ws *wo
 		d["look_state"] = rec.State
 	} else if errors.Is(e, folderagent.ErrNoRecord) {
 		d["look_link"] = look.link
+		d["station_offer"] = h.folderManager.CanOfferGuidedStation(ws.OwnerUserID, ws.ID)
 	} else {
 		return false
 	}

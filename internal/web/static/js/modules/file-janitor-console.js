@@ -5673,7 +5673,7 @@
             'p',
             'fj-sub',
             statusLoadState === 'loading'
-              ? 'Checking the folder and the saved look…'
+              ? 'Checking the workspace folder and its manager…'
               : 'This station offer is no longer current. Return to the map and check the folder.'
           )
         );
@@ -8567,6 +8567,14 @@
     buildProgress: () => (buildProgress?.id === wsId() ? buildProgress : null),
     openStationBuild(id, trigger) {
       if (!id || id !== wsId() || disposed) return false;
+      // Take report and welcome entries to the same plot as the manager's
+      // Map offer. Navigation opens the review only; it never replays Build.
+      if (workspaceViewMode() !== 'map' || trigger?.closest?.('.folder-agent-card--report')) {
+        window.location.assign(
+          window.location.pathname + '?mode=map&panel=file-janitor&station=build'
+        );
+        return true;
+      }
       setupReview = null;
       stationBuildWorkspace = id;
       return open({ source: 'station-build', tab: 'review', trigger });

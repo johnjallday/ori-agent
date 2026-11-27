@@ -52,6 +52,7 @@ type AssistantSetupCreation struct {
 	// never a grant and never inferred from a directory/profile name.
 	// InboxHireLeadID belongs to an ordinary anchored hire whose roster was
 	// reviewed using the Filing blueprint. The capability was NOT installed.
+	InboxWitness       string                     `json:"inbox_witness,omitempty"`
 	InboxPile          *folderdigest.ObservedPile `json:"inbox_pile,omitempty"`
 	InboxHireLeadID    string                     `json:"inbox_hire_lead_id,omitempty"`
 	FolderReferenceID  string                     `json:"folder_reference_id,omitempty"`

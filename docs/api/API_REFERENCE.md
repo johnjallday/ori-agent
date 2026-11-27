@@ -2238,7 +2238,7 @@ observation, method choice, folder checks and drawing a shelf are not move conse
 
 | Method / suffix | Request or result |
 | --- | --- |
-| `GET` or `POST /setup-review?station=build` | Review the saved look and current linked folder; POST can review the reference and optional monitoring. |
+| `GET` or `POST /setup-review?station=build` | Review the verified workspace manager and linked folder, with optional monitoring. No inventory or completed look is required. An owner-facing `station_offer` can appear without `filing_pile`; neither field is a grant. |
 | `POST /prepare-review?station=build` | Confirm the displayed `reference_id`, `monitoring` and `review_revision`. Installs, grants metadata access and obtains a first scan receipt; moves nothing. |
 | `GET /setup-review?station=progress` | `{build}` from receipts. No retry or timer-based advancement. |
 | `GET` or `POST /method` | Read `{layout}` or confirm `{revision, method}` (`own_folders` or `by_kind`). Send has its own connection flow. |

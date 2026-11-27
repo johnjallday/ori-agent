@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { mkdir, readFile, readdir, realpath, rename, utimes, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -27,6 +27,31 @@ test('the manager offers a first look on Open; dismissal and return do not start
     (await (await request.get('/api/settings/workspace-root')).json()).default_workspace_root
   ).toBe(join(home, 'Ori Workspaces'));
   const advice = process.env.ORI_STATION_ADVICE;
+  const buildWithoutCount = async (button: Locator, id: string, count: number) => {
+    await button.click();
+    const station = page.getByRole('dialog', { name: 'Filing', exact: true });
+    const confirm = station.getByRole('button', { name: 'Build the station', exact: true });
+    await expect(confirm).toBeVisible();
+    await expect(page.locator('body')).toHaveAttribute('data-workspace-view-mode', 'map');
+    expect(
+      (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+    ).toBe(false);
+    const prepared = page.waitForResponse(
+      r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/prepare-review')
+    );
+    await confirm.click();
+    const response = await prepared;
+    expect(response.status(), await response.text()).toBe(200);
+    const { result } = (await response.json()).preparation;
+    expect(result.eligible_count ?? 0).toBe(count);
+    const depot = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
+    await expect(depot).toBeVisible();
+    if (count) await expect(depot).toContainText(`Review ${count} files`);
+    await expect(depot).not.toHaveAttribute('data-station-part', /foundation|walls|roof/);
+    expect(
+      (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+    ).toBe(true);
+  };
   if (advice === 'legacy-check') {
     // Reopen the same isolated workspace on the fixed build; do not recreate
     // the hire or rewrite the older build's toolbox or run receipt.
@@ -44,13 +69,20 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
     const card = page.locator('.folder-agent-card--report:visible');
     await expect(card).toContainText('That step did not build a station or scan the folder.');
-    await expect(card).toContainText('The look did not finish counting loose documents');
-    await expect(card.locator('button')).toHaveCount(0);
+    expect(view.station_offer).toBe(true);
+    await expect(card).toContainText('No need to explore its subfolders');
+    await expect(card.getByRole('button', { name: 'Look further' })).toHaveCount(0);
     await card.screenshot({ path: info.outputPath('historical-advice-receipt.png') });
     const after = JSON.parse(await readFile(wsFile, 'utf8'));
     expect(after.toolboxes).toEqual(ws.toolboxes);
     expect(after.toolbox_assignments).toEqual(ws.toolbox_assignments);
     expect(after.mcp_bindings).toEqual(ws.mcp_bindings);
+    await buildWithoutCount(
+      card.getByRole('button', { name: 'Build a Filing station' }),
+      ws.id,
+      13
+    );
+    expect((await readdir(join(home, 'Documents', 'Orders'))).length).toBe(2001);
     return;
   }
   const hq = await freshGuidedHQ(request);
@@ -85,7 +117,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
   }
   if (advice === 'partial' || advice === 'legacy-seed') {
     // Exceed the walk's entry budget inside an existing shelf. The loose
-    // count is positive but cannot authorize a station from this look.
+    // count must not be presented as complete or required before Build.
     for (let i = 0; i < 2001; i++) await writeFile(join(root, 'Orders', `fixture-${i}.txt`), '');
   }
   const stationTree = [...Object.keys(stationFiles), ...stationFolders].sort();
@@ -186,6 +218,16 @@ test('the manager offers a first look on Open; dismissal and return do not start
   expect(starts).toEqual([]);
   expect(effects).toEqual([]);
   await verifyBytes();
+  if (advice === 'before-look') {
+    await buildWithoutCount(
+      card.getByRole('button', { name: 'Build a Filing station' }),
+      id,
+      empty ? 0 : 13
+    );
+    expect(starts).toEqual([]);
+    await verifyBytes();
+    return;
+  }
   await action.press('Enter');
   const report = card.getByRole('button', { name: 'View report' });
   await expect(report).toBeVisible({ timeout: 60000 });
@@ -251,13 +293,17 @@ test('the manager offers a first look on Open; dismissal and return do not start
     ).toBe(false);
     await verifyBytes();
     if (advice === 'partial') {
-      await expect(savedReport).toContainText('The look did not finish counting loose documents');
-      await expect(savedReport).not.toContainText('Check the workspace’s access settings');
-      await expect(savedReport.getByRole('button', { name: 'Build a Filing station' })).toHaveCount(
-        0
-      );
+      await expect(savedReport).toContainText('No need to explore its subfolders');
+      expect((await actual.json()).folder_agent.filing_pile).toBeUndefined();
       expect(effects).toEqual([]);
       await savedReport.screenshot({ path: info.outputPath('partial-advice-receipt.png') });
+      await buildWithoutCount(
+        savedReport.getByRole('button', { name: 'Build a Filing station' }),
+        id,
+        13
+      );
+      expect((await readdir(join(root, 'Orders'))).length).toBe(2001);
+      await verifyBytes();
       return;
     }
   }
@@ -265,7 +311,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
   if (empty) {
     await expect(suggestionButton).toHaveCount(0);
     await expect(savedReport).toContainText(
-      'This look found no loose documents supported for filing review.'
+      'Build the station to scan loose files directly in this folder.'
     );
     await savedReport.screenshot({ path: info.outputPath('empty-report.png') });
     await verifyBytes();

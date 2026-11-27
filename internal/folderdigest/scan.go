@@ -195,8 +195,9 @@ type Result struct {
 	ScannedAt     time.Time
 	Elapsed       time.Duration
 	// Metadata is process-local until explicitly sanitized for an attachment.
-	Metadata *MetadataTree `json:"-"`
-	Pile     *ObservedPile `json:"-"`
+	Metadata       *MetadataTree `json:"-"`
+	Pile           *ObservedPile `json:"-"`
+	StationWitness string        `json:"-"` // physical inbox identity, independent of count or coverage
 }
 
 // RootCandidate returns the root's own stats.
@@ -292,12 +293,15 @@ func Scan(root string, opts Options) (Result, error) {
 		Elapsed:       opts.Now().Sub(s.start),
 		Metadata:      s.metadata,
 	}
-	if p := s.pile; p != nil && p.Count > 0 && p.Witness != "" && !result.Partial && !s.incomplete {
+	if p := s.pile; p != nil && p.Witness != "" {
 		// A changed root is not the pile that the walk just counted. Stat
 		// only; do not restart the walk or replace it with a fresh listing.
 		after, err := os.Lstat(root) // #nosec G304 G703 -- same server-validated root as the walk; metadata only
-		if err == nil && after.IsDir() && diridentity.Of(after) == p.Witness && after.ModTime().Equal(p.Modified) {
-			result.Pile = p
+		if err == nil && after.IsDir() && diridentity.Of(after) == p.Witness {
+			result.StationWitness = p.Witness
+			if p.Count > 0 && !result.Partial && !s.incomplete && after.ModTime().Equal(p.Modified) {
+				result.Pile = p
+			}
 		}
 	}
 	result.Candidates = append(result.Candidates, s.root.finish())

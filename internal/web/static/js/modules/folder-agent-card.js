@@ -161,6 +161,7 @@ export function folderAgentReportView(view) {
   if (!view || !view.workspace_id) return null;
   const agent = String(view.agent_name || 'The agent');
   const folder = String(view.folder_name || 'this folder');
+  const filingPile = stationPile(view.filing_pile);
   const out = {
     workspaceID: String(view.workspace_id),
     workspace: String(view.workspace_name || folder),
@@ -186,7 +187,8 @@ export function folderAgentReportView(view) {
     rootPolicy: String(view.root_policy || ''),
     organizationReview: view.organization_review === true,
     filingReviewHint: String(view.filing_review_hint || ''),
-    filingPile: stationPile(view.filing_pile),
+    stationOffer: view.station_offer === true || Boolean(filingPile),
+    filingPile,
     stationHire: view.station_hire === true,
     policyNote: String(view.policy_note || ''),
     // The setup is done but filing was not allowed yet: one step left.
@@ -2708,7 +2710,7 @@ export function renderFolderAgentReport(
       )
     );
   }
-  if (view.filingPile) card.append(filingStationOffer(doc, view));
+  if (view.stationOffer) card.append(filingStationOffer(doc, view));
   else if (view.organizationReview && fetchImpl)
     card.append(
       documentsOrganizationOffer(
@@ -2727,7 +2729,7 @@ export function renderFolderAgentReport(
     const note = {
       empty: 'This look found no loose documents supported for filing review.',
       partial:
-        'The look did not finish counting loose documents. Filing needs a complete look before it can offer a station here.',
+        'This look covered only part of Documents. It does not give a verified count of loose files.',
       stale:
         'The folder has changed since this look. Look again before reviewing filing suggestions.',
       unavailable:

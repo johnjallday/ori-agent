@@ -15,9 +15,9 @@ import (
 // reference are checked by the host, and the saved look is checked here. No
 // folder-agent report or look ticket needs to be manufactured for this entry.
 type InboxStation struct {
-	Anchor                                   StationAnchor
-	Manager, WorkspaceName, Route, Operation string
-	Pile                                     *folderdigest.ObservedPile
+	Anchor                                            StationAnchor
+	Manager, WorkspaceName, Route, Operation, Witness string
+	Pile                                              *folderdigest.ObservedPile
 }
 
 func (s *Service) inboxStation(owner, id string) (View, filejanitor.StationLook, bool) {
@@ -28,20 +28,21 @@ func (s *Service) inboxStation(owner, id string) (View, filejanitor.StationLook,
 	}
 	src, ok := s.deps.InboxStation(owner, id)
 	p := src.Pile
-	if !ok || p == nil || p.Count < 1 || p.Count > folderdigest.DefaultMaxEntries || len(p.Names) != min(p.Count, 6) || p.Witness == "" || p.Policy != scopeHash(s.protectedReviewRoots()) || src.Anchor.LeadID == "" || src.Anchor.Reference == "" || src.Operation == "" {
+	witness := src.Witness
+	if witness == "" && p != nil {
+		witness = p.Witness
+	} // older witnessed hire
+	if !ok || src.Anchor.LeadID == "" || src.Anchor.Reference == "" || src.Operation == "" || !s.currentStationRoot(src.Anchor.Root, witness) {
 		return view, look, false
 	}
-	for _, n := range p.Names {
-		if !stationFileName(n) {
-			return view, look, false
+	view = View{WorkspaceID: id, WorkspaceName: src.WorkspaceName, Route: src.Route, AgentName: src.Manager, FolderName: filepath.Base(src.Anchor.Root), State: StateKept, StationHire: true, StationOffer: true}
+	look = filejanitor.StationLook{ReferenceID: src.Anchor.Reference, Manager: src.Manager, Witness: witness, Revision: scopeHash([]any{owner, id, src.Operation, src.Anchor, witness})}
+	if p != nil && p.Count > 0 && p.Count <= folderdigest.DefaultMaxEntries && len(p.Names) == min(p.Count, 6) && p.Witness == witness && p.Policy == scopeHash(s.protectedReviewRoots()) && !slices.ContainsFunc(p.Names, func(n string) bool { return !stationFileName(n) }) {
+		info, err := os.Lstat(src.Anchor.Root) // #nosec G304 G703 -- owned anchor, metadata only
+		if err == nil && diridentity.Of(info) == witness && info.ModTime().Equal(p.Modified) {
+			view.FilingPile = &LooseFilePile{Count: p.Count, Names: slices.Clone(p.Names)}
 		}
 	}
-	info, err := os.Lstat(src.Anchor.Root) // #nosec G304 G703 -- owner-scoped anchored directory, metadata only
-	if err != nil || !info.IsDir() || diridentity.Of(info) != p.Witness || !info.ModTime().Equal(p.Modified) {
-		return view, look, false
-	}
-	view = View{WorkspaceID: id, WorkspaceName: src.WorkspaceName, Route: src.Route, AgentName: src.Manager, FolderName: filepath.Base(src.Anchor.Root), State: StateKept, StationHire: true, FilingPile: &LooseFilePile{Count: p.Count, Names: slices.Clone(p.Names)}}
-	look = filejanitor.StationLook{ReferenceID: src.Anchor.Reference, Manager: src.Manager, Witness: p.Witness, Revision: scopeHash([]any{owner, id, src.Operation, src.Anchor, p})}
 	return view, look, true
 }
 

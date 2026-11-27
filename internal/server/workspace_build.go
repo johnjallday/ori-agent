@@ -154,11 +154,11 @@ func (o buildFolderObservations) ResolveRoot(ctx context.Context, target folderc
 	return service.ResolveRoot(ctx, target, id)
 }
 
-func (o buildFolderObservations) InboxStationPile(ctx context.Context, target foldercontext.Target, id string) *folderdigest.ObservedPile {
+func (o buildFolderObservations) InboxStationEvidence(ctx context.Context, target foldercontext.Target, id string) (string, *folderdigest.ObservedPile) {
 	if s := o.service(); s != nil {
-		return s.InboxStationPile(ctx, target, id)
+		return s.InboxStationEvidence(ctx, target, id)
 	}
-	return nil
+	return "", nil
 }
 
 func (o buildFolderObservations) Recognize(ctx context.Context, target foldercontext.Target, id string) (*personalassistant.BuildFolderRecognition, error) {

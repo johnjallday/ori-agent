@@ -235,7 +235,7 @@ export function resolveWorkspaceNextAction(input) {
   const folder = input.folderAgent;
   if (
     folder?.stationHire &&
-    folder?.filingPile &&
+    folder.stationOffer &&
     folder.workspaceID === workspaceId &&
     !known &&
     !input.filingDeferred
@@ -243,7 +243,9 @@ export function resolveWorkspaceNextAction(input) {
     return finish({
       kind: 'station_offer',
       title: `Build a Filing station for ${folder.folder}?`,
-      description: `${folder.filingPile.count} loose ${folder.filingPile.count === 1 ? 'file' : 'files'}. Review what Filing will do before building.`,
+      description: folder.filingPile
+        ? `${folder.filingPile.count} loose ${folder.filingPile.count === 1 ? 'file' : 'files'}. Review what Filing will do before building.`
+        : 'Build Filing to scan the loose files directly in this folder. Nothing moves.',
       tone: 'attention',
       action: {
         owner: 'console',

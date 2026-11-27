@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/charactercatalog"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -89,9 +90,15 @@ func (b *ServerBuilder) wireFolderAgent() {
 		UndoFilingFile:         b.fileJanitorService.UndoPlacedFile,
 		FilingStanding:         b.fileJanitorService.DocumentsFilingStanding,
 		StationAvailable:       b.fileJanitorService.StationAvailable,
-		StationAnchor:          b.hiredStationAnchor,
-		InboxStation:           b.inboxStation,
-		DocumentsAccess:        b.documentsOrganizationAccess,
+		GuidedStation: func(owner, id string) (filejanitor.StationLook, bool) {
+			if b.sessionHandler == nil {
+				return filejanitor.StationLook{}, false
+			}
+			return b.sessionHandler.GuidedStation(owner, id)
+		},
+		StationAnchor:   b.hiredStationAnchor,
+		InboxStation:    b.inboxStation,
+		DocumentsAccess: b.documentsOrganizationAccess,
 		StationPlacements: func(owner, id string, names []string) (map[string]string, bool) {
 			if b.fileJanitorService == nil {
 				return nil, false
@@ -176,10 +183,10 @@ func (b *ServerBuilder) inboxStation(owner, id string) (folderagent.InboxStation
 	m := prov.AssistantSetup
 	name := ws.EntryAgentName()
 	a, ok := b.hiredStationAnchor(owner, id, name)
-	if !ok || m.InboxHireLeadID != a.LeadID || m.FolderReferenceID != a.Reference || m.InboxPile == nil {
+	if !ok || m.InboxHireLeadID != a.LeadID || m.FolderReferenceID != a.Reference {
 		return no, false
 	}
-	return folderagent.InboxStation{Anchor: a, Manager: name, WorkspaceName: ws.Name, Route: "/workspaces/" + ws.FolderSlug, Operation: m.OperationID, Pile: m.InboxPile}, true
+	return folderagent.InboxStation{Anchor: a, Manager: name, WorkspaceName: ws.Name, Route: "/workspaces/" + ws.FolderSlug, Operation: m.OperationID, Witness: m.InboxWitness, Pile: m.InboxPile}, true
 }
 
 func (b *ServerBuilder) hiredStationAnchor(owner, id, name string) (folderagent.StationAnchor, bool) {

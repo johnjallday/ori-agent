@@ -2513,9 +2513,7 @@ export class WorkspaceCommandView {
     const words = waiting
       ? [waiting.phase, waiting.text, waiting.action, waiting.status].join('|')
       : '';
-    return view?.stationHire && view.filingPile
-      ? `${words}|station:${view.filingPile.count}`
-      : words;
+    return view?.stationOffer ? `${words}|station:${view.filingPile?.count ?? 'unscanned'}` : words;
   }
 
   // folderAgentWaitingFor is the waiting words when the named agent is the

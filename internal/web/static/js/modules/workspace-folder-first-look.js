@@ -39,6 +39,13 @@ export function renderDocumentsLook(host, page, draft, current) {
   }
   const saved = draft.look_state;
   const verify = draft.verify_folder;
+  const build = el('build');
+  if (build) {
+    build.hidden = !draft.station_offer;
+    build.onclick = () => {
+      if (current() && draft.station_offer) window.FileJanitorConsole?.openStationBuild(id, build);
+    };
+  }
   const paint = () => {
     const quiet = collapsed && !saved;
     el('look-copy').hidden = quiet;

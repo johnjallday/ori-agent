@@ -32,7 +32,7 @@ func (s *Service) SetStationHost(look func(string, string) (StationLook, error),
 }
 
 func stationChanged() error {
-	return setupErr(CodeFolderChanged, "The folder, manager or saved look changed. Review the current workspace before building.", RepairRetry, nil)
+	return setupErr(CodeFolderChanged, "The folder or its manager could not be verified. Review the current workspace before building.", RepairRetry, nil)
 }
 
 // StationAvailable is a stored-state check for an owner-facing offer, never

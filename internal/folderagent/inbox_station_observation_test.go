@@ -24,6 +24,15 @@ func TestInboxPileUsesTheWalkNotTheCappedTree(t *testing.T) {
 	for name, options := range map[string]folderdigest.Options{"partial": {MaxEntries: 12, PileFile: stationFileName}, "ordinary digest": {}} {
 		t.Run(name, func(t *testing.T) {
 			r, err := folderdigest.Scan(root, options)
+			if name == "partial" {
+				s := NewService(Deps{InboxStation: func(string, string) (InboxStation, bool) {
+					return InboxStation{Anchor: StationAnchor{root, "ref", "lead"}, Manager: "Lead", Witness: r.StationWitness, Operation: "hire"}, true
+				}})
+				v, _, ok := s.inboxStation("owner", "ws")
+				if !ok || !v.StationOffer || v.FilingPile != nil {
+					t.Fatal("partial attachment must offer Build without a count")
+				}
+			}
 			if err != nil || r.Pile != nil {
 				t.Fatalf("no pile expected: %+v %v", r.Pile, err)
 			}

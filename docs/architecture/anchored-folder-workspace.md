@@ -169,8 +169,10 @@ recommendation: **Set it up** does not install Filing, grant it access, or scan.
 A recommendation-only plan neither widens nor releases the first-look toolbox.
 An older guided Documents run that already released that exact toolbox may show
 its completed recommendation as a read-only receipt; it cannot authorize Build
-or a Documents review. An incomplete look does not offer Build.
-A complete saved look can instead show the loose count and a station offer. On
+or a Documents review. Build is a separate offer: the original workspace owner,
+manager, reference, access configuration and physical folder must still match.
+A complete current look can supply a count and filenames. With no count, the
+station can still be built; looking inside subfolders is not a prerequisite. On
 **Build the station** the existing manager becomes Curator without another hire;
 uninstall leaves that agent attached. The first scan reads metadata and creates
 no `Filed/`. The filing method and File press come later. Documents retains its

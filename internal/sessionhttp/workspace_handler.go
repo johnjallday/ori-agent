@@ -1177,6 +1177,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if inboxHire {
+		assistantSetupCreation.InboxWitness = buildFolderPlan.stationWitness
 		assistantSetupCreation.InboxPile = buildFolderPlan.pile
 		if err := h.recordInboxHire(ws.ID, assistantSetupCreation); err != nil {
 			respondBuildPreparationError(w, "hire_unconfirmed", "The workspace was created, but its hire receipt could not be verified. Reopen this same workspace.", http.StatusConflict, nil)

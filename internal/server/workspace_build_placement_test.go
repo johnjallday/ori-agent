@@ -169,8 +169,9 @@ func TestInboxPlacementHandoff_NoModelNoEffectsReplayAndExactPreparation(t *test
 	if err := os.WriteFile(filepath.Join(root, "new.pdf"), []byte("new"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.builder.folderAgentService.StationLook("local", workspaceID); err == nil {
-		t.Fatal("changed folder offered stale pile")
+	view, err = f.builder.folderAgentService.View(t.Context(), "local", workspaceID)
+	if err != nil || !view.StationOffer || view.FilingPile != nil {
+		t.Fatal("the inventory changed, not the approved folder", view.FilingPile, err)
 	}
 
 	if bytes, err := os.ReadFile(filepath.Join(root, "invoice.pdf")); err != nil || string(bytes) != "unchanged synthetic source" {

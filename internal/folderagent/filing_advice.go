@@ -32,6 +32,12 @@ func (s *Service) releasedAdviceView(ctx context.Context, owner, id string) (Vie
 	}
 	v := View{WorkspaceID: id, WorkspaceName: r.WorkspaceName, AgentName: r.AgentName, FolderName: r.FolderName, State: StateSetUp,
 		Chat: s.chatRef(ctx, id), UpdatedAt: r.UpdatedAt, FilingRecommendationDone: true}
+	// The historical report stays inert. Offer a separate review only if
+	// the workspace itself still qualifies independently of that receipt.
+	v.StationOffer = s.CanOfferGuidedStation(owner, id)
+	if s.deps.Workspaces != nil {
+		v.Route = s.deps.Workspaces.Route(id)
+	}
 	if !completeStationMap(r.Map) {
 		v.FilingReviewHint = "partial"
 	}

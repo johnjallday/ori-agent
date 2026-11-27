@@ -63,8 +63,13 @@ a controlled response to test cloud disclosure and decline, not a live provider.
 
 For the report’s **Set it up** route, use `ORI_STATION_ADVICE=partial` or
 `complete` with the first command. The manager’s recommendation finishes without
-changing its toolbox, installing Filing or leaving a clock running. Only the
-complete look continues through **Build** and File/Undo. To check an already
+changing its toolbox, installing Filing or leaving a clock running. Both can
+proceed to **Build**: the partial case offers no count and the station scans 13
+top-level files, not the 2,001 nested files. The complete case also tests File
+and Undo. `ORI_STATION_ADVICE=before-look ORI_GUIDED_LOOK_EMPTY=1` builds from
+the welcome card and scans an empty folder without starting the manager look.
+To check an already
 affected workspace, use `ORI_STATION_ADVICE=legacy-seed` with `--rev f7c2c5d15`,
 then `ORI_STATION_ADVICE=legacy-check` with `--sandbox <printed sandbox>` on
-the current build. The old receipt is visible without changing its permissions.
+the current build. Viewing the old receipt does not change permissions. A
+separately reviewed Build can then install Filing and run its first scan.

@@ -699,7 +699,7 @@ export function commanderPresenter(
   const pileView = () =>
     map.filingStation &&
     map.showing?.() &&
-    last?.view?.filingPile &&
+    last?.view?.stationOffer &&
     !globalThis.window?.WorkspaceCapabilities?.isInstalled?.('file-janitor')
       ? last.view
       : null;

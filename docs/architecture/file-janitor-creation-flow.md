@@ -22,8 +22,10 @@ model. Do not describe that conversation as necessarily on-device.
 
 ### Building on the workspace Map
 
-A current saved look can offer Filing beside the manager with the loose count
-and up to six sample names. Missing or partial evidence is not a zero count.
+A verified workspace can offer Filing beside the manager without a file count.
+A complete current look can add the loose count and up to six sample names.
+Opening Build from a report or the Documents welcome card goes to the Map's
+read-only review, not a recursive look. Missing or partial evidence is not zero.
 Dismissing or restoring the offer cannot start work. **Build the station** reviews
 the existing folder, install and manager, metadata grant, first scan and optional
 monitoring. The building shows only stages proved by receipts. Reload observes

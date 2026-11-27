@@ -162,7 +162,7 @@
   isolation: isolate;
   pointer-events: none;
 }
-.filing-station-plot::before {
+.filing-station-plot:not(:empty)::before {
   content: "";
   position: absolute;
   width: 1.6rem;
