@@ -111,7 +111,7 @@ async function musicGroup(page: Page) {
 }
 
 for (const phone of [false, true])
-  test(`linked Track-2 reveals its original only on disclosure (${phone ? 'phone, dark' : 'desktop, light'})`, async ({
+  test(`a group lists its fed folder once and preserves nested link ownership (${phone ? 'phone, dark' : 'desktop, light'})`, async ({
     page
   }) => {
     test.setTimeout(60000);
@@ -135,6 +135,7 @@ for (const phone of [false, true])
       'Project',
       join(dirname(project), 'Track-1')
     );
+    await linkedFixture(page, demo.id, 'Picker Songs', dirname(project));
     const absent = join(fixtures, 'Filed');
     mkdirSync(absent);
     const missing = await linkedFixture(page, track.id, 'Archive', absent);
@@ -156,25 +157,18 @@ for (const phone of [false, true])
       )
         reads.push(`${r.method()} ${path}`);
     });
-    await row(page, 'Linked workspaces').click();
-    await row(page, demo.name).click();
-    await keyed(page, sibling.id).click();
-    await keyed(page, `${sibling.id}/s/files`).click();
-    await keyed(page, `${sibling.id}/l/${siblingRef}`).press('Enter');
+    await expect(row(page, 'Folders on this Mac')).toBeVisible();
+    await expect(row(page, 'Stored in Ori')).toBeVisible();
+    await expect(row(page, 'Project Linked folder')).toHaveCount(0);
+    await row(page, sibling.name).press('Enter');
     await keyed(page, `${sibling.id}/lf/${siblingRef}/Song.rpp`).press('Enter');
     await expect(reader(page).locator('.wf-crumb')).toHaveText(
       'Track-1 / Files / Project / Song.rpp'
     );
     if (phone) await reader(page).getByRole('button', { name: 'Back to files' }).press('Enter');
-    await keyed(page, sibling.id).click();
+    await row(page, sibling.name).click();
     await row(page, track.name).click();
-    await keyed(page, `${track.id}/s/files`).click();
-    await expect(row(page, 'Project Linked folder')).toBeVisible();
-    expect(reads.splice(0)).toEqual([
-      `GET /api/workspaces/${sibling.id}/directories/${siblingRef}/entries`
-    ]);
-    await row(page, 'Project Linked folder').click();
-    await row(page, 'Song.rpp').press('Enter');
+    await keyed(page, `${track.id}/lf/${ref}/Song.rpp`).press('Enter');
     await expect(reader(page).locator('.wf-crumb')).toHaveText(
       'Track-2 / Files / Project / Song.rpp'
     );
@@ -186,15 +180,14 @@ for (const phone of [false, true])
       await reader(page).getByRole('button', { name: 'Back to files' }).press('Enter');
       await expect(row(page, 'Song.rpp')).toBeFocused();
     }
-    await row(page, 'Archive Linked folder').click();
+    await expect(row(page, 'Archive Linked folder')).toHaveAttribute('aria-expanded', 'true');
     await expect(row(page, 'Folder unavailable. Retry')).toBeVisible();
     await row(page, 'Folder unavailable. Retry').scrollIntoViewIfNeeded();
     await page.screenshot({
       path: join(linkedEvidence, phone ? 'unavailable-phone.png' : 'unavailable.png')
     });
-    expect(reads).toEqual(
-      [ref, missing].map(id => `GET /api/workspaces/${track.id}/directories/${id}/entries`)
-    );
+    expect(reads).toContain(`GET /api/workspaces/${track.id}/directories/${ref}/entries`);
+    expect(reads).not.toContain(`POST /api/workspaces/${track.id}/directories/${missing}/open`);
     await mode(page, 'map').click();
     await expect(viewport).toBeVisible();
     expect(await camera()).toEqual(moved);
@@ -222,8 +215,6 @@ test('a linked Python file previews, opens in an editor, and moves to Trash only
   test.skip(process.platform !== 'darwin', 'native file actions require the local Mac');
   await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
   await ready(page);
-  await row(page, 'Files').click();
-  await row(page, 'Downloads Linked folder').click();
   await row(page, 'example-project').click();
   await row(page, name).press('Enter');
   await expect(reader(page).locator('pre')).toHaveText(code);
@@ -271,8 +262,6 @@ test('Trash explains which permission to check, without retrying the move', asyn
   await linkedFixture(page, ws.id, 'Downloads', root);
   await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
   await ready(page);
-  await row(page, 'Files').click();
-  await row(page, 'Downloads Linked folder').click();
   await row(page, name).press('Enter');
   const preview = reader(page).getByRole('article');
   const trash = preview.getByRole('button', { name: 'Move to Trash…' });
@@ -324,8 +313,6 @@ test('Contents supports right-click, individual picks and a range without includ
   });
   await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
   await ready(page);
-  await row(page, 'Files').click();
-  await row(page, 'Downloads Linked folder').click();
   const a = row(page, 'a.txt'),
     b = row(page, 'b.txt'),
     c = row(page, 'c.txt'),
@@ -393,8 +380,7 @@ test('color and move linked folders and files in Contents, then trash a whole fo
   const visit = async () => {
     await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
     await ready(page);
-    await row(page, 'Files').click();
-    await row(page, 'Downloads Linked folder').click();
+    await expect(row(page, 'Downloads Linked folder')).toHaveAttribute('aria-expanded', 'true');
   };
   await visit();
   await row(page, src).click({ button: 'right' });
@@ -527,9 +513,7 @@ test('a linked alternate opens only by explicit sandbox dispatch; disconnect ref
   page.on('request', r => {
     if (r.url().endsWith(`${api}/open`)) sent.push(r.postDataJSON().path);
   });
-  await row(page, 'Files').click();
   await expect(row(page, 'Stored in Ori')).toBeVisible();
-  await row(page, 'Session originals Linked folder').click();
   await row(page, 'Song.rpp').click();
   await row(page, 'Alternate.rpp').press('Enter');
   const open = reader(page).getByRole('button', { name: 'Open in default app' });
