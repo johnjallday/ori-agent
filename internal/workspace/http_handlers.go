@@ -39,6 +39,7 @@ type HTTPHandler struct {
 	folderWorkspaceResolver folderWorkspaceResolver
 	openFolder              func(string) error
 	openFile                func(string) error
+	openLinkedReader        func(string) error
 	linkedSelectionKey      []byte
 	linkedDesktop           bool // native launch policy is macOS only
 	revealFile              func(string) error
@@ -66,6 +67,7 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 		eventBus:           eventBus,
 		openFolder:         platform.OpenFolder,
 		openFile:           platform.OpenFile,
+		openLinkedReader:   openLinkedReader,
 		linkedSelectionKey: []byte(rand.Text()),
 		linkedDesktop:      runtime.GOOS == "darwin",
 		revealFile:         platform.RevealInFileManager,

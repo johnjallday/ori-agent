@@ -399,6 +399,10 @@ func (h *HTTPHandler) ReadDirectoryFile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", contentType)
+	// A linked HTML document is user data, never an Ori page authorized
+	// to call same-origin workspace APIs when opened in a browser tab.
+	w.Header().Set("Content-Security-Policy", workspaceOutputPolicy)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-File-Path", filePath)
 	w.Header().Set("X-Directory-ID", dirID)
 	if _, writeErr := w.Write(content); writeErr != nil {

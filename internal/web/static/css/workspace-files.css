@@ -28,7 +28,76 @@
 .wf-index .wf-kicker {
   padding-inline: 0.65rem;
 }
+.wf-select-hint,
+.wf-trash-status {
+  margin: 0.5rem 0.65rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.wf-trash-status:empty {
+  margin: 0;
+}
+.wf-access-help {
+  margin-block: 0.65rem;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 2px solid var(--border-color);
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+.wf-access-help p {
+  margin-block: 0.4rem;
+}
+.wf-access-help summary {
+  cursor: pointer;
+}
+.wf-trash-review {
+  width: min(28rem, 90vw);
+  max-height: 85vh;
+  overflow: auto;
+  padding: 1.25rem;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+.wf-trash-review::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+.wf-trash-review select {
+  display: block;
+  width: 100%;
+  margin: 0.4rem 0 1rem;
+}
+.wf-tree .wf-drop-target {
+  outline: 2px solid var(--focus-color);
+  outline-offset: -2px;
+  background: var(--bg-tertiary);
+}
+.wf-tree [data-folder-color] > .cockpit-tree-icon:nth-child(2) {
+  color: var(--wf-folder-color);
+  fill: var(--wf-folder-color);
+  fill-opacity: 0.22;
+}
+.wf-swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-right: 0.4em;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.wf-color-review [aria-pressed="true"] {
+  border-color: var(--focus-color);
+}
+.wf-trash-review ul {
+  max-height: 35vh;
+  overflow: auto;
+  padding-inline-start: 1.5rem;
+  overflow-wrap: anywhere;
+}
 .wf-tree {
+  user-select: none;
   overflow: auto;
   max-height: 65vh;
   min-height: 14rem;
@@ -109,6 +178,12 @@
   border: 1px solid var(--border-color);
   border-radius: 5px;
   padding: 0.45rem 0.75rem;
+}
+.wf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
 }
 .wf-action:disabled {
   color: var(--text-secondary);

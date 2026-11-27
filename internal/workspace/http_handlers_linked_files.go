@@ -80,17 +80,21 @@ func (h *HTTPHandler) ListLinkedFilePage(w http.ResponseWriter, r *http.Request)
 	}
 	type listedEntry struct {
 		DirectoryEntry
-		Selection string `json:"selection,omitempty"`
+		linkedActions
 	}
 	entries := make([]listedEntry, 0, len(listing.Entries))
 	local := h.linkedDesktop && h.openFile != nil && linkedOpenLocal(r)
 	expires := time.Now().Add(linkedSelectionTTL).Unix()
 	for _, entry := range listing.Entries {
 		item := listedEntry{DirectoryEntry: entry}
-		if local && entry.Kind == "file" {
-			item.Selection = h.linkedSelection(source, listing.rootIdentity, entry, expires)
+		if local && (entry.Kind == "file" && entry.mode.IsRegular() || entry.Kind == "folder" && entry.folderVerified) {
+			item.linkedActions = h.linkedActions(source, listing.rootIdentity, entry, expires)
 		}
 		entries = append(entries, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "partial": listing.Truncated, "desktop_disabled": platform.DesktopOpenDisabled()})
+	result := map[string]any{"entries": entries, "partial": listing.Truncated, "desktop_disabled": platform.DesktopOpenDisabled()}
+	if local && r.URL.Query().Get("path") == "" && listing.rootIdentity != "" && h.typedFolderPaths != nil {
+		result["destination_selection"] = h.destinationSelection(source, listing.rootIdentity, "", listing.rootIdentity, expires)
+	}
+	writeJSON(w, http.StatusOK, result)
 }

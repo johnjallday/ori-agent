@@ -1,5 +1,4 @@
-// Read-only workspace detail surface. Share Home's qualified keys and read
-// adapters, not its editor, menus, tab persistence or cross-workspace index.
+// Workspace detail reader. Browsing never launches an app or changes a file.
 import {
   loadFilePreview,
   loadLinkedPage,
@@ -16,6 +15,17 @@ import {
   readWorkspaceTree
 } from './workspace-detail-members.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
+import { chooseFolderColor, folderColor } from './workspace-folder-colors.js';
+import {
+  canDrop,
+  countItems,
+  isFolder,
+  reviewItems,
+  trashAccessHelp,
+  trashable,
+  trashLabel
+} from './workspace-files-actions.js';
+import { openRowMenu, closeRowMenu } from './home-tree-menu.js';
 import { escapeHtml as esc, renderMarkdown } from './note-editor.js';
 
 const sections = [
@@ -26,8 +36,22 @@ const sections = [
 const linkedBranch = row => row.kind === 'linked' || row.kind === 'linkedFolder';
 const loadable = row => row.kind === 'section' || linkedBranch(row);
 
+async function linkedRequest(row, action, selection, fetchImpl, destination = {}) {
+  const base = `/api/workspaces/${encodeURIComponent(row.workspaceId)}/directories/${encodeURIComponent(row.meta.dirId)}`;
+  const response = await fetchImpl(`${base}/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: row.meta.path, selection, ...destination })
+  });
+  if (!response.ok) throw await responseError(response);
+  return response.json();
+}
+
 export async function readPreview(row, options = {}) {
-  if (row.kind === 'linkedFile') return { kind: 'none' };
+  if (row.kind === 'linkedFile')
+    return row.meta.previewSelection
+      ? linkedRequest(row, 'preview', row.meta.previewSelection, options.fetchImpl || fetch)
+      : { kind: 'none' };
   if (row.kind === 'file')
     return loadFilePreview(row.workspaceId, row.meta.path, { ...options, size: row.meta.size });
   if (row.kind !== 'note') throw new Error('Unsupported item');
@@ -95,6 +119,7 @@ export class WorkspaceFilesView {
     this.focusKey = root.id;
     this.previewVersion = 0;
     this.opening = new Set();
+    this.picked = new Map(); // visible rows and the exact tokens originally selected
   }
 
   enter(root) {
@@ -109,12 +134,15 @@ export class WorkspaceFilesView {
       return;
     }
     this.controller = new AbortController();
-    this.host.innerHTML = `<aside class="wf-index"><h2 class="wf-kicker">Contents</h2><div class="wf-tree" role="tree" aria-label="${esc(root.name)} contents"></div></aside><article class="wf-preview" aria-label="Item preview"><button type="button" class="wf-back" data-files-back>${iconHTML('back')}Back to files</button><span class="wf-kicker">Preview</span><p class="wf-crumb"></p><h2 tabindex="-1" aria-live="polite" aria-atomic="true"></h2><div class="wf-body"></div></article>`;
+    this.host.innerHTML = `<aside class="wf-index"><h2 class="wf-kicker">Contents</h2><p class="wf-select-hint" hidden>Drag items to a folder, ⌘/Ctrl-click to select, or Shift-click a range.</p><button class="wf-action" type="button" data-color-picked hidden>Folder color…</button><button class="wf-action" type="button" data-move-picked hidden>Move to…</button><button class="wf-action" type="button" data-trash-picked hidden></button><div class="wf-trash-status" role="status"></div><button class="wf-action" type="button" data-refresh-trash-folder hidden>Refresh folder</button><div class="wf-tree" role="tree" aria-multiselectable="true" aria-label="${esc(root.name)} contents"></div></aside><article class="wf-preview" aria-label="Item preview"><button type="button" class="wf-back" data-files-back>${iconHTML('back')}Back to files</button><span class="wf-kicker">Preview</span><p class="wf-crumb"></p><h2 tabindex="-1" aria-live="polite" aria-atomic="true"></h2><div class="wf-body"></div></article>`;
     this.tree = this.host.querySelector('[role="tree"]');
     this.article = this.host.querySelector('article');
     const options = { signal: this.controller.signal };
     this.host.addEventListener('click', e => this.click(e), options);
     this.tree.addEventListener('keydown', e => this.keydown(e), options);
+    this.tree.addEventListener('contextmenu', e => this.contextMenu(e), options);
+    for (const type of ['dragstart', 'dragover', 'dragleave', 'drop', 'dragend'])
+      this.tree.addEventListener(type, e => this.drag(e), options);
     this.paintTree();
     this.paintPreview();
     this.syncExpanded();
@@ -173,6 +201,9 @@ export class WorkspaceFilesView {
         showPreview: this.showPreview
       };
     }
+    closeRowMenu({ restoreFocus: false });
+    this.picked.clear();
+    this.pickAnchor = this.trashRefreshParent = this.dragRows = null;
     this.stopWatchingLink();
     this.controller.abort();
     this.controller = null;
@@ -304,6 +335,28 @@ export class WorkspaceFilesView {
   paintTree() {
     const focused = this.tree.contains(document.activeElement);
     this.rows = this.visibleRows();
+    const live = new Map(this.rows.filter(trashable).map(r => [r.id, r.meta.trashSelection]));
+    for (const [id, r] of this.picked)
+      if (live.get(id) !== r.meta.trashSelection) this.picked.delete(id);
+    const bulk = this.host.querySelector('[data-trash-picked]');
+    bulk.hidden =
+      !this.picked.size ||
+      (this.picked.size === 1 && this.selected?.id === this.picked.keys().next().value);
+    const picks = [...this.picked.values()];
+    bulk.textContent = trashLabel(picks);
+    this.host.querySelector('[data-color-picked]').hidden =
+      !picks.length || !picks.every(r => r.meta?.colorKey);
+    const move = this.host.querySelector('[data-move-picked]');
+    move.hidden = bulk.hidden || !picks.every(r => r.meta.moveSelection);
+    move.disabled = !!this.trashing;
+    bulk.disabled = !!this.trashing;
+    this.host.querySelector('.wf-select-hint').hidden = !live.size;
+    this.host.querySelector('[data-refresh-trash-folder]').hidden =
+      !this.trashRefreshParent ||
+      !this.rows.some(r => r.id === this.trashRefreshParent && this.expanded.has(r.id));
+    // Disclosure, relinking or a membership update can prune the last pick
+    // without a click. Don't leave a stale selection summary in Preview.
+    if (!this.selected) this.paintPreview();
     if (!this.rows.some(r => r.id === this.focusKey)) this.focusKey = this.root.id;
     this.tree.innerHTML = this.rows
       .map((r, i) => {
@@ -311,7 +364,8 @@ export class WorkspaceFilesView {
           linkedBranch(r) ||
           ['workspace', 'group', 'section', 'members', 'folder'].includes(r.kind);
         const expanded = this.expanded.has(r.id);
-        return `<div role="treeitem" tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" data-key="${esc(r.id)}" aria-level="${r.level}" aria-selected="${(this.selected?.id || this.branchSelection) === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(r.kind === 'members' ? 'linkedFolders' : rowIconName(r))}<span>${esc(r.label)}</span>${r.kind === 'linked' ? '<small class="wf-source-label">Linked folder</small>' : ''}</div>`;
+        const color = folderColor(r);
+        return `<div role="treeitem" ${color ? `data-folder-color="${color.name}" aria-description="${color.name} folder"` : ''} tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" ${r.meta?.moveSelection ? 'draggable="true"' : ''} data-key="${esc(r.id)}" aria-level="${r.level}" aria-selected="${this.picked.size ? this.picked.has(r.id) : (this.selected?.id || this.branchSelection) === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level};${color ? `--wf-folder-color:${color.hex}` : ''}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(r.kind === 'members' ? 'linkedFolders' : rowIconName(r))}<span>${esc(r.label)}</span>${r.kind === 'linked' ? '<small class="wf-source-label">Linked folder</small>' : ''}</div>`;
       })
       .join('');
     if (focused) this.focusRow(this.focusKey);
@@ -341,8 +395,40 @@ export class WorkspaceFilesView {
       this.focusRow(this.selected?.id || this.focusKey);
       return;
     }
+    if (event.target.closest('[data-color-picked]')) {
+      this.colorRows([...this.picked.values()]);
+      return;
+    }
     if (event.target.closest('[data-open-linked]')) {
       void this.openSelected();
+      return;
+    }
+    if (
+      event.target.closest(
+        '[data-trash-linked], [data-trash-picked], [data-move-linked], [data-move-picked]'
+      )
+    ) {
+      const picks = event.target.closest('[data-trash-picked], [data-move-picked]')
+        ? [...this.picked.values()]
+        : [this.selected];
+      void this.changeItems(
+        picks,
+        !!event.target.closest('[data-move-linked], [data-move-picked]')
+      );
+      return;
+    }
+    if (event.target.closest('[data-refresh-trash-folder]')) {
+      const parent = this.rows.find(r => r.id === this.trashRefreshParent);
+      this.trashRefreshParent = null;
+      this.host.querySelector('.wf-trash-status').textContent = '';
+      if (parent && this.expanded.has(parent.id)) {
+        if (this.selected?.parent === parent.id) {
+          ++this.previewVersion;
+          this.selected = this.value = this.error = null;
+        }
+        void this.load(parent);
+        this.focusRow(parent.id);
+      }
       return;
     }
     if (event.target.closest('[data-refresh-links]') && this.selected) {
@@ -354,9 +440,123 @@ export class WorkspaceFilesView {
     if (target && this.tree.contains(target)) {
       const row = this.rows[Number(target.dataset.row)];
       this.focusKey = row.id;
-      this.activate(row);
+      if (trashable(row) && (event.metaKey || event.ctrlKey || event.shiftKey))
+        this.pick(row, event.shiftKey ? 'range' : 'toggle');
+      else this.activate(row);
     } else if (event.target.closest('[data-retry-preview]') && this.selected)
       this.select(this.selected);
+  }
+
+  pick(row, mode) {
+    const sameFolder = [...this.picked.values()].every(r => r.parent === row.parent);
+    if (!sameFolder || mode === 'only') this.picked.clear();
+    if (mode === 'range' && sameFolder && this.pickAnchor?.parent === row.parent) {
+      const files = this.rows.filter(r => r.parent === row.parent && trashable(r));
+      const start = files.findIndex(
+        r =>
+          r.id === this.pickAnchor.id &&
+          r.meta.trashSelection === this.pickAnchor.meta.trashSelection
+      );
+      const end = files.findIndex(r => r.id === row.id);
+      this.picked.clear();
+      if (start !== -1)
+        for (const r of files.slice(Math.min(start, end), Math.max(start, end) + 1))
+          this.picked.set(r.id, r);
+      else this.pickAnchor = row;
+      this.picked.set(row.id, row);
+    } else {
+      if (mode === 'toggle' && this.picked.has(row.id)) this.picked.delete(row.id);
+      else this.picked.set(row.id, row);
+      this.pickAnchor = row;
+    }
+    ++this.previewVersion;
+    this.selected = this.value = this.error = this.branchSelection = null;
+    this.showPreview = false;
+    this.focusKey = row.id;
+    this.paintTree();
+    this.paintPreview();
+    this.focusRow(row.id);
+  }
+
+  destination(row) {
+    if (!row || !linkedBranch(row)) return null;
+    const destinationSelection =
+      row.meta.destinationSelection || this.sections.get(row.id)?.destinationSelection;
+    return destinationSelection ? { ...row, destinationSelection } : null;
+  }
+
+  drag(event) {
+    const el = event.target.closest('[data-row]');
+    const row = el && this.rows[Number(el.dataset.row)];
+    if (event.type === 'dragstart') {
+      if (!row?.meta?.moveSelection || this.trashing) return;
+      this.dragRows = this.picked.has(row.id) ? [...this.picked.values()] : [row];
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('application/x-ori-tree-selection', 'move');
+      return;
+    }
+    if (!this.dragRows) return; // never interpret external filenames or paths
+    this.tree.querySelector('.wf-drop-target')?.classList.remove('wf-drop-target');
+    if (event.type === 'dragend') {
+      this.dragRows = null;
+      return;
+    }
+    if (!event.dataTransfer?.types.includes('application/x-ori-tree-selection')) return;
+    const dest = this.destination(row);
+    if (!canDrop(this.dragRows, dest)) return;
+    if (event.type === 'dragover') {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      el.classList.add('wf-drop-target');
+    } else if (event.type === 'drop') {
+      event.preventDefault();
+      const rows = this.dragRows;
+      this.dragRows = null;
+      void this.changeItems(rows, true, dest);
+    }
+  }
+
+  colorRows(rows) {
+    if (
+      !this.controller ||
+      !rows.length ||
+      !rows.every(
+        r =>
+          r.meta?.colorKey &&
+          this.rows.some(live => live.id === r.id && live.meta?.colorKey === r.meta.colorKey)
+      )
+    )
+      return;
+    chooseFolderColor(rows, this.controller.signal, message => {
+      this.host.querySelector('.wf-trash-status').textContent = message;
+      this.paintTree();
+    });
+  }
+
+  contextMenu(event, keyboard = false) {
+    const el = event.target.closest('[data-row]');
+    const row = el && this.rows[Number(el.dataset.row)];
+    if ((!trashable(row) && !row?.meta?.colorKey) || this.trashing) return;
+    event.preventDefault();
+    const box = el.getBoundingClientRect();
+    if (trashable(row) && !this.picked.has(row.id)) this.pick(row, 'only');
+    else this.focusRow(row.id);
+    const rows = trashable(row) ? [...this.picked.values()] : [row];
+    openRowMenu({
+      items: [
+        ...(rows.every(r => r.meta.colorKey) ? [{ action: 'color', label: 'Folder color…' }] : []),
+        ...(rows.every(r => r.meta.moveSelection) ? [{ action: 'move', label: 'Move to…' }] : []),
+        ...(rows.every(trashable)
+          ? [{ action: 'trash', label: trashLabel(rows), danger: true }]
+          : [])
+      ],
+      label: rows.length === 1 ? `Actions for ${row.label}` : `Actions for ${countItems(rows)}`,
+      at: keyboard ? { x: box.left + 16, y: box.bottom } : { x: event.clientX, y: event.clientY },
+      findOrigin: () => this.tree?.querySelector(`[data-key="${CSS.escape(row.id)}"]`),
+      event,
+      onChoose: action =>
+        action === 'color' ? this.colorRows(rows) : void this.changeItems(rows, action === 'move')
+    });
   }
 
   keydown(event) {
@@ -365,6 +565,17 @@ export class WorkspaceFilesView {
     const i = Number(target.dataset.row),
       row = this.rows[i];
     switch (event.key) {
+      case 'ContextMenu':
+      case 'F10':
+        if (event.key === 'F10' && !event.shiftKey) return;
+        this.contextMenu(event, true);
+        return;
+      case 'Backspace':
+      case 'Delete':
+        if (!trashable(row) || (this.picked.size && !this.picked.has(row.id))) return;
+        if (!event.repeat)
+          void this.changeItems(this.picked.size ? [...this.picked.values()] : [row]);
+        break;
       case 'ArrowDown':
         this.focusRow(this.rows[i + 1]?.id);
         break;
@@ -386,6 +597,11 @@ export class WorkspaceFilesView {
         else this.focusRow(row.parent);
         break;
       case ' ':
+        if (trashable(row) && (event.metaKey || event.ctrlKey || event.shiftKey)) {
+          this.pick(row, event.shiftKey ? 'range' : 'toggle');
+          break;
+        }
+      // fall through to ordinary activation
       case 'Enter':
         this.focusKey = row.id;
         this.activate(row);
@@ -397,17 +613,26 @@ export class WorkspaceFilesView {
   }
 
   activate(row) {
+    if (row.kind === 'status') return;
     this.saved = null;
+    this.picked.clear();
+    this.pickAnchor = null;
     if (row.kind === 'file' || row.kind === 'note' || row.kind === 'linkedFile') {
       void this.select(row);
       return;
+    }
+    if (isFolder(row) && trashable(row)) {
+      this.picked.set(row.id, row);
+      this.pickAnchor = row;
+      ++this.previewVersion;
+      this.selected = this.value = this.error = null;
+      this.showPreview = false;
     }
     if (row.kind === 'retry') {
       if (row.parent === this.linkedKey) void this.loadMembers();
       else void this.load(this.rows.find(r => r.id === row.parent));
       return;
     }
-    if (row.kind === 'status') return;
     if (this.expanded.has(row.id)) {
       // Never reuse a cached link or its children on a new disclosure.
       if (loadable(row)) {
@@ -497,6 +722,12 @@ export class WorkspaceFilesView {
   async select(row, { restore = false } = {}) {
     const version = ++this.previewVersion;
     this.selected = row;
+    this.picked.clear();
+    this.pickAnchor = null;
+    if (trashable(row)) {
+      this.pickAnchor = row;
+      this.picked.set(row.id, row);
+    }
     this.openResult = null;
     if (row.kind === 'linkedFile') this.watchLink(row.workspaceId);
     this.branchSelection = null;
@@ -522,19 +753,132 @@ export class WorkspaceFilesView {
     this.paintPreview();
   }
 
+  async changeItems(rows, move = false, dropped = null) {
+    const controller = this.controller;
+    const field = move ? 'moveSelection' : 'trashSelection';
+    const live = row =>
+      controller === this.controller &&
+      trashable(row) &&
+      !this.opening.has(row.id) &&
+      (row.workspaceId === this.root.id || this.members.has(row.workspaceId)) &&
+      !!row.meta[field] &&
+      this.rows.some(r => r.id === row.id && r.meta?.[field] === row.meta[field]);
+    if (!controller || this.trashing || !rows.length) return;
+    const status = this.host.querySelector('.wf-trash-status');
+    if (!rows.every(r => live(r) && r.parent === rows[0].parent)) {
+      status.textContent = 'Selection unavailable. Select the items again.';
+      return;
+    }
+    const destinations = move
+      ? this.rows.map(r => this.destination(r)).filter(d => canDrop(rows, d))
+      : null;
+    if (move && !destinations.length) {
+      status.textContent =
+        'Expand another folder in this linked tree to choose it as a destination.';
+      return;
+    }
+    this.trashing = true;
+    const parent = rows[0].parent;
+    let moved = 0;
+    try {
+      const choice = await reviewItems(rows, controller.signal, destinations, dropped);
+      if (!choice) return;
+      const target = move
+        ? [choice.meta.dirName, choice.meta.path].filter(Boolean).join(' / ')
+        : 'Trash';
+      this.trashRefreshParent = null;
+      for (const row of rows) {
+        if (!live(row)) throw new Error('The selection changed. Refresh Files and select again.');
+        if (
+          move &&
+          !this.rows.some(
+            r =>
+              r.id === choice.id &&
+              this.destination(r)?.destinationSelection === choice.destinationSelection
+          )
+        )
+          throw new Error('The destination changed. Select it again.');
+        status.textContent = `Moving ${row.label} to ${target}…`;
+        await linkedRequest(
+          row,
+          move ? 'move-item' : isFolder(row) ? 'trash-folder' : 'trash-file',
+          row.meta[field],
+          this.scopedFetch(),
+          move
+            ? { destination: choice.meta.path, destination_selection: choice.destinationSelection }
+            : {}
+        );
+        moved++;
+        if (controller !== this.controller) return;
+        const state = this.sections.get(row.parent);
+        if (state?.rows)
+          state.rows = state.rows.filter(
+            r => r.id !== row.id || r.meta?.trashSelection !== row.meta.trashSelection
+          );
+        if (
+          this.selected?.id === row.id &&
+          this.selected.meta.trashSelection === row.meta.trashSelection
+        ) {
+          ++this.previewVersion;
+          this.selected = this.value = this.error = null;
+          this.showPreview = false;
+        }
+        if (isFolder(row)) {
+          for (const key of this.expanded)
+            if (key === row.id || key.startsWith(`${row.id}/`)) this.expanded.delete(key);
+          for (const key of this.sections.keys())
+            if (key === row.id || key.startsWith(`${row.id}/`)) this.sections.delete(key);
+          if (
+            this.selected?.workspaceId === row.workspaceId &&
+            this.selected.meta.dirId === row.meta.dirId &&
+            this.selected.meta.path?.startsWith(`${row.meta.path}/`)
+          ) {
+            ++this.previewVersion;
+            this.selected = this.value = this.error = null;
+            this.showPreview = false;
+          }
+        }
+        if (this.focusKey === row.id) this.focusKey = parent;
+        this.paintTree();
+      }
+      status.textContent = `${rows.length === 1 ? rows[0].label : countItems(rows)} moved to ${target}.`;
+    } catch (err) {
+      if (controller === this.controller) {
+        this.trashRefreshParent = parent;
+        status.textContent = `${moved} of ${rows.length} confirmed moved. Stopped at ${rows[moved]?.label || 'file'}: ${err.message || 'Could not confirm the move.'}`;
+        const message = status.textContent;
+        const accessCode = move ? null : err.code;
+        const help = trashAccessHelp(accessCode);
+        if (help) status.insertAdjacentHTML('beforeend', help);
+        // On a narrow screen Contents is hidden while reading one file.
+        if (this.selected && this.selected.id === rows[moved]?.id) {
+          this.openResult = { message, accessCode, stale: [404, 409].includes(err.status) };
+          this.paintPreview();
+        }
+      }
+    } finally {
+      this.trashing = false;
+      if (controller === this.controller) {
+        if (move && moved) this.refreshLinks(rows[0].workspaceId);
+        else this.paintTree();
+        if (moved && this.focusKey === parent) this.focusRow(parent);
+      }
+    }
+  }
+
   async openSelected() {
     const row = this.selected;
     const version = this.previewVersion;
+    const selection = row?.meta?.selection;
     if (
       !this.controller ||
       row?.kind !== 'linkedFile' ||
-      !row.meta.selection ||
+      !selection ||
       this.opening.has(row.id) ||
       this.openResult?.stale ||
       (row.workspaceId !== this.root.id && !this.members.has(row.workspaceId)) ||
-      !this.rows.some(
-        current => current.id === row.id && current.meta?.selection === row.meta.selection
-      )
+      this.trashing ||
+      !this.rows.some(current => current.id === row.id && current.meta?.selection === selection)
     )
       return;
     this.opening.add(row.id);
@@ -542,19 +886,10 @@ export class WorkspaceFilesView {
     this.paintPreview();
     let result;
     try {
-      const response = await this.scopedFetch()(
-        `/api/workspaces/${encodeURIComponent(row.workspaceId)}/directories/${encodeURIComponent(row.meta.dirId)}/open`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: row.meta.path, selection: row.meta.selection })
-        }
-      );
-      if (!response.ok) throw await responseError(response);
-      result = { message: (await response.json()).message };
+      result = await linkedRequest(row, 'open', selection, this.scopedFetch());
     } catch (err) {
       result = {
-        message: err.message || 'Open request failed.',
+        message: err.message || 'File action failed.',
         stale: [404, 409].includes(err.status)
       };
     } finally {
@@ -579,21 +914,26 @@ export class WorkspaceFilesView {
           .filter(Boolean)
           .join(' / ')
       : '';
-    this.article.querySelector('h2').textContent = row?.label || 'Select a file or note';
+    this.article.querySelector('h2').textContent =
+      row?.label || (this.picked.size ? `${this.picked.size} selected` : 'Select a file or note');
     this.article.querySelector('.wf-body').innerHTML = !row
-      ? '<p>Open a section in Contents to start reading.</p>'
+      ? this.picked.size
+        ? '<p>Right-click a selected file for actions.</p>'
+        : '<p>Open a section in Contents to start reading.</p>'
       : this.error
         ? `<p>${esc(this.error.message)}</p><button type="button" data-retry-preview>Retry preview</button>`
         : this.value
           ? previewHTML(this.value, row.label)
           : '<p role="status">Loading preview…</p>';
-    if (row?.kind === 'linkedFile' && row.meta.selection) {
+    if (row?.kind === 'linkedFile' && (row.meta.selection || row.meta.trashSelection)) {
       const pending = this.opening.has(row.id);
+      const stale = this.openResult?.stale || [404, 409].includes(this.error?.status);
+      const disabled = pending || stale ? 'disabled' : '';
       this.article
         .querySelector('.wf-body')
         .insertAdjacentHTML(
-          'beforeend',
-          `<button type="button" class="wf-action" data-open-linked ${pending || this.openResult?.stale ? 'disabled' : ''}>Open in default app</button><p role="status">${esc(pending ? 'Requesting open…' : this.openResult?.message || '')}</p>${this.openResult?.stale ? '<button type="button" class="wf-action" data-refresh-links>Refresh Files</button>' : ''}`
+          'afterbegin',
+          `<div class="wf-actions">${row.meta.moveSelection ? `<button type="button" class="wf-action" data-move-linked ${disabled}>Move to…</button>` : ''}${row.meta.selection ? `<button type="button" class="wf-action" data-open-linked ${disabled}>${esc(row.meta.openLabel || 'Open in default app')}</button>` : ''}${row.meta.trashSelection ? `<button type="button" class="wf-action" data-trash-linked ${disabled}>Move to Trash…</button>` : ''}${stale ? '<button type="button" class="wf-action" data-refresh-links>Refresh Files</button>' : ''}</div><p role="status">${esc(pending ? 'Working…' : this.openResult?.message || '')}</p>${pending ? '' : trashAccessHelp(this.openResult?.accessCode)}`
         );
     }
   }

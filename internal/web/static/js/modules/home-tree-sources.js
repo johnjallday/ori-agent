@@ -704,22 +704,28 @@ const LOADERS = {
  * The APIs here answer errors as `{"message": …}` or `{"error": …}`; a body
  * that is neither is shown as it is, and an empty one falls back to the status.
  */
-export async function responseErrorMessage(response, fallback) {
+async function errorFields(response, fallback) {
   let body = '';
   try {
     body = await response.text();
   } catch (_) {
-    return fallback;
+    return { message: fallback };
   }
-  if (!body) return fallback;
+  if (!body) return { message: fallback };
   try {
     const parsed = JSON.parse(body);
-    if (parsed && typeof parsed.message === 'string' && parsed.message) return parsed.message;
-    if (parsed && typeof parsed.error === 'string' && parsed.error) return parsed.error;
+    if (parsed && typeof parsed.message === 'string' && parsed.message)
+      return { message: parsed.message, code: parsed.code };
+    if (parsed && typeof parsed.error === 'string' && parsed.error)
+      return { message: parsed.error };
   } catch (_) {
     // Not JSON: the text itself is the reason.
   }
-  return body.length > 200 ? fallback : body;
+  return { message: body.length > 200 ? fallback : body };
+}
+
+export async function responseErrorMessage(response, fallback) {
+  return (await errorFields(response, fallback)).message;
 }
 
 /**
@@ -728,7 +734,9 @@ export async function responseErrorMessage(response, fallback) {
  * is gone (404) from a request that failed.
  */
 export async function responseError(response) {
-  const error = new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+  const { message, code } = await errorFields(response, `HTTP ${response.status}`);
+  const error = new Error(message);
+  if (typeof code === 'string') error.code = code;
   error.status = response.status;
   return error;
 }
@@ -753,7 +761,12 @@ export async function loadWorkspaceContents(workspaceId, sectionId, { fetchImpl 
   });
   const linked = (payload.linked_sources || [])
     .map(({ id, name }) =>
-      row(workspaceId, 'linked', id, name, { dirId: id, dirName: name, path: '' })
+      row(workspaceId, 'linked', id, name, {
+        dirId: id,
+        dirName: name,
+        path: '',
+        colorKey: JSON.stringify([workspaceId, id])
+      })
     )
     .sort(byName);
   if (!linked.length && !payload.linked_sources_unavailable) return owned;
@@ -789,7 +802,18 @@ export async function loadLinkedPage(parent, { fetchImpl } = {}) {
         entry.kind === 'folder' ? 'linkedFolder' : 'linkedFile',
         `${dirId}/${entry.path}`,
         entry.name,
-        { dirName, dirId, path: entry.path, selection: entry.selection }
+        {
+          dirName,
+          dirId,
+          path: entry.path,
+          selection: entry.selection,
+          openLabel: entry.open_label,
+          previewSelection: entry.preview_selection,
+          trashSelection: entry.trash_selection,
+          moveSelection: entry.move_selection,
+          destinationSelection: entry.destination_selection,
+          colorKey: entry.color_key
+        }
       )
     )
     .sort(
@@ -802,7 +826,7 @@ export async function loadLinkedPage(parent, { fetchImpl } = {}) {
       kind: 'status',
       label: 'Partial listing — this folder has more entries.'
     });
-  return { rows };
+  return { rows, destinationSelection: payload.destination_selection };
 }
 
 /** Fetch one section of one workspace and return its capped rows. */

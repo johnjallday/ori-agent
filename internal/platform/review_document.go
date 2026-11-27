@@ -26,7 +26,16 @@ func ReviewDocumentViewer(name string) string {
 // OpenReviewDocument hands an already validated local review source to its
 // fixed system reader. Do not fall back to open(path) for unknown types.
 func OpenReviewDocument(path string) error {
-	viewer := ReviewDocumentViewer(path)
+	return openWithSystemReader(path, ReviewDocumentViewer(path))
+}
+
+// OpenTextDocument treats source files as documents, never as launch targets.
+func OpenTextDocument(path string) error { return openWithSystemReader(path, "TextEdit") }
+
+// OpenImageDocument uses Preview even when the user changed the file association.
+func OpenImageDocument(path string) error { return openWithSystemReader(path, "Preview") }
+
+func openWithSystemReader(path, viewer string) error {
 	if runtime.GOOS != "darwin" || DesktopOpenDisabled() || viewer == "" || !filepath.IsAbs(path) {
 		return errors.New("document opening is unavailable")
 	}
