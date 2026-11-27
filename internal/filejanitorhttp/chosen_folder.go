@@ -40,6 +40,10 @@ func (h *Handler) ChosenFolder(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Selection.Example = req.Example
 		p, err = h.service.ResolveExamplePath(owner, id, req.Selection.CandidateID, req.Example)
+		if err != nil {
+			_ = orihttp.RespondConflict(w, "That saved example or its folder is no longer available. Nothing was filed.")
+			return
+		}
 	} else {
 		resolver, ok := h.pathSelections.(interface {
 			ResolveFor(string, string) (string, error)

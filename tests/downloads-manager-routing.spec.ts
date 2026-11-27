@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { existsSync, mkdirSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  realpathSync,
+  renameSync,
+  utimesSync,
+  writeFileSync
+} from 'node:fs';
 import { join } from 'node:path';
 import { freshGuidedHQ } from './helpers/fresh-guided-hq';
 import { filingWorkspace } from './helpers/filing-workspace';
@@ -92,6 +99,10 @@ test('the Downloads manager reviews individual destinations without moving the r
   await expect(repeat).toContainText('You filed hotel-receipt.pdf in Travel/Receipts.');
   await expect(repeat.getByRole('button', { name: 'Choose another folder' })).toBeVisible();
   await page.screenshot({ path: `${evidence}/remembered-folder.png` });
+  await expect(row('unclear.pdf')).toContainText('No suggested destination');
+  await row('unclear.pdf').getByRole('button', { name: 'Choose a folder' }).click();
+  await folder.getByRole('button', { name: 'Cancel' }).click();
+  expect(existsSync(join(root, 'unclear.pdf'))).toBe(true);
   const acmeRoot = join(home, 'Acme');
   mkdirSync(acmeRoot);
   const acme = await filingWorkspace(request, 'Acme', acmeRoot, 'Acme');
@@ -104,6 +115,20 @@ test('the Downloads manager reviews individual destinations without moving the r
   await expect(repeat).toContainText('Is this for your travel records or for Acme?');
   await expect(repeat).toContainText('top level');
   await page.screenshot({ path: `${evidence}/two-destinations.png` });
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(value => {
+      document.documentElement.setAttribute('data-theme', value);
+      document.documentElement.setAttribute('data-bs-theme', value);
+    }, theme);
+    const send = repeat.getByRole('button', { name: 'Send to Acme' });
+    await send.focus();
+    await expect(send).toBeFocused();
+    expect(await repeat.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await repeat.screenshot({ path: `${evidence}/choice-${theme}-390.png` });
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
   await repeat.getByRole('button', { name: 'Review filing' }).click();
   await expect(folder).toContainText('File to Travel/Receipts?');
   expect(existsSync(join(root, 'hotel-receipt-may.pdf'))).toBe(true);
@@ -168,5 +193,18 @@ test('the Downloads manager reviews individual destinations without moving the r
   await page.screenshot({ path: `${evidence}/revoked.png` });
   expect(existsSync(join(root, 'client-proof-revised.pdf'))).toBe(true);
   expect(existsSync(join(acmeRoot, 'client-proof-revised.pdf'))).toBe(false);
+  expect((await (await request.get(base + '/filings')).json()).filings).toEqual(before);
+
+  seed('hotel-receipt-june.pdf');
+  await post(base + '/scan');
+  await page.goto(url!);
+  await row('hotel-receipt-june.pdf').getByRole('button', { name: 'Review filing' }).click();
+  await expect(folder).toContainText('File to Travel/Receipts?');
+  renameSync(receipts, receipts + '-moved');
+  mkdirSync(receipts);
+  await folder.getByRole('button', { name: 'File', exact: true }).click();
+  await expect(folder).toContainText('Nothing was filed');
+  expect(existsSync(join(root, 'hotel-receipt-june.pdf'))).toBe(true);
+  expect(existsSync(join(receipts, 'hotel-receipt-june.pdf'))).toBe(false);
   expect((await (await request.get(base + '/filings')).json()).filings).toEqual(before);
 });

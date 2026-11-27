@@ -34,21 +34,17 @@ export function renderDownloadsReview(doc, files, picture, choices, actions) {
     const row = make('article', 'fj-route-file');
     row.append(make('h4', 'fj-label', file.name));
     const example = examples.get(file.id);
-    row.append(
-      make(
-        'p',
-        'fj-sub',
-        example
-          ? `You filed ${example.name} in ${example.folder}.`
-          : 'No saved folder example matches this file.'
-      )
-    );
+    if (example) row.append(make('p', 'fj-sub', `You filed ${example.name} in ${example.folder}.`));
     const kind = file.decision_category || file.category;
     const matches =
       !file.needs_review || file.decision_category
         ? (picture.leaving || []).filter(c => c.kinds.includes(kind))
         : [];
     const route = matches.length === 1 ? matches[0] : null;
+    if (!route && !example)
+      row.append(
+        make('p', 'fj-sub', 'No suggested destination. Choose a folder or leave this file here.')
+      );
     if (route) {
       row.append(
         make(
@@ -116,7 +112,8 @@ async function reviewSend(file, route, { base, current, onFiled }, binding) {
   try {
     const query = new URLSearchParams({
       revision: binding.revision,
-      group_revision: binding.groupRevision
+      group_revision: binding.groupRevision,
+      ids: file.id
     });
     const response = await fetch(url + '?' + query);
     const { plan } = await response.json();
@@ -126,8 +123,13 @@ async function reviewSend(file, route, { base, current, onFiled }, binding) {
       !response.ok ||
       plan?.total !== 1 ||
       plan.send_count !== 1 ||
+      plan.items?.length !== 1 ||
+      plan.items[0].candidate_id !== file.id ||
+      plan.items[0].name !== file.name ||
+      plan.items[0].operation !== 'send' ||
       plan.sends?.[0]?.connection_id !== route.connection_id ||
       plan.sends[0].receiver_workspace_id !== route.receiver_workspace_id ||
+      plan.sends[0].receiver_name !== route.receiver_name ||
       !plan.plan_digest
     )
       throw new Error(refused);
