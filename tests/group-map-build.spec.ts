@@ -135,22 +135,15 @@ test('a group page draws its own district, and its coordinates are Home’s', as
   expect(saved.layout.positions[member.id]).toEqual(moved);
 
   await page.reload();
-  await zone.locator(`.ws-map-tile[data-ws-id="${member.id}"]`).waitFor({ timeout: 20000 });
-  const onGroupPage = await zone
-    .locator(`.ws-map-tile[data-ws-id="${member.id}"]`)
-    .evaluate(el => ({
-      left: parseFloat((el as HTMLElement).style.left),
-      top: parseFloat((el as HTMLElement).style.top)
-    }));
+  const tile = `.ws-map-tile[data-ws-id="${member.id}"]`;
+  // Both surfaces can paint an automatic lot before the saved layout arrives.
+  // Assert the actual saved coordinates, not equality of two transient paints.
+  await expect(zone.locator(tile)).toHaveCSS('left', `${moved.x}px`);
+  await expect(zone.locator(tile)).toHaveCSS('top', `${moved.y}px`);
 
   await page.goto('/');
-  const homeTile = page.locator(`.ws-map-tile[data-ws-id="${member.id}"]`);
-  await homeTile.waitFor({ timeout: 20000 });
-  const onHome = await homeTile.evaluate(el => ({
-    left: parseFloat((el as HTMLElement).style.left),
-    top: parseFloat((el as HTMLElement).style.top)
-  }));
-  expect(onHome).toEqual(onGroupPage);
+  await expect(page.locator(tile)).toHaveCSS('left', `${moved.x}px`);
+  await expect(page.locator(tile)).toHaveCSS('top', `${moved.y}px`);
 });
 
 test('a group’s Commander stands on its map, opens its Unit Sheet, and keeps where it is moved', async ({

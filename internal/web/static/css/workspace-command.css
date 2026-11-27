@@ -1637,7 +1637,7 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   white-space: nowrap;
   padding: 0 5px;
   border-inline-start: 2px solid currentColor;
-  background: var(--ws-panel);
+  background: var(--ws-panel-2);
   color: var(--ws-keeper);
   font: 11px/16px var(--ws-font-mono);
 }
@@ -10265,7 +10265,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
   height: auto;
 }
 .ws-cmd-grounds-court > strong {
-  color: var(--ws-keeper);
+  color: color-mix(in srgb, var(--ws-keeper) 65%, var(--ws-ink));
   font: bold 12px/1.6 var(--ws-font-mono);
   letter-spacing: 0.2em;
 }
