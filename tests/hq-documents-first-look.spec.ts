@@ -46,7 +46,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
     expect(result.eligible_count ?? 0).toBe(count);
     const depot = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
     await expect(depot).toBeVisible();
-    if (count) await expect(depot).toContainText(`Review ${count} files`);
+    if (count) await expect(depot).toContainText(`${count} to review`);
     await expect(depot).not.toHaveAttribute('data-station-part', /foundation|walls|roof/);
     expect(
       (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
@@ -386,7 +386,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
     expect((await readdir(root)).sort()).toEqual(stationTree);
     await verifyBytes();
     if (!reduced) await expect.poll(() => builtParts).toEqual(['foundation', 'walls', 'roof']);
-    await expect(building).toContainText('Review 13 files');
+    await expect(building).toContainText('13 to review');
     if (await closeReport.isVisible()) await closeReport.click();
     const collapse = page.locator('.commander-balloon:visible .commander-balloon__close');
     if (await collapse.isVisible()) await collapse.click();
@@ -395,7 +395,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await expect(station.getByRole('tab', { name: 'History' })).toBeVisible();
     await page.screenshot({ path: info.outputPath('station-built.png') });
     await page.reload();
-    await expect(building).toContainText('Review 13 files');
+    await expect(building).toContainText('13 to review');
     await expect(building).not.toHaveAttribute('data-station-part', /foundation|walls|roof/);
     // A shelf is an existing folder the person chooses, not one created by
     // setup or by selecting a chip. Exercise the admitted File and Undo too.

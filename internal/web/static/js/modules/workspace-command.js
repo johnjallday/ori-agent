@@ -322,6 +322,18 @@ function calendarOpsMeetingTimeLabel(evt) {
   }
 }
 
+// Only the grounds use a short sign; panels, Flow and Overview keep the full state.
+function stationGroundsSign(state, review) {
+  if (review) return `${state.reviewCount} to review`;
+  const value = String(state.value || '');
+  if (state.tone === 'loading') return value === 'Preparing…' ? value : 'Loading…';
+  if (state.tone === 'degraded')
+    return /failed|needs attention/i.test(value) ? value : 'Unavailable';
+  if (/^(set up|finish setup|not set up|setup needed)\b/i.test(value)) return 'Setup needed';
+  if (state.tone === 'attention' || state.buildPart || value === 'Preparing preview…') return value;
+  return '';
+}
+
 // Pointer travel (px) from the press origin past which a press on a station
 // becomes a drag rather than a click (FR9).
 const STATION_DRAG_THRESHOLD_PX = 5;
@@ -8401,6 +8413,7 @@ export class WorkspaceCommandView {
         key: 'watchtower',
         label: 'Watchtower',
         icon: 'bi-binoculars',
+        visualVariant: 'tower',
         state: () => this.hqWatchtowerStationState(),
         action: trigger => this.openWatchtowerPanel(trigger)
       },
@@ -8408,6 +8421,7 @@ export class WorkspaceCommandView {
         key: 'email',
         label: 'Email',
         icon: 'bi-envelope',
+        visualVariant: 'mail',
         state: () => this.hqEmailStationState(),
         action: () => this.openHQEmailSetup()
       },
@@ -8415,6 +8429,7 @@ export class WorkspaceCommandView {
         key: 'calendar-ops',
         label: 'Calendar Ops',
         icon: 'bi-calendar-check',
+        visualVariant: 'calendar',
         state: () => this.hqCalendarOpsStationState(),
         action: trigger => this.openCalendarOpsPanel(trigger)
       },
@@ -8566,6 +8581,7 @@ export class WorkspaceCommandView {
       key: NOTES_STATION,
       label: 'Notes',
       icon: 'bi-journal-text',
+      visualVariant: 'notebook',
       defaultX: 0.76,
       defaultY: 0.39,
       state: () => this.notesStationState(),
@@ -9487,12 +9503,13 @@ export class WorkspaceCommandView {
       .map(station => {
         const state = station.state() || {};
         const pos = this.hqStationPosition(station.key);
-        const visualVariant = String(station.visualVariant || '').trim();
         const buildingArt = typeof window === 'undefined' ? null : window.OriWorkspaceBuildingArt;
-        const visualMarkup =
-          visualVariant && buildingArt && typeof buildingArt.svgForVariant === 'function'
-            ? buildingArt.svgForVariant(visualVariant, { context: 'station' })
-            : '';
+        let visualVariant = station.visualVariant || 'neutral';
+        let visualMarkup = buildingArt?.svgForVariant(visualVariant, { context: 'station' });
+        if (!visualMarkup && visualVariant !== 'neutral') {
+          visualVariant = 'neutral';
+          visualMarkup = buildingArt?.svgForVariant(visualVariant, { context: 'station' });
+        }
         const icon = station.icon
           ? '<i class="bi ' + escapeHtml(station.icon) + '" aria-hidden="true"></i>'
           : '';
@@ -9500,9 +9517,8 @@ export class WorkspaceCommandView {
         const accessibleParts = [String(station.label || '') + ' station'];
         if (location) accessibleParts.push('managed folder ' + location);
         const review = station.key === 'file-janitor' && state.reviewCount > 0;
-        const value = review
-          ? `Review ${state.reviewCount} ${state.reviewCount === 1 ? 'file' : 'files'}`
-          : String(state.value || '');
+        const value = String(state.value || '');
+        const sign = stationGroundsSign(state, review);
         const description = String(state.description || '');
         // The value is read unless it says nothing ("—"), only repeats the
         // station's name, or the description already says it ("14 entries,
@@ -9528,8 +9544,13 @@ export class WorkspaceCommandView {
           '%;--station-y:' +
           (pos.y * 100).toFixed(2) +
           '%" aria-label="' +
-          escapeHtml(accessibleParts.join(', ')) +
-          '">' +
+          escapeHtml(review ? station.label + ' · ' + sign : accessibleParts.join(', ')) +
+          '"' +
+          (review
+            ? ' aria-description="' + escapeHtml(accessibleParts.slice(1).join(', ')) + '"'
+            : '') +
+          (location ? ' title="' + escapeHtml(location) + '"' : '') +
+          '>' +
           (visualMarkup
             ? '<span class="ws-cmd-map-hq-station-visual" aria-hidden="true">' +
               visualMarkup +
@@ -9543,19 +9564,8 @@ export class WorkspaceCommandView {
           '<span class="ws-cmd-map-hq-station-label">' +
           escapeHtml(station.label) +
           '</span>' +
-          (location
-            ? '<span class="ws-cmd-map-hq-station-location" title="' +
-              escapeHtml(location) +
-              '">' +
-              escapeHtml(location) +
-              '</span>'
-            : '') +
-          '<span class="ws-cmd-map-hq-station-state">' +
-          escapeHtml(value) +
-          (review ? ' <span aria-hidden="true">→</span>' : '') +
-          '</span>' +
-          (review
-            ? '<span class="ws-cmd-map-review-note">' + escapeHtml(description) + '</span>'
+          (sign
+            ? '<span class="ws-cmd-map-hq-station-state">' + escapeHtml(sign) + '</span>'
             : '') +
           '</button>'
         );

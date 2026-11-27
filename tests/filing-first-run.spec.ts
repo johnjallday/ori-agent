@@ -160,7 +160,7 @@ test(`a hired ${folderName} station is built separately and files by kind only o
   expect(result.eligible_count).toBe(36);
   expect(await readdir(f.root)).not.toContain('Filed');
   const station = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
-  await expect(station).toContainText('Review 36 files');
+  await expect(station).toContainText('36 to review');
   if (!(await panel.isVisible())) await station.press('Enter');
   const chooser = panel.getByRole('region', { name: 'Filing method' });
   await expect(chooser).toContainText('Suggested · Sort loose files by type.');
@@ -404,7 +404,8 @@ test(`a fed ${folderName} preview hands off on the map (${entryPoint}, ${theme})
   await expect(panel).toBeHidden();
   // When the station owns this exact batch it replaces the duplicate note.
   await expect(guidance).toHaveCount(0);
-  await expect(station).toHaveAccessibleName(/Review 36 files, Nothing moved/);
+  await expect(station).toHaveAccessibleName('Filing · 36 to review');
+  await expect(station).toHaveAccessibleDescription(/Nothing moved/);
   await expect(page.locator('.ws-cmd-map-agent.is-command-node')).not.toContainText(
     'Waiting for permission'
   );
@@ -441,7 +442,8 @@ test(`a fed ${folderName} preview hands off on the map (${entryPoint}, ${theme})
   );
   await snapshot('06-map-returned');
   await page.reload();
-  await expect(station).toHaveAccessibleName(/Review 36 files, Nothing moves until you file/);
+  await expect(station).toHaveAccessibleName('Filing · 36 to review');
+  await expect(station).toHaveAccessibleDescription(/Nothing moves until you file/);
   await expect(station).not.toHaveClass(/is-preview-handoff/);
 });
 

@@ -149,7 +149,7 @@ test.describe.serial('Daily Brief station in My HQ', () => {
       /Next brief .+\.|No brief scheduled\./
     );
     // The station's own status follows the brief the panel is showing.
-    await expect(page.locator(`${STATION} .ws-cmd-map-hq-station-state`)).toContainText('Ready');
+    await expect(page.locator(STATION)).toHaveAccessibleName(/Ready/i);
 
     await page.getByRole('button', { name: 'Close Daily Brief' }).click();
     await expect(page.locator(PANEL)).toBeHidden();

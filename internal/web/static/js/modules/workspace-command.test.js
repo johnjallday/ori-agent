@@ -3912,9 +3912,7 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
   const lightAgentRule = css.match(
     /\[data-bs-theme="light"\] \.ws-cmd-opmap \.ws-cmd-map-agent\s*\{([\s\S]*?)\n\}/
   );
-  const lightHQRule = css.match(
-    /\[data-bs-theme="light"\] \.ws-cmd-opmap \.ws-cmd-map-hq-station\s*\{([\s\S]*?)\n\}/
-  );
+  const landmarkRule = css.match(/(?:^|\n)\.ws-cmd-map-hq-station\s*\{([\s\S]*?)\n\}/);
   const lightBeltRule = css.match(/\[data-bs-theme="light"\] \.ws-cmd-map-belt\s*\{([\s\S]*?)\n\}/);
   const agentFieldRule = css.match(/(?:^|\n)\.ws-cmd-map-agent-field\s*\{([\s\S]*?)\n\}/);
   const controls = readFileSync(new URL('../../css/components.css', import.meta.url), 'utf8');
@@ -3923,7 +3921,7 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
   assert.ok(baseRule, 'the base Operations Map rule must remain present');
   assert.ok(lightRule, 'light mode must override the Operations Map directly');
   assert.ok(lightAgentRule, 'light mode must give agent cards a dedicated surface');
-  assert.ok(lightHQRule, 'light mode must give HQ stations a dedicated surface');
+  assert.ok(landmarkRule, 'stations have their own map target');
   assert.ok(lightBeltRule, 'light mode must give the tool belt a dedicated surface');
   assert.ok(agentFieldRule, 'the Operations Map must define its specialist field');
   assert.ok(sharedViewControl, 'workspace destinations must use the shared control surface');
@@ -3954,7 +3952,7 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
     'background-image must not reset the inherited background sizes'
   );
   assert.doesNotMatch(lightAgentRule[1], /rgba\(0, 0, 0/, 'agent cards avoid dark scrims');
-  assert.doesNotMatch(lightHQRule[1], /rgba\(0, 0, 0/, 'HQ stations avoid dark scrims');
+  assert.match(landmarkRule[1], /background: transparent/, 'no card behind a building');
   assert.match(
     agentFieldRule[1],
     /grid-template-columns: repeat\(auto-fit, minmax\(142px, 176px\)\);/,
@@ -6940,6 +6938,29 @@ test('every workspace ends its station registry with Memory; the HQ four keep th
   }
 });
 
+test('a contributed station gets a neutral building and a distinct loading or error sign', () => {
+  const originalWindow = globalThis.window;
+  let tone = 'loading';
+  globalThis.window = {
+    WorkspaceSurfaceHost: {
+      stations: () => [{ key: 'imported', label: 'Library', state: () => ({ tone }) }]
+    },
+    OriWorkspaceBuildingArt: { svgForVariant: key => `<svg data-building-variant="${key}"></svg>` }
+  };
+  try {
+    const view = makeMemoryCommandView();
+    assert.match(
+      view.renderMapHQStations(),
+      /data-cmd-hq-station="imported" data-station-visual="neutral"/
+    );
+    assert.match(view.renderMapHQStations(), /station-state">Loading…</);
+    tone = 'degraded';
+    assert.match(view.renderMapHQStations(), /station-state">Unavailable</);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('the Memory building draws the archive art and reads its badge once', () => {
   const originalWindow = globalThis.window;
   globalThis.window = {
@@ -6956,7 +6977,7 @@ test('the Memory building draws the archive art and reads its badge once', () =>
     assert.match(html, /data-building-variant="archive" data-context="station"/);
     assert.match(html, /aria-label="Agent memory station, 14 entries, 2 watching"/);
     assert.match(html, /ws-cmd-map-hq-station-label">Agent memory</);
-    assert.match(html, /ws-cmd-map-hq-station-state">14 entries</);
+    assert.doesNotMatch(html, /ws-cmd-map-hq-station-state/, 'quiet archive has only a name');
 
     readyMemory(plain, { count: 5, overBudget: true, dropped: 2 });
     const over = plain.renderMapHQStations();
@@ -7742,7 +7763,7 @@ test('a configured File Janitor station shows its folder and derived status', ()
     assert.match(html, /data-building-variant="depot"/);
     assert.match(html, /data-context="station"/);
     assert.match(html, /ws-cmd-map-hq-station-label">Filing/);
-    assert.match(html, /ws-cmd-map-hq-station-location[^>]*>Downloads/);
+    assert.match(html, /title="Downloads"/);
     assert.match(html, /managed folder Downloads, 12 ready for review/);
     assert.match(html, /12 ready for review/);
   } finally {

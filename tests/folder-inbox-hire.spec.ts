@@ -122,7 +122,7 @@ test('hire, reload and review are inert; only Build grants Filing and scans the 
   expect(r.ok(), await r.text()).toBeTruthy();
   expect((await r.json()).preparation.result.eligible_count).toBe(25);
   await expect(page.locator('[data-cmd-hq-station="file-janitor"]:visible')).toContainText(
-    'Review 25 files'
+    '25 to review'
   );
   expect(readdirSync(root).sort()).toEqual(names);
   expect(names.map(n => readFileSync(join(root, n)))).toEqual(original);

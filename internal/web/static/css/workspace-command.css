@@ -1585,42 +1585,33 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   border: 1px solid var(--ws-keeper-deep);
   background: linear-gradient(180deg, rgba(232, 181, 75, 0.08), transparent 70%);
 }
-/* HQ stations as structures on the map surface (FR6, FR8). Absolutely
-   positioned inside .ws-cmd-map-world (position: relative) from their
-   fractional coordinate, centered on the point via translate(-50%,-50%).
-   Gold "keeper" citadel treatment with a kiosk silhouette (cut corner),
-   visually distinct from the agent unit cards. Reuses existing keeper tokens,
-   so both themes are covered by the light-theme token overrides below. */
+/* A building is the control. Its foundation and name stay put even when
+   its hanging sign appears; only the focus ring frames the whole landmark. */
 .ws-cmd-map-hq-station {
   position: absolute;
-  --station-half-width: 79px;
+  --station-half-width: 56px;
   left: clamp(
     calc(var(--station-half-width) + 8px),
     var(--station-x, 90%),
     calc(100% - var(--station-half-width) - 8px)
   );
-  top: var(--station-y, 22%);
+  top: clamp(53px, var(--station-y, 22%), calc(100% - 53px));
   transform: translate(-50%, -50%);
   z-index: 4;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  column-gap: 9px;
-  row-gap: 2px;
-  width: 158px;
-  padding: 10px 12px;
-  border: 1px solid var(--ws-keeper-deep);
-  border-top: 2px solid var(--ws-keeper);
-  background: linear-gradient(180deg, rgba(232, 181, 75, 0.14), rgba(0, 0, 0, 0.3) 74%);
+  grid-template: 66px 18px 18px / minmax(0, 1fr);
+  width: calc(2 * var(--station-half-width));
+  justify-items: center;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--ws-ink);
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   touch-action: none;
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 11px), calc(100% - 11px) 100%, 0 100%);
 }
 .ws-cmd-map-hq-station-icon {
-  grid-row: 1 / span 2;
-  align-self: center;
   display: inline-grid;
   place-items: center;
   width: 30px;
@@ -1630,119 +1621,35 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   font-size: 15px;
 }
 .ws-cmd-map-hq-station-label {
-  align-self: end;
-  color: var(--ws-ink-dim);
-  font-family: var(--ws-font-mono);
-  font-size: 11px;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-.ws-cmd-map-hq-station-location {
-  min-width: 0;
-  color: var(--ws-ink-faint);
-  font-family: var(--ws-font-mono);
-  font-size: 9px;
-  letter-spacing: 0.4px;
-  white-space: nowrap;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.ws-cmd-map-hq-station-state {
-  min-width: 0;
-  align-self: start;
-  color: var(--ws-keeper);
+  white-space: nowrap;
+  color: var(--ws-ink);
   font-family: var(--ws-font-display);
   font-size: 13px;
-  white-space: nowrap;
+  font-weight: 700;
+}
+.ws-cmd-map-hq-station-state {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-/* A descriptor with a visualVariant opts into a curated building silhouette
-   (File Janitor's depot, the Daily Brief's briefing room). It remains one
-   button: the art, location, and state are all inert content inside the same
-   keyboard/click target. */
-.ws-cmd-map-hq-station.has-visual {
-  --station-half-width: 113px;
-  grid-template-columns: 88px minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
-  width: 226px;
-  min-height: 118px;
-  padding: 11px 13px 12px 10px;
-  column-gap: 11px;
-  row-gap: 3px;
-  background:
-    linear-gradient(120deg, rgba(232, 181, 75, 0.1), transparent 48%),
-    linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
-  border-color: var(--ws-line-bright);
-  border-top-color: var(--ws-keeper);
-  box-shadow: var(--ws-glow);
-}
-.ws-cmd-map-hq-station-visual {
-  grid-row: 1 / span 3;
-  align-self: center;
-  display: grid;
-  place-items: center;
-  width: 88px;
-  height: 78px;
-  overflow: hidden;
+  white-space: nowrap;
+  padding: 0 5px;
+  border-inline-start: 2px solid currentColor;
+  background: var(--ws-panel);
   color: var(--ws-keeper);
-  background: var(--ws-bg-2);
-  border: 1px solid var(--ws-keeper-deep);
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%);
+  font: 11px/16px var(--ws-font-mono);
 }
 .ws-cmd-map-hq-station-visual .ws-cmd-map-station-art {
   display: block;
-  width: 92px;
-  height: 68px;
+  width: 90px;
+  height: 66px;
+  filter: drop-shadow(0 4px 2px rgb(0 0 0 / 18%));
 }
-.ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-label {
-  align-self: end;
-  color: var(--ws-ink);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1.1px;
-}
-.ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-location {
-  align-self: center;
-}
-.ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-state {
-  align-self: start;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  font-family: var(--ws-font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.25;
-  letter-spacing: 0.35px;
-  text-transform: uppercase;
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-}
-.ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-state::before {
-  content: "";
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  background: currentColor;
-  box-shadow: 0 0 0 2px var(--ws-bg-2);
-}
-.ws-cmd-map-hq-station.has-visual:hover {
-  background:
-    linear-gradient(120deg, rgba(232, 181, 75, 0.16), transparent 48%),
-    linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
-}
-.ws-cmd-map-hq-station.has-visual:active {
-  border-color: var(--ws-keeper);
-  background: var(--ws-bg-2);
-}
-.ws-cmd-map-hq-station.has-visual:focus-visible {
-  outline-offset: 4px;
-}
-.ws-cmd-map-hq-station:hover {
-  border-color: var(--ws-keeper);
-  background: linear-gradient(180deg, rgba(232, 181, 75, 0.2), rgba(0, 0, 0, 0.3) 74%);
+.ws-cmd-map-hq-station:is(:hover, :focus-visible) .ws-cmd-map-hq-station-label {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .ws-cmd-map-hq-station:focus-visible {
   outline: 2px solid var(--ws-keeper);
@@ -1754,8 +1661,7 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
 .ws-cmd-map-hq-station.is-dragging {
   z-index: 20;
   cursor: grabbing;
-  border-color: var(--ws-keeper);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  filter: drop-shadow(0 6px 4px rgb(0 0 0 / 26%));
 }
 /* Watchtower keeps the gold HQ structure silhouette, then shifts its small
    signal readout by state. The color is information, not decoration: amber
@@ -1763,26 +1669,6 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
    source itself is degraded. */
 .ws-cmd-map-hq-station.is-attention .ws-cmd-map-hq-station-state {
   color: var(--ws-waiting);
-}
-.ws-cmd-map-hq-station.is-review-ready {
-  border-color: var(--ws-waiting);
-  border-inline-start-width: 4px;
-}
-.ws-cmd-map-review-note {
-  display: none;
-  grid-column: 1 / -1;
-  color: var(--ws-ink);
-  font-size: 0.75rem;
-}
-.ws-cmd-map-hq-station:is(:hover, :focus-visible) .ws-cmd-map-review-note {
-  display: block;
-}
-.ws-cmd-map-hq-station.is-clear .ws-cmd-map-hq-station-state {
-  color: var(--ws-done);
-}
-.ws-cmd-map-hq-station.is-degraded {
-  border-color: rgba(226, 101, 77, 0.6);
-  border-top-color: var(--ws-alert);
 }
 .ws-cmd-map-hq-station.is-degraded .ws-cmd-map-hq-station-icon,
 .ws-cmd-map-hq-station.is-degraded .ws-cmd-map-hq-station-state {
@@ -6531,29 +6417,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
 [data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-agent-status {
   border-color: #aeb8bb;
   background: rgba(255, 255, 255, 0.88);
-}
-
-[data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(243, 238, 228, 0.95) 74%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    0 18px 30px -26px rgba(85, 62, 28, 0.58);
-}
-[data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station:hover {
-  background: linear-gradient(180deg, #ffffff, rgba(239, 230, 211, 0.98) 74%);
-}
-[data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station.has-visual {
-  background:
-    linear-gradient(120deg, rgba(155, 100, 27, 0.08), transparent 48%),
-    linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
-}
-[data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station.has-visual:hover {
-  background:
-    linear-gradient(120deg, rgba(155, 100, 27, 0.12), transparent 48%),
-    linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
-}
-[data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station.is-dragging {
-  box-shadow: 0 12px 28px -14px rgba(31, 33, 40, 0.5);
 }
 
 /* The quest composer remains a dark control surface in light mode, so restore
@@ -11312,32 +11175,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   .ws-cmd-detachment-host .ws-map-control-dock {
     bottom: calc(var(--ori-launcher-clearance-y, 88px) + 16px);
-  }
-}
-@media (max-width: 640px) {
-  .ws-cmd-map-hq-station.has-visual {
-    --station-half-width: 55px;
-    width: 110px;
-    min-height: 92px;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto;
-    justify-items: center;
-    gap: 4px;
-    padding: 8px;
-    text-align: center;
-  }
-  .ws-cmd-map-hq-station-visual {
-    grid-row: auto;
-    width: 64px;
-    height: 46px;
-  }
-  .ws-cmd-map-hq-station-visual .ws-cmd-map-station-art {
-    width: 60px;
-    height: 44px;
-  }
-  .ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-label {
-    overflow-wrap: anywhere;
-    letter-spacing: 0;
   }
 }
 @media (max-width: 600px) {
