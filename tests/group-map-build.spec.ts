@@ -110,6 +110,8 @@ test('a group page draws its own district, and its coordinates are Home’s', as
   await expect(zone.locator('.ws-cmd-map-command-post')).toHaveCount(0);
   const toolbar = page.locator('[data-map-zone="detachment"]');
   await expect(toolbar).toHaveAttribute('role', 'toolbar');
+  await expect(toolbar.locator('.ws-cmd-map-group-bar-label')).toHaveText('Linked workspaces');
+  await expect(toolbar.getByRole('button', { name: '+ Add folder' })).toHaveCount(0);
   await expect(toolbar.locator('.ws-cmd-map-zone-count')).toHaveText('2');
   await expect(zone.locator(`.ws-map-tile[data-ws-id="${member.id}"]`)).toBeVisible();
   // FR-7: nothing outside the group, and no reserved Personal HQ landmark.

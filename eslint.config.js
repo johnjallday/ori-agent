@@ -258,6 +258,7 @@ export default defineConfig([
       'internal/web/static/js/modules/memory-station.js',
       'internal/web/static/js/modules/workspace-station-link.js',
       'internal/web/static/js/modules/home-library-badges.js',
+      'internal/web/static/js/modules/home-map-folders.js',
       'internal/web/static/js/modules/home-setup-arrival.js',
       'internal/web/static/js/modules/home-plugin-updates.js',
       'internal/web/static/js/modules/home-files-search.js',
