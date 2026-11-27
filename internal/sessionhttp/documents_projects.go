@@ -11,8 +11,9 @@ import (
 )
 
 type projectAction struct {
-	Action string `json:"action"`
-	Parent string `json:"parent,omitempty"`
+	Action    string `json:"action"`
+	Parent    string `json:"parent,omitempty"`
+	Candidate string `json:"candidate,omitempty"`
 }
 
 func (h *Handler) projectDiscovery(r *http.Request, id string) (folderagent.ProjectDiscovery, bool) {
@@ -49,19 +50,49 @@ func (h *Handler) handleDocumentsProjects(w http.ResponseWriter, r *http.Request
 	if !decodeBuildBody(w, r, &q) {
 		return
 	}
+	h.projectDiscoveryMu.Lock()
+	defer h.projectDiscoveryMu.Unlock()
 	var view folderagent.ProjectLook
 	var err error
 	switch q.Action {
 	case "folders":
 		view, err = d.Folders()
-	case "find":
-		view, err = d.Find(r.Context(), q.Parent, nil)
+	case "find", "ignore", "open":
+		var ignored map[string]bool
+		ignored, err = h.ignoredProjects(r.Context(), id)
+		if err == nil {
+			view, err = d.Find(r.Context(), q.Parent, ignored)
+		}
 	default:
 		_ = orihttp.RespondBadRequest(w, "Choose a project discovery action.")
 		return
 	}
 	if current, ok := h.projectDiscovery(r, id); err != nil || !ok || current != d {
 		_ = orihttp.RespondError(w, http.StatusConflict, "This look is unavailable or the folder changed. Choose it again.")
+		return
+	}
+	if q.Action == "ignore" || q.Action == "open" {
+		for _, candidate := range view.Suggestions {
+			if candidate.Ref != q.Candidate {
+				continue
+			}
+			if q.Action == "ignore" {
+				_, err = h.store.DB().ExecContext(r.Context(), `INSERT OR IGNORE INTO ignored_documents_projects(manager_id,folder_ref) VALUES (?,?)`, id, candidate.Identity)
+				if err == nil {
+					orihttp.WriteJSON(w, map[string]bool{"ignored": true})
+					return
+				}
+			} else {
+				var route string
+				route, err = h.openCourse(r, id, d, candidate)
+				if err == nil {
+					orihttp.WriteJSON(w, map[string]string{"route": route})
+					return
+				}
+			}
+			break
+		}
+		_ = orihttp.RespondError(w, http.StatusConflict, "Setup could not be verified. Check your workspaces and look again.")
 		return
 	}
 	orihttp.WriteJSON(w, view)

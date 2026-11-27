@@ -1012,6 +1012,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		req.TemplateID = ""
 	}
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
+	if course, ok := r.Context().Value(courseCreateKey{}).(courseCreate); ok {
+		// Reserve one managed workspace for the witnessed folder, without attaching it.
+		ws.ID, ws.OwnerUserID = course.id, course.owner
+	}
 	if assistantSetup, ok := assistantSetupCreationFromContext(r.Context()); ok {
 		// This server-only descriptor preallocates identity before any profile or
 		// workspace write. No browser JSON field can select these values.

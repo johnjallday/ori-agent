@@ -39,23 +39,63 @@ export function bindProjectDiscovery(trigger, panel, id, available) {
     }
   }
   function find(parent) {
-    return request('find', { parent }, data => {
-      present(element('h3', 'What I found', 'h6'));
-      for (const c of data.suggestions || []) {
-        panel.append(
+    return request('find', { parent }, data => showResults(parent, data));
+  }
+  function showResults(parent, data) {
+    present(element('h3', 'What I found', 'h6'));
+    for (const c of data.suggestions || []) {
+      const card = element('article', '', 'py-2');
+      card.setAttribute('aria-label', c.folder);
+      const actions = element('div', '', 'documents-look__actions mt-2');
+      const params = { parent, candidate: c.ref };
+      const dismiss = () => {
+        data.suggestions = data.suggestions.filter(row => row !== c);
+        showResults(parent, data);
+      };
+      const review = button('Review setup', () => {
+        const heading = element('h3', 'Review course setup', 'h5');
+        const confirm = button('Open course workspace', () =>
+          request('open', params, result => {
+            location.assign(result.route);
+          })
+        );
+        present(
+          heading,
+          element('p', `Folder: Documents/${c.folder}`),
           element(
             'p',
-            `I found ${c.folder}/${c.syllabus} and ${c.folder}/${c.structure}/. Is this a course you want help tracking?`
-          )
+            `Open the existing workspace, or create a course workspace with a manager. First, choose ${c.syllabus} and approve reading it to find the next stated deadline. Your originals stay in place.`
+          ),
+          element(
+            'p',
+            'The Course intake skill needs separate review. No folder access, recurring scan or calendar connection is added.',
+            'text-body-secondary'
+          ),
+          confirm,
+          button('Cancel', () => showResults(parent, data))
         );
-      }
-      if (data.partial)
-        panel.append(element('p', 'This look is incomplete. Some entries could not be checked.'));
-      else if (!data.suggestions?.length)
-        panel.append(element('p', 'No convincing project match in this folder.'));
-      panel.tabIndex = -1;
-      panel.focus();
-    });
+        confirm.focus();
+      });
+      actions.append(
+        review,
+        button('Not now', dismiss),
+        button('Ignore this folder', () => request('ignore', params, dismiss))
+      );
+      card.append(
+        element(
+          'p',
+          `I found ${c.folder}/${c.syllabus} and ${c.folder}/${c.structure}/. Is this a course you want help tracking?`
+        ),
+        actions
+      );
+      panel.append(card);
+    }
+    if (data.partial)
+      panel.append(element('p', 'This look is incomplete. Some entries could not be checked.'));
+    else if (!data.suggestions?.length)
+      panel.append(element('p', 'No convincing project match in this folder.'));
+    panel.tabIndex = -1;
+    panel.focus();
   }
   trigger.onclick = () =>
     request('folders', {}, data => {

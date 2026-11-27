@@ -57,4 +57,38 @@ test('find a BIO 101 lab deadline from Documents', async ({ page, request }) => 
   await expect(panel).toContainText('Archived History/Labs/');
   await expect(panel).not.toContainText('Shopping');
   await panel.screenshot({ path: join(evidence, 'suggestions.png') });
+  const managerURL = page.url();
+  await panel
+    .getByRole('article', { name: 'School/Archived History' })
+    .getByRole('button', { name: 'Ignore this folder' })
+    .click();
+  await expect(panel).not.toContainText('Archived History');
+  await discover();
+  await expect(panel).toContainText('BIO 101/Syllabus.txt');
+  await expect(panel).not.toContainText('Archived History');
+  const review = panel.getByRole('button', { name: 'Review setup' });
+  await review.click();
+  await panel.screenshot({ path: join(evidence, 'review.png') });
+  await panel.getByRole('button', { name: 'Cancel' }).click();
+  const count = async () =>
+    ((await (await request.get('/api/workspaces')).json()).workspaces || []).filter(
+      (w: { name: string }) => w.name === 'BIO 101'
+    ).length;
+  const courseOpen = async () => {
+    await review.click();
+    const response = page.waitForResponse(
+      r => r.url().endsWith('/documents-projects') && r.request().postDataJSON()?.action === 'open'
+    );
+    await panel.getByRole('button', { name: 'Open course workspace' }).click();
+    const result = await response;
+    expect(result.status()).toBe(200);
+    await page.waitForURL('**/workspaces/bio-101?setup=1');
+  };
+  expect(await count()).toBe(0);
+  await courseOpen();
+  await expect(page.locator('#setupWizardDialog')).toBeVisible();
+  await page.goto(managerURL);
+  await discover();
+  await courseOpen();
+  expect(await count()).toBe(1);
 });
