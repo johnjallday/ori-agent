@@ -102,6 +102,7 @@ export default defineConfig([
       'internal/web/static/js/modules/field-labels.js',
       'internal/web/static/js/modules/home-song-roster.js',
       'internal/web/static/js/modules/linked-agents.js',
+      'internal/web/static/js/modules/map-team-deck.js',
       'internal/web/static/js/modules/member-folder-agents.js',
       'internal/web/static/js/modules/member-commanders.js',
       'internal/web/static/js/modules/library-freshness.js',

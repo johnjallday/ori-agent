@@ -92,6 +92,21 @@ func (h *Handler) librarySharing(scope projectlibrary.Scope, home *workspace.Wor
 	return view
 }
 
+// The group Map needs only the label and whether it can link to the existing
+// offer. Consent and the team digest stay on the library page that owns them.
+type sharedAssistantOffer struct {
+	Label   string `json:"label"`
+	CanHire bool   `json:"can_hire"`
+}
+
+func (h *Handler) sharedAssistantOffer(scope projectlibrary.Scope, home *workspace.Workspace) *sharedAssistantOffer {
+	sharing := h.librarySharing(scope, home)
+	if sharing.State != sharingNone || sharing.Hired || sharing.OfferDismissed {
+		return nil
+	}
+	return &sharedAssistantOffer{Label: sharing.RoleLabel, CanHire: h.assistantLibraryProviderEvidence(scope, home)}
+}
+
 type librarySharingRequest struct {
 	RequestID  string `json:"request_id"`
 	Enabled    bool   `json:"enabled"`

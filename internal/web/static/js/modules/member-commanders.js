@@ -181,10 +181,12 @@ export function memberCommanders({
       if (!id || Number(detail?.count) !== 1) return false;
       const raw = (Array.isArray(views) ? views : []).find(view => view?.workspace_id === id);
       if (!raw || !waits[id]) return false;
-      if (!root() || narrow()) return false;
+      const fromDeck = detail.fromDeck === true;
+      if (!root() || (!fromDeck && narrow())) return false;
       // The mark is its own toggle: activating it again closes the line.
       if (shown && shown.id === id) {
-        close(id);
+        if (fromDeck) shown.adapter.balloon.focusLine();
+        else close(id);
         return true;
       }
       if (shown) close(shown.id);
@@ -194,6 +196,7 @@ export function memberCommanders({
         showing,
         docEvents,
         pinLine: true,
+        inlineOnNarrow: fromDeck,
         onDismiss: () => close(id, { returnFocus: true }),
         onNarrow: () => open?.(id),
         doc,

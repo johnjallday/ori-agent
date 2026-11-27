@@ -93,6 +93,42 @@ func TestAssistantLibraryHTTP_SummaryIsOwnerScopedBoundedAndInert(t *testing.T) 
 	}
 }
 
+func TestAssistantLibraryHTTP_SummaryOffersOnlyTheUnansweredSharedRole(t *testing.T) {
+	h, store, home, _, scope, _ := songCardHTTPFixture(t)
+	h.projectTeamOverride = func(projectlibrary.Scope, *workspace.Workspace) (projectlibrary.ProjectTeam, bool) {
+		return projectlibrary.ProjectTeam{Roles: []workspace.AssistantProgramRoleSpec{{ID: "keeper", Label: "Keeper"}}}, true
+	}
+	readOffer := func() *sharedAssistantOffer {
+		t.Helper()
+		response := httptest.NewRecorder()
+		h.GetAssistantLibrarySummary(response, assistantProgramRequest(http.MethodGet, "/library/summary", home.ID, ""))
+		var body struct {
+			Offer *sharedAssistantOffer `json:"shared_assistant_offer"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+			t.Fatalf("summary: %d %s", response.Code, response.Body.String())
+		}
+		return body.Offer
+	}
+	if offer := readOffer(); offer != nil {
+		t.Fatalf("uninitialized library offered %+v", offer)
+	}
+	initializeSongCardLibrary(t, store, scope)
+	// This fixture has no matching Home provider evidence. The role may be
+	// listed, but it must not invite the owner into an unavailable flow.
+	if offer := readOffer(); offer == nil || offer.Label != "Keeper" || offer.CanHire {
+		t.Fatalf("read-only offer: %+v", offer)
+	}
+	response := httptest.NewRecorder()
+	h.DismissAssistantLibrarySharingOffer(response, assistantProgramRequest(http.MethodPost, "/library/sharing/offer", home.ID, `{"request_id":"not-now"}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("Not now: %d %s", response.Code, response.Body.String())
+	}
+	if offer := readOffer(); offer != nil {
+		t.Fatalf("dismissed offer returned: %+v", offer)
+	}
+}
+
 // seedLibraryDigest writes a valid completed scan and its digest straight into
 // the Home document, standing in for a real scan so the card rules can be
 // exercised without a native picker.

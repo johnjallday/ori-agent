@@ -104,6 +104,7 @@ import {
 import { openHomeFeed, pendingHomeFeeds, homeFolderChips } from './home-map-folders.js';
 import { memberCommanders } from './member-commanders.js';
 import { nodeAgentNames } from './linked-agents.js';
+import { mountMapTeamDeck } from './map-team-deck.js';
 import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
 import {
   deleteWorkspace as deleteWorkspaceAction,
@@ -3222,6 +3223,7 @@ export class WorkspaceCommandView {
     const memberActive = typeof document === 'undefined' ? null : document.activeElement;
     if (memberActive && membersNode?.contains?.(memberActive)) this.membersFocus = memberActive;
     this.restoreSharedSurface('members');
+    this.mapTeamDeck?.rememberFocus();
     const hqDetails = this.viewMode === 'details' && this.isPersonalHQ();
     this.container.innerHTML =
       this.commandBarHTML(ws, name, mode, stats) +
@@ -6087,6 +6089,7 @@ export class WorkspaceCommandView {
   }
 
   mountRoleRoster() {
+    this.mapTeamDeck?.update();
     const host = this.container?.querySelector('[data-cmd-role-roster]');
     const component = typeof window === 'undefined' ? null : window.WorkspaceRoleRoster;
     if (!host || !component) return;
@@ -12652,8 +12655,9 @@ export class WorkspaceCommandView {
       (post ? '<div class="ws-cmd-map-command-post">' + post + '</div>' : '') +
       this.renderMapHQStations() +
       '</section>' +
-      '</div>' +
+      '<div class="ws-cmd-map-corner"><div class="map-team-dock"></div>' +
       this.mapGiveWorkHTML() +
+      '</div></div>' +
       this.renderMapWindow(selected) +
       '</div>'
     );
@@ -14443,7 +14447,10 @@ export class WorkspaceCommandView {
     // The same moments re-read the songs' tile facts.
     void this.loadDetachmentSongFacts();
     const folders = this.loadHomeMapFolders();
+    const token = Symbol();
+    this.librarySummaryToken = token;
     const workspaceId = this.workspaceId();
+    let offer = null;
     const status = this.groupTemplateStatus;
     let next = null;
     if (workspaceId && status && status.kind === 'managed_home') {
@@ -14454,6 +14461,9 @@ export class WorkspaceCommandView {
         );
         if (response.ok) {
           const summary = await response.json();
+          if (summary.initialized && summary.shared_assistant_offer?.label) {
+            offer = { ...summary.shared_assistant_offer, workspaceId };
+          }
           // The outer map's badge reads the same count (home-library-badges.js).
           const toSetUp = libraryToSetUp(summary);
           if (toSetUp > 0) {
@@ -14465,7 +14475,9 @@ export class WorkspaceCommandView {
       }
     }
     await folders;
-    if (this.workspaceId() !== workspaceId) return;
+    if (this.workspaceId() !== workspaceId || this.librarySummaryToken !== token) return;
+    this.sharedAssistantOffer = offer;
+    this.mapTeamDeck?.update();
     const arrival = this._setupArrival;
     this._setupArrival = null;
     if (JSON.stringify(next) !== JSON.stringify(this.libraryEmptyState || null)) {
@@ -14657,7 +14669,10 @@ export class WorkspaceCommandView {
       if (took) event?.preventDefault?.();
     });
     // A mount draws its marks afresh and without aria-expanded.
-    host.addEventListener('ori:map-mounted', () => this.memberCommanders?.syncMarks());
+    host.addEventListener('ori:map-mounted', () => {
+      this.memberCommanders?.syncMarks();
+      this.mapTeamDeck?.update();
+    });
     this.detachmentMapEl = host;
     return host;
   }
@@ -14720,6 +14735,11 @@ export class WorkspaceCommandView {
     const host = this.ensureDetachmentHost();
     if (!host) return;
     if (host.parentNode !== slot) slot.appendChild(host);
+    const dock = this.container.querySelector('.map-team-dock');
+    if (dock) {
+      this.mapTeamDeck ??= mountMapTeamDeck(this);
+      this.mapTeamDeck.attach(dock);
+    }
     this.attachMusicFolders(slot);
     // The dock was rebuilt with the rest of the view; the selected song's card
     // comes back from the last read, without a fetch.
@@ -15067,6 +15087,8 @@ export class WorkspaceCommandView {
   }
 
   unmountDetachmentMap() {
+    this.mapTeamDeck?.destroy();
+    this.mapTeamDeck = null;
     this.homeFeedDialog?.close();
     this.closeMusicFolders();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
@@ -15171,6 +15193,7 @@ export class WorkspaceCommandView {
     const { workspaces } = this.detachmentSnapshot();
     const state = memberFolderAgentState(views, workspaces, groupId);
     this.memberFolderAgents = { waits: state.waits, lines: state.lines, views: state.views };
+    this.mapTeamDeck?.update();
     this.syncHomeFeedControls();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (map && map.folderAgentWaits && typeof map.folderAgentWaits.update === 'function') {

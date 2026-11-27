@@ -114,15 +114,18 @@ func (h *Handler) GetAssistantLibrarySummary(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var feedback []workspace.AssistantProposalFeedback
+	var offer *sharedAssistantOffer
 	if summary.Initialized {
 		feedback = h.libraryProposalFeedback(station.ID)
+		offer = h.sharedAssistantOffer(scope, station)
 	}
 	_ = orihttp.RespondSuccess(w, struct {
 		projectlibrary.LibrarySummary
-		Route    string                                `json:"route"`
-		Feedback []workspace.AssistantProposalFeedback `json:"feedback,omitempty"`
-		Words    projectlibrary.Words                  `json:"words"`
-	}{summary, librarySuggestionsRoute(station), feedback, h.projectCardWords(station)})
+		Route                string                                `json:"route"`
+		Feedback             []workspace.AssistantProposalFeedback `json:"feedback,omitempty"`
+		Words                projectlibrary.Words                  `json:"words"`
+		SharedAssistantOffer *sharedAssistantOffer                 `json:"shared_assistant_offer,omitempty"`
+	}{summary, librarySuggestionsRoute(station), feedback, h.projectCardWords(station), offer})
 }
 
 // librarySuggestionsRoute is the Home's suggestions shelf, or "" when the

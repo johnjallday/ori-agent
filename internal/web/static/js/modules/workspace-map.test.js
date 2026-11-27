@@ -11921,6 +11921,26 @@ async function mountedScopedUnits(extra = {}) {
   return { ...ctx, harness, selected };
 }
 
+test('team navigation frames a drawn unit without opening its sheet or saving, refusing moves and covered maps', async () => {
+  const { map, harness, selected, patches } = await mountedScopedUnits();
+  const host = harness.container;
+  const scout = { unitName: 'Scout' };
+  const before = { ...map.getCamera() };
+  assert.equal(map.revealTeamPlace(host, scout), false, 'Move is on');
+  harness.control('[data-map-drag]').click();
+  host.inert = true;
+  assert.equal(map.revealTeamPlace(host, scout), false, 'folder view covers map');
+  host.inert = false;
+  assert.equal(map.revealTeamPlace({}, scout), false, 'different map');
+  assert.equal(map.revealTeamPlace(host, { id: 'removed' }), false);
+  assert.deepEqual({ ...map.getCamera() }, before);
+  assert.equal(map.revealTeamPlace(host, scout), true);
+  assert.ok(map.getCamera().zoom >= 0.65);
+  assert.deepEqual(selected, [], 'unit sheet stays closed');
+  await flushDeep();
+  assert.equal(patches.length, 0);
+});
+
 test('dragging an agent saves its own anchor beside the buildings, and never a membership', async () => {
   const { map, harness, patches } = await mountedScopedUnits();
   const boss = harness.unit('agent:g:boss');

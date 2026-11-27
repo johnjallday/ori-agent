@@ -317,6 +317,7 @@ export class WorkspaceMembersPanel {
     this.songRosterRows = rows;
     this.songRosterWords = words;
     this.renderSongRoster();
+    this.onSongRosterRead?.();
   }
 
   renderSongRoster() {

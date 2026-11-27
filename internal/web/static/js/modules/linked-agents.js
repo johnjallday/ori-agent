@@ -7,8 +7,8 @@
  * every node as `agents` and `entry_agent_name`, so this module only shapes
  * that tree for the page; it reads nothing itself.
  *
- * Agents stay owned by the workspace they work in: what these helpers return
- * is shown as text, never as a control or a link to an agent.
+ * Agents stay owned by the workspace they work in. Overview and member rows
+ * show text; the group map's team deck uses the place ids for in-map navigation.
  */
 
 const text = value => (typeof value === 'string' ? value.trim() : '');

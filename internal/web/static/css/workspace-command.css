@@ -998,11 +998,27 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   align-items: flex-start;
   gap: 10px;
 }
-.ws-cmd-map-shell.is-group .ws-cmd-map-quest-dock {
-  top: 80px;
-  max-height: min(65vh, 620px);
-  max-width: calc(100% - 36px);
-  overflow-y: auto;
+/* Keep the group roster and selection in one column above the camera controls.
+   Only the visible cards catch clicks; the rest of the map remains draggable. */
+.ws-cmd-map-corner {
+  position: absolute;
+  inset: 12px 12px 94px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+.ws-cmd-map-corner > .ws-cmd-map-quest-dock {
+  position: static;
+  max-width: 100%;
+  min-height: 0;
+  overflow: auto;
+  pointer-events: auto;
+}
+.ws-cmd-map-corner > .ws-cmd-map-quest-dock:not(:has(> :not([hidden]))) {
+  display: none;
 }
 .ws-cmd-map-member-folders {
   width: min(340px, calc(100vw - 72px));
@@ -1060,6 +1076,157 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
+.map-team-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 0;
+  max-width: 100%;
+}
+body:has(#personalAssistantPanel:not([hidden])) .map-team-dock {
+  display: none;
+}
+.map-team-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 4px 12px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 6px;
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.map-team-tab::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-2px) rotate(45deg);
+}
+.map-team-tab[aria-expanded="true"]::after {
+  transform: translateY(2px) rotate(225deg);
+}
+.map-team-deck {
+  width: 304px;
+  max-width: 100%;
+  max-height: 380px;
+  min-height: 0;
+  pointer-events: auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 8px;
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+}
+.map-team-deck h2 {
+  margin: 0 4px 6px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.map-team-deck p {
+  margin: 8px 4px 0;
+}
+.map-team-deck [role="status"]:empty {
+  display: none;
+}
+.map-team-deck button {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.map-team-deck button:hover {
+  background: var(--ws-panel-2);
+}
+.map-team-places {
+  padding-inline-start: 40px;
+  list-style: none;
+}
+.map-team-wait {
+  color: var(--ws-faction);
+  font-weight: 700;
+}
+.map-team-deck .map-team-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-top: 1px solid var(--ws-line);
+  overflow-wrap: anywhere;
+}
+.map-team-face {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+}
+.map-team-face .ws-map-av-label {
+  display: none;
+}
+.map-team-face > :is(.ws-map-av, .ws-cmd-character) {
+  width: 40px;
+  min-width: 0;
+  height: 40px;
+  margin: 0;
+  place-items: center;
+}
+.map-team-face .ws-map-av-figure {
+  width: 30px;
+  height: 36px;
+  margin: 0;
+}
+.map-team-card small {
+  display: block;
+}
+.map-team-deck h3 {
+  margin: 12px 4px 4px;
+  font-size: 0.8rem;
+  color: var(--ws-ink-dim);
+}
+.map-team-slot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  border: 1px dashed var(--ws-line);
+  border-radius: 6px;
+}
+.map-team-slot button,
+.map-team-slot a {
+  width: auto;
+  color: var(--ws-faction);
+  font-weight: 700;
+}
+.map-team-tab:focus-visible,
+.map-team-deck :is(button, a):focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 1px;
+}
+.ws-cmd-detachment-slot:has(.music-folder-view) .music-folder-view {
+  padding-top: 68px;
+}
+@media (max-width: 900px) {
+  .ws-cmd-map-corner {
+    bottom: calc(var(--ori-launcher-clearance-y, 88px) + 148px);
+  }
+}
+
 /* A Home's selected linked song (song-card PRD FR9): the shared card from
    components.css, under Give work, scrolling inside itself when tall. */
 .ws-cmd-map-song-card {
