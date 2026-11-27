@@ -12,7 +12,7 @@
 // because it uses the same `.ori-context-menu` styles (context-menu.css); it
 // shares none of the Map's menu contents.
 
-import { escapeHtml } from './home-workspace-cockpit.js';
+import { escapeHtml } from './note-editor.js';
 import {
   FOLDER_ACTION_CONNECT,
   FOLDER_ACTION_MAKE_SEARCHABLE,

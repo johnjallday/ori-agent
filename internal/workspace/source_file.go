@@ -437,6 +437,11 @@ func listContainedEntries(root, relativePath string, depth int, page bool, witne
 					continue
 				}
 				sub = opened // nil when unreadable or swapped for a link: listed, left unexpanded
+				if page && sub != nil {
+					if info, err := sub.Stat("."); err == nil {
+						item.folderVerified = sourceVersion(info) == item.Version
+					}
+				}
 			}
 			listing.Entries = append(listing.Entries, item)
 			if sub != nil {

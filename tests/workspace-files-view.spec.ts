@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -198,6 +199,267 @@ for (const phone of [false, true])
     await expect(viewport).toBeVisible();
     expect(await camera()).toEqual(moved);
   });
+
+test('a linked Python file previews, opens in an editor, and moves to Trash only after confirmation', async ({
+  page
+}) => {
+  const ws = await workspace(page, 'Downloads');
+  await files(page, ws.id); // verify this server is isolated before touching files
+  const root = mkdtempSync(join(realpathSync(process.env.ORI_SANDBOX!), 'downloads-'));
+  const folder = join(root, 'example-project');
+  mkdirSync(folder);
+  const name = `cards-${randomUUID()}.py`;
+  const code = 'print("<b>not markup</b>")';
+  writeFileSync(join(folder, name), code, { mode: 0o700 });
+  writeFileSync(join(folder, 'keep.txt'), 'still here');
+  const ref = await linkedFixture(page, ws.id, 'Downloads', root);
+  const listing = await (
+    await page.request.get(
+      `/api/workspaces/${ws.id}/directories/${ref}/entries?path=example-project`
+    )
+  ).json();
+  expect(listing.desktop_disabled).toBe(true);
+  test.skip(process.platform !== 'darwin', 'native file actions require the local Mac');
+  await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
+  await ready(page);
+  await row(page, 'Files').click();
+  await row(page, 'Downloads Linked folder').click();
+  await row(page, 'example-project').click();
+  await row(page, name).press('Enter');
+  await expect(reader(page).locator('pre')).toHaveText(code);
+  await reader(page).getByRole('button', { name: 'Open in editor' }).click();
+  await expect(reader(page)).toContainText('No application was opened.');
+  const trash = reader(page).getByRole('button', { name: 'Move to Trash…' });
+  page.once('dialog', async dialog => {
+    await dialog.dismiss();
+  });
+  await trash.click();
+  expect(readFileSync(join(folder, name), 'utf8')).toBe(code);
+  let confirmation = '';
+  page.once('dialog', async dialog => {
+    confirmation = dialog.message();
+    await dialog.accept();
+  });
+  await trash.click();
+  await expect(row(page, name)).toHaveCount(0);
+  await expect(row(page, 'keep.txt')).toBeVisible();
+  expect(confirmation).toContain(`example-project/${name}`);
+  expect(readdirSync(folder)).toEqual(['keep.txt']);
+  const sandbox = realpathSync(process.env.ORI_SANDBOX!);
+  expect(
+    readFileSync(
+      join(
+        process.env.ORI_DEMO_SPLIT_PROFILE === '1' ? join(sandbox, 'home') : sandbox,
+        '.Trash',
+        name
+      ),
+      'utf8'
+    )
+  ).toBe(code);
+});
+
+test('Trash explains which permission to check, without retrying the move', async ({ page }) => {
+  test.skip(
+    process.platform !== 'darwin' || process.getuid?.() === 0,
+    'requires unprivileged Mac permissions'
+  );
+  const ws = await workspace(page, 'Downloads');
+  await files(page, ws.id);
+  const root = mkdtempSync(join(realpathSync(process.env.ORI_SANDBOX!), 'denied-'));
+  const name = 'test.txt';
+  writeFileSync(join(root, name), 'keep');
+  await linkedFixture(page, ws.id, 'Downloads', root);
+  await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
+  await ready(page);
+  await row(page, 'Files').click();
+  await row(page, 'Downloads Linked folder').click();
+  await row(page, name).press('Enter');
+  const preview = reader(page).getByRole('article');
+  const trash = preview.getByRole('button', { name: 'Move to Trash…' });
+  const attempt = async () => {
+    page.once('dialog', d => d.accept());
+    await trash.click();
+  };
+  chmodSync(root, 0o500);
+  try {
+    await attempt();
+    const settings = preview.getByRole('link', { name: 'Open Files & Folders settings' });
+    await expect(settings).toHaveAttribute('href', /Privacy_FilesAndFolders$/);
+    await expect(preview).toContainText('Downloads Folder');
+  } finally {
+    chmodSync(root, 0o700);
+  }
+  await page.route('**/trash-file', r =>
+    r.fulfill({
+      status: 403,
+      json: {
+        code: 'trash_directory_denied',
+        message: 'macOS denied access to Trash. This item was not moved.'
+      }
+    })
+  );
+  await attempt();
+  await expect(preview.getByRole('link', { name: 'Open Files & Folders settings' })).toHaveCount(0);
+  await expect(preview).toContainText('select it in Finder');
+  await preview.getByText('Allow Ori to use Trash', { exact: true }).click();
+  await expect(
+    preview.getByRole('link', { name: 'Open Full Disk Access settings' })
+  ).toHaveAttribute('href', /Privacy_AllFiles$/);
+  expect(readFileSync(join(root, name), 'utf8')).toBe('keep');
+  await page.unroute('**/trash-file');
+});
+
+test('Contents supports right-click, individual picks and a range without including a stale file', async ({
+  page
+}) => {
+  test.skip(process.platform !== 'darwin', 'native file actions require the local Mac');
+  const ws = await workspace(page, 'Downloads');
+  await files(page, ws.id);
+  const folder = mkdtempSync(join(realpathSync(process.env.ORI_SANDBOX!), 'multi-'));
+  for (const n of ['a', 'b', 'c', 'd']) writeFileSync(join(folder, `${n}.txt`), n);
+  const ref = await linkedFixture(page, ws.id, 'Downloads', folder);
+  const posted: string[] = [];
+  page.on('request', r => {
+    if (r.url().endsWith(`/directories/${ref}/trash-file`)) posted.push(r.postDataJSON().path);
+  });
+  await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
+  await ready(page);
+  await row(page, 'Files').click();
+  await row(page, 'Downloads Linked folder').click();
+  const a = row(page, 'a.txt'),
+    b = row(page, 'b.txt'),
+    c = row(page, 'c.txt'),
+    d = row(page, 'd.txt');
+  const count = () => reader(page).locator('[aria-selected=true]').count();
+  await a.click();
+  await c.click({ modifiers: ['Meta'] });
+  expect(await count()).toBe(2);
+  await a.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move 2 files to Trash…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move 2 files to Trash?' });
+  await expect(dialog.locator('li')).toHaveText(['a.txt', 'c.txt']);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  expect(posted).toEqual([]);
+  // A right-click outside the current selection acts only on the clicked row.
+  await d.click({ button: 'right' });
+  page.once('dialog', async dialog => {
+    await dialog.accept();
+  });
+  await page.getByRole('menuitem', { name: 'Move to Trash…', exact: true }).click();
+  await expect(d).toHaveCount(0);
+  expect(posted).toEqual(['d.txt']);
+  await a.click();
+  await c.click({ modifiers: ['Shift'] });
+  await expect(b).toHaveAttribute('aria-selected', 'true');
+  expect(await count()).toBe(3);
+  await c.press('Delete');
+  const range = page.getByRole('dialog', { name: 'Move 3 files to Trash?' });
+  await expect(range.locator('li')).toHaveText(['a.txt', 'b.txt', 'c.txt']);
+  writeFileSync(join(folder, 'b.txt'), 'replacement bytes');
+  await range.getByRole('button', { name: 'Move to Trash', exact: true }).click();
+  await expect(reader(page).getByRole('status')).toContainText(
+    '1 of 3 confirmed moved. Stopped at b.txt'
+  );
+  expect(posted).toEqual(['d.txt', 'a.txt', 'b.txt']);
+  expect(readdirSync(folder).sort()).toEqual(['b.txt', 'c.txt']);
+  expect(readFileSync(join(folder, 'b.txt'), 'utf8')).toBe('replacement bytes');
+  // New listings require a new selection, never silently upgrade a token.
+  await reader(page).getByRole('button', { name: 'Refresh folder' }).click();
+  expect(await count()).toBe(0);
+  await b.click();
+  await c.click({ modifiers: ['Meta'] });
+  await c.press('Shift+F10');
+  await page.getByRole('menuitem', { name: 'Move 2 files to Trash…' }).click();
+  await dialog.getByRole('button', { name: 'Move to Trash', exact: true }).click();
+  await expect(reader(page)).toContainText('2 files moved to Trash.');
+  expect(readdirSync(folder)).toEqual([]);
+});
+
+test('color and move linked folders and files in Contents, then trash a whole folder', async ({
+  page
+}) => {
+  test.skip(process.platform !== 'darwin', 'native file actions require the local Mac');
+  const ws = await workspace(page, 'Downloads');
+  await files(page, ws.id);
+  const sandbox = realpathSync(process.env.ORI_SANDBOX!);
+  const root = mkdtempSync(join(sandbox, 'arrange-'));
+  const src = `Cards-${randomUUID().slice(0, 8)}`,
+    dst = 'Projects';
+  mkdirSync(join(root, src));
+  mkdirSync(join(root, dst));
+  writeFileSync(join(root, src, 'notes.txt'), 'keep this');
+  writeFileSync(join(root, 'cover.txt'), 'cover');
+  await linkedFixture(page, ws.id, 'Downloads', root);
+  const visit = async () => {
+    await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
+    await ready(page);
+    await row(page, 'Files').click();
+    await row(page, 'Downloads Linked folder').click();
+  };
+  await visit();
+  await row(page, src).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Folder color…' }).click();
+  await page
+    .getByRole('dialog', { name: `Folder color: ${src}` })
+    .getByRole('button', { name: 'Purple' })
+    .click();
+  await expect(row(page, src)).toHaveAttribute('data-folder-color', 'Purple');
+  await visit();
+  await expect(row(page, src)).toHaveAttribute('data-folder-color', 'Purple');
+  // A drag is reviewed. Cancel first, then move a folder and a sibling file together.
+  await row(page, src).dragTo(row(page, dst));
+  await page
+    .getByRole('dialog', { name: 'Move 1 folder' })
+    .getByRole('button', { name: 'Cancel' })
+    .click();
+  expect(readdirSync(join(root, dst))).toEqual([]);
+  await row(page, src).click();
+  await row(page, 'cover.txt').click({ modifiers: ['Meta'] });
+  await row(page, src).dragTo(row(page, dst));
+  const review = page.getByRole('dialog', { name: 'Move 2 items' });
+  await expect(review.locator('li')).toHaveText([`${src}/`, 'cover.txt']);
+  await expect(review.getByRole('combobox')).toHaveValue(/\d+/);
+  await review.getByRole('button', { name: 'Move here' }).click();
+  await expect(reader(page)).toContainText('2 items moved to Downloads / Projects.');
+  expect(readdirSync(root)).toEqual([dst]);
+  await row(page, dst).click();
+  await expect(row(page, src)).toHaveAttribute('data-folder-color', 'Purple');
+  await row(page, 'cover.txt').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to…' }).click();
+  const picker = page.getByRole('dialog', { name: 'Move 1 file' });
+  await picker.getByRole('combobox').selectOption({ label: 'Downloads' });
+  await picker.getByRole('button', { name: 'Move here' }).click();
+  await expect(reader(page)).toContainText('cover.txt moved to Downloads.');
+  expect(readFileSync(join(root, 'cover.txt'), 'utf8')).toBe('cover');
+  await row(page, src).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Folder color…' }).click();
+  await page.getByRole('button', { name: 'Clear color' }).click();
+  await expect(row(page, src)).not.toHaveAttribute('data-folder-color', 'Purple');
+  // The linked root can be colored, never trashed.
+  await row(page, 'Downloads Linked folder').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Move to Trash…' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await row(page, src).click({ button: 'right' });
+  let warning = '';
+  page.once('dialog', async d => {
+    warning = d.message();
+    await d.accept();
+  });
+  await page.getByRole('menuitem', { name: 'Move to Trash…' }).click();
+  await expect(row(page, src)).toHaveCount(0);
+  expect(warning).toContain('all of its contents');
+  expect(
+    readFileSync(
+      join(
+        process.env.ORI_DEMO_SPLIT_PROFILE === '1' ? join(sandbox, 'home') : sandbox,
+        '.Trash',
+        src,
+        'notes.txt'
+      ),
+      'utf8'
+    )
+  ).toBe('keep this');
+});
 
 test('a linked alternate opens only by explicit sandbox dispatch; disconnect refuses replay', async ({
   page
