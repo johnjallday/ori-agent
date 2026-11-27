@@ -60,8 +60,28 @@ export function deckSlots(view) {
     .map(row => ({ row, canHire: !readOnly && !row.readOnly && !row.needsClear }));
 }
 
-function slotsHTML(slots) {
-  if (!slots.length) return '';
+// Unlike a blueprint vacancy, this is a Home-wide consent offer. Link to
+// its owner rather than substituting the ordinary role form or hiring here.
+export function sharedSlot(view) {
+  const offer = view.sharedAssistantOffer;
+  const ws = view.page.workspace;
+  const status = view.groupTemplateStatus;
+  if (!offer || offer.workspaceId !== view.workspaceId() || status?.kind !== 'managed_home')
+    return null;
+  const slug = view.page.workspaceSlug || ws?.folder_slug;
+  const writable =
+    !ws?.read_only && !view.roleRoster?.read_only && status.integration?.state === 'available';
+  return {
+    label: offer.label,
+    href:
+      offer.can_hire === true && writable && slug
+        ? `/workspaces/${encodeURIComponent(slug)}/assistant#projectLibrarySharing`
+        : null
+  };
+}
+
+function slotsHTML(slots, shared) {
+  if (!slots.length && !shared) return '';
   return (
     '<h3>Open roles</h3>' +
     slots
@@ -69,7 +89,10 @@ function slotsHTML(slots) {
         ({ row, canHire }) =>
           `<div class="map-team-slot"><span>${escapeHtml(row.label)}</span>${canHire ? `<button type="button" data-team-hire="${escapeHtml(row.roleId)}" aria-label="Hire for ${escapeHtml(row.label)}">Hire</button>` : ''}</div>`
       )
-      .join('')
+      .join('') +
+    (shared
+      ? `<div class="map-team-slot"><span>${escapeHtml(shared.label)}</span>${shared.href ? `<a data-team-shared href="${escapeHtml(shared.href)}" aria-label="Hire for ${escapeHtml(shared.label)}">Hire</a>` : ''}</div>`
+      : '')
   );
 }
 
@@ -165,18 +188,19 @@ export function mountMapTeamDeck(view, dock) {
         : !cards.length
           ? '<p>No other agents work here.</p>'
           : '') +
-      slotsHTML(deckSlots(view));
+      slotsHTML(deckSlots(view), sharedSlot(view));
     if (html !== previous) {
       const focus = list.contains(document.activeElement) ? document.activeElement.dataset : null;
       list.innerHTML = html;
       list.append(status);
       previous = html;
       if (focus) {
-        const next = [...list.querySelectorAll('button')].find(
+        const next = [...list.querySelectorAll('button, a')].find(
           el =>
             el.dataset.teamAgent === focus.teamAgent &&
             el.dataset.teamPlace === focus.teamPlace &&
-            el.dataset.teamHire === focus.teamHire
+            el.dataset.teamHire === focus.teamHire &&
+            el.dataset.teamShared === focus.teamShared
         );
         (next || tab).focus({ preventScroll: true });
       }

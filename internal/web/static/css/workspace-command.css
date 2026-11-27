@@ -1167,13 +1167,14 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   border: 1px dashed var(--ori-line);
   border-radius: 6px;
 }
-.map-team-slot button {
+.map-team-slot button,
+.map-team-slot a {
   width: auto;
   color: var(--ori-accent-text);
   font-weight: 700;
 }
 .map-team-tab:focus-visible,
-.map-team-deck button:focus-visible {
+.map-team-deck :is(button, a):focus-visible {
   outline: 2px solid var(--ori-accent-strong);
   outline-offset: 1px;
 }

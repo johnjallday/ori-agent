@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
 
-// Real page, member tree, waits, camera and roster. Only the opt-in Hire case writes. See
+// Real page, member tree, waits, camera and roster. Only opt-in role/offer cases write. See
 // the manual guide for the preconditions. Does not scan folders or call a model.
 const route = process.env.ORI_MAP_TEAM_HOME || '';
 test.skip(!route, 'requires the prepared, isolated music Home');
@@ -21,7 +21,8 @@ test('Hire uses the existing role form and the filled slot becomes a navigable u
   const modal = page.locator('#addAgentModal');
   await expect(modal).toBeVisible();
   await expect(modal).toContainText('Create an agent for Archivist');
-  await modal.locator('[data-agent-create-field="name"]').fill('Index Keeper');
+  const name = process.env.ORI_MAP_TEAM_HIRE_NAME || 'Index Keeper';
+  await modal.locator('[data-agent-create-field="name"]').fill(name);
   await page.screenshot({ path: 'tasks/evidence-map-agent-deck/hire-archivist.png' });
   const saved = page.waitForResponse(
     r => r.request().method() === 'PUT' && r.url().endsWith('/roles/archivist')
@@ -32,12 +33,45 @@ test('Hire uses the existing role form and the filled slot becomes a navigable u
   await expect(modal).toBeHidden();
   await tab.click();
   await expect(deck.getByRole('button', { name: 'Hire for Archivist' })).toHaveCount(0);
-  const hired = deck.getByRole('button', { name: /Index Keeper/ });
+  const hired = deck.getByRole('button').filter({ hasText: name });
   await expect(hired).toBeVisible();
   await page.screenshot({ path: 'tasks/evidence-map-agent-deck/hired.png' });
   await hired.click();
-  await expect(page.locator('.ws-map-unit[aria-pressed="true"]')).toContainText('Index Keeper');
+  await expect(page.locator('.ws-map-unit[aria-pressed="true"]')).toContainText(name);
   await expect(page.locator('.ws-cmd-map-window')).toHaveCount(0);
+});
+
+test('the shared slot opens the Home offer without hiring; Not now removes it', async ({
+  page
+}) => {
+  test.skip(
+    !process.env.ORI_MAP_TEAM_SHARED_OFFER,
+    'requires an unanswered offer in the disposable Home'
+  );
+  await installLocalCdn(page);
+  const writes: string[] = [];
+  page.on('request', req => {
+    if (req.method() !== 'GET' && req.url().includes('/library/sharing')) writes.push(req.url());
+  });
+  await page.goto(route);
+  await page.locator('.map-team-tab').click();
+  const link = page.getByRole('link', { name: 'Hire for Song assistant' });
+  await expect(link).toBeVisible();
+  await page.screenshot({ path: 'tasks/evidence-map-agent-deck/shared-slot.png' });
+  await link.click();
+  await expect(page).toHaveURL(/\/assistant#projectLibrarySharing$/);
+  await expect(page.locator('#projectLibrarySharingTitle')).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Add your Song assistant' })).toBeVisible();
+  expect(writes).toEqual([]);
+  await page.screenshot({ path: 'tasks/evidence-map-agent-deck/shared-offer.png' });
+  const answered = page.waitForResponse(r => r.url().endsWith('/library/sharing/offer'));
+  await page.locator('#projectLibrarySharingDismiss').click();
+  expect((await answered).ok()).toBe(true);
+  const summary = page.waitForResponse(r => r.url().endsWith('/library/summary'));
+  await page.goto(route);
+  expect((await (await summary).json()).shared_assistant_offer).toBeUndefined();
+  await page.locator('.map-team-tab').click();
+  await expect(page.getByRole('region', { name: 'Map team' })).not.toContainText('Song assistant');
 });
 
 test('Move mode and the folder view refuse team jumps without moving the camera', async ({
@@ -81,9 +115,7 @@ for (const width of [1440, 390]) {
       await page.keyboard.press('Enter');
       const waiting = deck.getByRole('button', { name: /Has a question for you/ });
       await expect(waiting).toBeVisible();
-      await expect(
-        deck.getByRole('button', { name: /Songkeeper.*2 (songs|workspaces)/ })
-      ).toBeVisible();
+      await expect(deck.getByRole('button', { name: /Songkeeper.*2 songs/ })).toBeVisible();
       await page.screenshot({ path: `tasks/evidence-map-agent-deck/team-${width}-${theme}.png` });
       await waiting.focus();
       await page.keyboard.press('Enter');

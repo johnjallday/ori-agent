@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deckMembers, deckSlots, teamSnapshot } from './map-team-deck.js';
+import { deckMembers, deckSlots, sharedSlot, teamSnapshot } from './map-team-deck.js';
 
 test('only current empty, writable roster slots offer a hire', t => {
   const old = globalThis.window;
@@ -34,6 +34,29 @@ test('only current empty, writable roster slots offer a hire', t => {
   assert.ok(deckSlots(view).every(slot => !slot.canHire));
   view.roleRoster.workspace_id = 'other';
   assert.deepEqual(deckSlots(view), []);
+});
+
+test('a shared slot links only to the matching writable Home’s own offer', () => {
+  const view = {
+    workspaceId: () => 'h',
+    page: { workspace: { folder_slug: 'my-home' } },
+    groupTemplateStatus: { kind: 'managed_home', integration: { state: 'available' } },
+    sharedAssistantOffer: { workspaceId: 'h', label: 'Keeper', can_hire: true }
+  };
+  assert.deepEqual(sharedSlot(view), {
+    label: 'Keeper',
+    href: '/workspaces/my-home/assistant#projectLibrarySharing'
+  });
+  view.page.workspace.read_only = true;
+  assert.equal(sharedSlot(view).href, null);
+  view.page.workspace.read_only = false;
+  delete view.sharedAssistantOffer.can_hire;
+  assert.equal(sharedSlot(view).href, null);
+  view.groupTemplateStatus.kind = 'ordinary';
+  assert.equal(sharedSlot(view), null);
+  view.groupTemplateStatus.kind = 'managed_home';
+  view.workspaceId = () => 'other';
+  assert.equal(sharedSlot(view), null);
 });
 
 const group = {

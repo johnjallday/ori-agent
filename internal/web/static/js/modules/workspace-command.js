@@ -14445,7 +14445,10 @@ export class WorkspaceCommandView {
     // The same moments re-read the songs' tile facts.
     void this.loadDetachmentSongFacts();
     const folders = this.loadHomeMapFolders();
+    const token = Symbol();
+    this.librarySummaryToken = token;
     const workspaceId = this.workspaceId();
+    let offer = null;
     const status = this.groupTemplateStatus;
     let next = null;
     if (workspaceId && status && status.kind === 'managed_home') {
@@ -14456,6 +14459,9 @@ export class WorkspaceCommandView {
         );
         if (response.ok) {
           const summary = await response.json();
+          if (summary.initialized && summary.shared_assistant_offer?.label) {
+            offer = { ...summary.shared_assistant_offer, workspaceId };
+          }
           // The outer map's badge reads the same count (home-library-badges.js).
           const toSetUp = libraryToSetUp(summary);
           if (toSetUp > 0) {
@@ -14467,7 +14473,9 @@ export class WorkspaceCommandView {
       }
     }
     await folders;
-    if (this.workspaceId() !== workspaceId) return;
+    if (this.workspaceId() !== workspaceId || this.librarySummaryToken !== token) return;
+    this.sharedAssistantOffer = offer;
+    this.mapTeamDeck?.update();
     const arrival = this._setupArrival;
     this._setupArrival = null;
     if (JSON.stringify(next) !== JSON.stringify(this.libraryEmptyState || null)) {
