@@ -22,8 +22,12 @@ export function bindProjectDiscovery(trigger, panel, id, available) {
     panel.hidden = false;
     panel.replaceChildren(...nodes);
   };
+  let sequence = 0;
   async function request(action, params, onSuccess) {
-    present(element('p', 'Checking folder names…'));
+    const current = ++sequence;
+    present(
+      element('p', action === 'open' ? 'Opening course workspace…' : 'Checking folder names…')
+    );
     try {
       const r = await fetch(`/api/workspaces/${encodeURIComponent(id)}/documents-projects`, {
         method: 'POST',
@@ -32,9 +36,18 @@ export function bindProjectDiscovery(trigger, panel, id, available) {
       });
       if (!r.ok) throw Error();
       const data = await r.json();
-      if (!trigger.hidden && panel.dataset.workspace === id) onSuccess(data);
+      if (current === sequence && !trigger.hidden && panel.dataset.workspace === id)
+        onSuccess(data);
     } catch {
-      present(element('p', 'The folder could not be verified. Choose it again for a fresh look.'));
+      if (current !== sequence || trigger.hidden || panel.dataset.workspace !== id) return;
+      present(
+        element(
+          'p',
+          action === 'open'
+            ? 'Setup could not be verified. Check your workspaces before looking again.'
+            : 'The folder could not be verified. Choose it again for a fresh look.'
+        )
+      );
       trigger.focus();
     }
   }
@@ -49,6 +62,7 @@ export function bindProjectDiscovery(trigger, panel, id, available) {
       const actions = element('div', '', 'documents-look__actions mt-2');
       const params = { parent, candidate: c.ref };
       const dismiss = () => {
+        data.dismissed = true;
         data.suggestions = data.suggestions.filter(row => row !== c);
         showResults(parent, data);
       };
@@ -93,7 +107,14 @@ export function bindProjectDiscovery(trigger, panel, id, available) {
     if (data.partial)
       panel.append(element('p', 'This look is incomplete. Some entries could not be checked.'));
     else if (!data.suggestions?.length)
-      panel.append(element('p', 'No convincing project match in this folder.'));
+      panel.append(
+        element(
+          'p',
+          data.dismissed
+            ? 'No more suggestions from this look.'
+            : 'No convincing project match in this folder.'
+        )
+      );
     panel.tabIndex = -1;
     panel.focus();
   }

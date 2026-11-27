@@ -20,6 +20,10 @@ func supportedFileProposals(items []ProposalItem, text string, notice *ProposalN
 			notice.Unsupported++
 			continue
 		}
+		if item.Kind == ProposalKindCalendarEvent && (item.Start == nil || unstatedDate.MatchString(quote) || !quotedDate(quote, *item.Start)) {
+			notice.Unsupported++
+			continue
+		}
 		if item.Kind == ProposalKindTicket && item.DueAt != nil && (unstatedDate.MatchString(quote) || !quotedDate(quote, *item.DueAt)) {
 			item.DueAt = nil
 			item.DueInput = ""
@@ -33,7 +37,7 @@ func supportedFileProposals(items []ProposalItem, text string, notice *ProposalN
 func quotedDate(quote string, date time.Time) bool {
 	quote = strings.ToLower(quote)
 	for _, layout := range []string{"2006-01-02", "January 2, 2006", "Jan 2, 2006", "2 January 2006", "2 Jan 2006", "January 2 2006", "Jan 2 2006", "1/2/2006", "01/02/2006"} {
-		if strings.Contains(quote, strings.ToLower(date.Format(layout))) {
+		if matched, _ := regexp.MatchString(`\b`+regexp.QuoteMeta(strings.ToLower(date.Format(layout)))+`\b`, quote); matched {
 			return true
 		}
 	}

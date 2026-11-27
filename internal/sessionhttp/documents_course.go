@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/examples/blueprints"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -48,7 +49,15 @@ func (h *Handler) openCourse(r *http.Request, manager string, d folderagent.Proj
 	owner := ws.OwnerUserID
 	route := func(id string, setup bool) (string, error) {
 		w, e := h.workspaceStore.Get(id)
-		if e != nil || w.ID != id || w.OwnerUserID != owner || w.GetStatus() != workspace.StatusActive || w.FolderSlug == "" {
+		if e != nil || w == nil || !d.Current(c) || w.ID != id || w.FolderSlug == "" {
+			return "", folderagent.ErrWrongState
+		}
+		// Ordinary and legacy local workspace creation can leave the owner blank.
+		actualOwner := w.OwnerUserID
+		if actualOwner == "" {
+			actualOwner = userprofile.LocalUserID
+		}
+		if status := w.GetStatus(); actualOwner != owner || (status != "" && status != workspace.StatusActive) {
 			return "", folderagent.ErrWrongState
 		}
 		p := "/workspaces/" + url.PathEscape(w.FolderSlug)
@@ -80,6 +89,9 @@ func (h *Handler) openCourse(r *http.Request, manager string, d folderagent.Proj
 	source, err := blueprints.StageCourse(temp)
 	if err != nil {
 		return "", err
+	}
+	if current, ok := h.projectDiscovery(r, manager); !ok || current != d || !d.Current(c) {
+		return "", folderagent.ErrWrongState
 	}
 	ctx := context.WithValue(r.Context(), courseCreateKey{}, courseCreate{id, owner})
 	created, err := h.createFromTemplate(ctx, createWorkspaceRequest{Name: c.Name(), TemplatePath: source})

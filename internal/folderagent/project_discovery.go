@@ -19,11 +19,12 @@ type DiscoveryFolder struct {
 	Ref  string `json:"ref"`
 }
 type CourseSuggestion struct {
-	Folder    string `json:"folder"`
-	Ref       string `json:"ref"`
-	Syllabus  string `json:"syllabus"`
-	Structure string `json:"structure"`
-	Identity  string `json:"-"`
+	Folder                 string `json:"folder"`
+	Ref                    string `json:"ref"`
+	Syllabus               string `json:"syllabus"`
+	Structure              string `json:"structure"`
+	Identity               string `json:"-"`
+	parentWitness, witness string
 }
 type ProjectLook struct {
 	Folders     []DiscoveryFolder  `json:"folders,omitempty"`
@@ -32,7 +33,10 @@ type ProjectLook struct {
 }
 
 func projectEntry(e workspace.DirectoryEntry) bool {
-	return e.Version.Identity != "" && !e.Version.Placeholder && len(e.Name) <= 100 && projectLabel.MatchString(e.Name) && !strings.HasSuffix(e.Name, " ") && !folderdigest.IsSkippedFolder(e.Name) && !sensitive.ContainsSecretLikeText(e.Name) && !strings.EqualFold(e.Name, "My Notes") && !strings.EqualFold(e.Name, "Ori Workspaces")
+	return e.Version.Identity != "" && !e.Version.Placeholder && len(e.Name) <= 100 &&
+		projectLabel.MatchString(e.Name) && !strings.HasSuffix(e.Name, " ") &&
+		!folderdigest.IsSkippedFolder(e.Name) && !sensitive.ContainsSecretLikeText(e.Name) &&
+		!strings.EqualFold(e.Name, "My Notes") && !strings.EqualFold(e.Name, "Ori Workspaces")
 }
 func (d ProjectDiscovery) folderRef(rel, id string) string {
 	return documentsRef("project-folder-v1", d.Binding, d.Witness, rel, id)
@@ -42,7 +46,7 @@ func (d ProjectDiscovery) Folders() (ProjectLook, error) {
 	if err != nil {
 		return ProjectLook{}, err
 	}
-	out := ProjectLook{Partial: listing.Truncated, Folders: []DiscoveryFolder{{"Documents", d.folderRef("", d.Witness)}}}
+	out := ProjectLook{Partial: listing.Truncated || listing.Incomplete, Folders: []DiscoveryFolder{{"Documents", d.folderRef("", d.Witness)}}}
 	for _, e := range listing.Entries {
 		if e.Kind == "folder" && projectEntry(e) {
 			out.Folders = append(out.Folders, DiscoveryFolder{"Documents/" + e.Name, d.folderRef(e.Name, e.Version.Identity)})
@@ -77,7 +81,7 @@ func (d ProjectDiscovery) Find(ctx context.Context, ref string, ignored map[stri
 	if err != nil {
 		return ProjectLook{}, err
 	}
-	out := ProjectLook{Partial: listing.Truncated}
+	out := ProjectLook{Partial: listing.Truncated || listing.Incomplete}
 	probes := 0
 	for _, e := range listing.Entries {
 		if err := ctx.Err(); err != nil {
@@ -86,7 +90,9 @@ func (d ProjectDiscovery) Find(ctx context.Context, ref string, ignored map[stri
 		if e.Kind != "folder" || !projectEntry(e) {
 			continue
 		}
-		identity := documentsRef(ref, e.RelativePath, e.Version.Identity)
+		// An independently re-verified Documents workspace still opens the same
+		// physical course, but its review token is bound to this manager's receipt.
+		identity := documentsRef("course-folder-v1", d.Root, d.Witness, id, e.RelativePath, e.Version.Identity)
 		if ignored[identity] {
 			continue
 		}
@@ -100,8 +106,8 @@ func (d ProjectDiscovery) Find(ctx context.Context, ref string, ignored map[stri
 			out.Partial = true
 			continue
 		}
-		out.Partial = out.Partial || children.Truncated
-		c := CourseSuggestion{Folder: e.RelativePath, Identity: identity}
+		out.Partial = out.Partial || children.Truncated || children.Incomplete
+		c := CourseSuggestion{Folder: e.RelativePath, Identity: identity, parentWitness: id, witness: e.Version.Identity}
 		for _, child := range children.Entries {
 			if !projectEntry(child) {
 				continue
@@ -121,7 +127,7 @@ func (d ProjectDiscovery) Find(ctx context.Context, ref string, ignored map[stri
 		if c.Syllabus == "" || c.Structure == "" {
 			continue
 		}
-		c.Ref = documentsRef(identity, c.Syllabus, c.Structure)
+		c.Ref = documentsRef(ref, identity, c.Syllabus, c.Structure)
 		out.Suggestions = append(out.Suggestions, c)
 		if len(out.Suggestions) == 2 {
 			break
@@ -136,4 +142,14 @@ func (d ProjectDiscovery) Find(ctx context.Context, ref string, ignored map[stri
 	}
 	return out, nil
 }
+
 func (c CourseSuggestion) Name() string { return path.Base(c.Folder) }
+
+// Current checks only the reviewed directory chain, not its siblings or files.
+func (d ProjectDiscovery) Current(c CourseSuggestion) bool {
+	chain, err := workspace.WitnessedFolderChain(d.Root, c.Folder, d.Witness)
+	if err != nil || len(chain) == 0 || chain[len(chain)-1].Identity != c.witness {
+		return false
+	}
+	return len(chain) == 1 && c.parentWitness == d.Witness || len(chain) == 2 && chain[0].Identity == c.parentWitness
+}

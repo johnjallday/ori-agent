@@ -72,6 +72,12 @@ func TestProjectHandoffRefusesReplacementAndForeignRequest(t *testing.T) {
 		t.Fatal(code)
 	}
 	local = true
+	if _, err := h.createFromTemplate(t.Context(), createWorkspaceRequest{Name: "Existing course", AnchorPath: course}); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := call(open); code != 200 {
+		t.Fatalf("existing workspace did not open: %d", code)
+	}
 	if err := os.Rename(course, course+"-moved"); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +86,7 @@ func TestProjectHandoffRefusesReplacementAndForeignRequest(t *testing.T) {
 		t.Fatal("accepted replacement", code)
 	}
 	ids, err := h.workspaceStore.List()
-	if err != nil || len(ids) != 1 {
+	if err != nil || len(ids) != 2 {
 		t.Fatal(ids, err)
 	}
 }

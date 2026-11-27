@@ -1,6 +1,7 @@
 package folderagent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,7 +50,36 @@ func TestProjectDiscoveryBoundedWitnessedEvidence(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "School"), 0750); err != nil {
 		t.Fatal(err)
 	}
+	if d.Current(a.Suggestions[0]) {
+		t.Fatal("stale candidate still current")
+	}
 	if _, err := d.Find(t.Context(), parent, nil); err == nil {
 		t.Fatal("replacement parent inherited the look")
+	}
+}
+
+func TestDiscoveryDistinguishesEmptyFromProbeLimit(t *testing.T) {
+	root := t.TempDir()
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := ProjectDiscovery{Root: root, Witness: directoryid.Witness(info), Binding: "manager"}
+	if d.Witness == "" {
+		t.Skip("no physical identity")
+	}
+	ref := d.folderRef("", d.Witness)
+	empty, err := d.Find(t.Context(), ref, nil)
+	if err != nil || empty.Partial || len(empty.Suggestions) != 0 {
+		t.Fatal(empty, err)
+	}
+	for i := 0; i < 13; i++ {
+		if err := os.Mkdir(filepath.Join(root, fmt.Sprintf("Folder %02d", i)), 0750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	partial, err := d.Find(t.Context(), ref, nil)
+	if err != nil || !partial.Partial || len(partial.Suggestions) != 0 {
+		t.Fatal(partial, err)
 	}
 }
