@@ -41,6 +41,35 @@ export function teamSnapshot(view) {
   return { cards, incomplete: !group };
 }
 
+// Use the canonical, workspace-scoped projection, including its stale and
+// cross-scope flags. A label alone is never permission to create an agent.
+export function deckSlots(view) {
+  const roster = view.roleRoster;
+  if (roster?.workspace_id !== view.workspaceId()) return [];
+  const ws = view.page?.workspace;
+  const status = view.groupTemplateStatus;
+  const readOnly =
+    ws?.read_only ||
+    roster.read_only ||
+    (status?.kind === 'managed_home' && status.integration?.state !== 'available');
+  return (globalThis.window?.WorkspaceRoleRoster?.rowsFrom(roster) || [])
+    .filter(row => row.state === 'empty')
+    .map(row => ({ row, canHire: !readOnly && !row.readOnly && !row.needsClear }));
+}
+
+function slotsHTML(slots) {
+  if (!slots.length) return '';
+  return (
+    '<h3>Open roles</h3>' +
+    slots
+      .map(
+        ({ row, canHire }) =>
+          `<div class="map-team-slot"><span>${escapeHtml(row.label)}</span>${canHire ? `<button type="button" data-team-hire="${escapeHtml(row.roleId)}" aria-label="Hire for ${escapeHtml(row.label)}">Hire</button>` : ''}</div>`
+      )
+      .join('')
+  );
+}
+
 function destination(card, place) {
   return place.own ? { unitName: card.name } : { id: place.id };
 }
@@ -125,7 +154,8 @@ export function mountMapTeamDeck(view, dock) {
         ? '<p>Linked workspace membership is unavailable.</p>'
         : !cards.length
           ? '<p>No other agents work here.</p>'
-          : '');
+          : '') +
+      slotsHTML(deckSlots(view));
     if (html !== previous) {
       const focus = list.contains(document.activeElement) ? document.activeElement.dataset : null;
       list.innerHTML = html;
@@ -133,7 +163,10 @@ export function mountMapTeamDeck(view, dock) {
       previous = html;
       if (focus) {
         const next = [...list.querySelectorAll('button')].find(
-          el => el.dataset.teamAgent === focus.teamAgent && el.dataset.teamPlace === focus.teamPlace
+          el =>
+            el.dataset.teamAgent === focus.teamAgent &&
+            el.dataset.teamPlace === focus.teamPlace &&
+            el.dataset.teamHire === focus.teamHire
         );
         (next || tab).focus({ preventScroll: true });
       }
@@ -148,6 +181,18 @@ export function mountMapTeamDeck(view, dock) {
     if (focus) tab.focus({ preventScroll: true });
   }
   list.addEventListener('click', event => {
+    const hire = event.target.closest('button[data-team-hire]');
+    if (hire) {
+      const slot = deckSlots(view).find(s => s.row.roleId === hire.dataset.teamHire);
+      if (slot?.canHire) {
+        close(true);
+        view.openRoleCreateModal(slot.row.roleId, slot.row);
+      } else {
+        update();
+        status.textContent = 'This role is no longer available to hire.';
+      }
+      return;
+    }
     const el = event.target.closest('button[data-team-agent]');
     if (!el) return;
     // Re-resolve by identity, never by a stale array offset.

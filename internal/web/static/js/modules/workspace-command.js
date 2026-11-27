@@ -6088,6 +6088,7 @@ export class WorkspaceCommandView {
   }
 
   mountRoleRoster() {
+    this.mapTeamDeck?.update();
     const host = this.container?.querySelector('[data-cmd-role-roster]');
     const component = typeof window === 'undefined' ? null : window.WorkspaceRoleRoster;
     if (!host || !component) return;

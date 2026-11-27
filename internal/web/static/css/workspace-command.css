@@ -1153,6 +1153,25 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
 .map-team-card small {
   display: block;
 }
+.map-team-deck h3 {
+  margin: 12px 4px 4px;
+  font-size: 0.8rem;
+  color: var(--ori-accent-text);
+}
+.map-team-slot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  border: 1px dashed var(--ori-line);
+  border-radius: 6px;
+}
+.map-team-slot button {
+  width: auto;
+  color: var(--ori-accent-text);
+  font-weight: 700;
+}
 .map-team-tab:focus-visible,
 .map-team-deck button:focus-visible {
   outline: 2px solid var(--ori-accent-strong);

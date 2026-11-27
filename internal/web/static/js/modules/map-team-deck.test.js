@@ -1,6 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deckMembers, teamSnapshot } from './map-team-deck.js';
+import { deckMembers, deckSlots, teamSnapshot } from './map-team-deck.js';
+
+test('only current empty, writable roster slots offer a hire', t => {
+  const old = globalThis.window;
+  t.after(() => {
+    if (old === undefined) delete globalThis.window;
+    else globalThis.window = old;
+  });
+  globalThis.window = { WorkspaceRoleRoster: { rowsFrom: roster => roster.roles } };
+  const view = {
+    workspaceId: () => 'h',
+    roleRoster: {
+      workspace_id: 'h',
+      roles: [
+        { state: 'empty', roleId: 'a' },
+        { state: 'filled', roleId: 'b' },
+        { state: 'empty', roleId: 'c', readOnly: true },
+        { state: 'empty', roleId: 'd', needsClear: true }
+      ]
+    },
+    page: { workspace: {} }
+  };
+  assert.deepEqual(
+    deckSlots(view).map(s => [s.row.roleId, s.canHire]),
+    [
+      ['a', true],
+      ['c', false],
+      ['d', false]
+    ]
+  );
+  view.page.workspace.read_only = true;
+  assert.ok(deckSlots(view).every(slot => !slot.canHire));
+  view.roleRoster.workspace_id = 'other';
+  assert.deepEqual(deckSlots(view), []);
+});
 
 const group = {
   id: 'h',
