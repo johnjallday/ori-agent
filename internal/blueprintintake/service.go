@@ -128,6 +128,9 @@ func (s *Service) executeRequirement(ctx context.Context, key string, run *activ
 			s.finishRun(key, run, nil, parseErr)
 			return
 		}
+		if requirement.Sources.ReviewFiles {
+			parsed = supportedFileProposals(parsed, result.reviewText, &sourceNotice)
+		}
 		for _, item := range parsed {
 			if seen[item.Key] {
 				s.finishRun(key, run, nil, ErrUnreadableProposal)

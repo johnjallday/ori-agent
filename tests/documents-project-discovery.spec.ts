@@ -85,10 +85,52 @@ test('find a BIO 101 lab deadline from Documents', async ({ page, request }) => 
     await page.waitForURL('**/workspaces/bio-101?setup=1');
   };
   expect(await count()).toBe(0);
+  const live = process.env.ORI_DISCOVERY_MODEL;
+  if (live)
+    expect(
+      (
+        await request.post('/api/settings/system-model', {
+          data: { provider: 'claude', model: live }
+        })
+      ).ok()
+    ).toBeTruthy();
   await courseOpen();
   await expect(page.locator('#setupWizardDialog')).toBeVisible();
   await page.goto(managerURL);
   await discover();
   await courseOpen();
   expect(await count()).toBe(1);
+  const wizard = page.locator('#setupWizardDialog');
+  const file = wizard.getByLabel('Choose your syllabus');
+  const selected = join(school, 'BIO 101', 'Syllabus.txt');
+  const uploads: string[] = [];
+  page.on('request', r => {
+    if (r.url().endsWith('/sources/files')) uploads.push(r.url());
+  });
+  await file.setInputFiles(selected);
+  await expect(wizard.getByRole('button', { name: 'Read selected syllabus' })).toBeDisabled();
+  await wizard.getByRole('button', { name: 'Not now', exact: true }).click();
+  await expect(wizard).toContainText('No sources added yet.');
+  expect(uploads).toEqual([]);
+  if (!live) return;
+  await file.setInputFiles(selected);
+  await expect(wizard.locator('.blueprint-intake-consent-statement')).toContainText(
+    /claude|anthropic/i
+  );
+  await wizard.screenshot({ path: join(evidence, 'consent.png') });
+  await wizard.getByRole('checkbox', { name: 'I understand and agree.' }).check();
+  await wizard.getByRole('button', { name: 'Read selected syllabus' }).click();
+  await expect(wizard).toContainText('Parsed');
+  await wizard.locator('#setupWizardPrimary').click();
+  await wizard.getByRole('button', { name: 'Trust and enable' }).click();
+  await wizard.getByRole('button', { name: 'Run intake' }).click();
+  await expect(
+    wizard
+      .getByRole('heading', { name: 'Next stated deadline' })
+      .or(wizard.locator('.blueprint-intake-run-error'))
+  ).toBeVisible({ timeout: 120000 });
+  await expect(wizard.locator('.blueprint-intake-run-error')).toHaveCount(0);
+  await expect(wizard.locator('blockquote').first()).toContainText('December 14, 2027');
+  await expect(wizard).toContainText('Dates marked TBD remain unknown.');
+  await wizard.screenshot({ path: join(evidence, 'answer.png') });
 });

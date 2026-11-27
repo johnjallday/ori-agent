@@ -59,6 +59,7 @@
           ? payload.files
           : [];
       state.consent = payload.consent || null;
+      state.reviewFiles = Boolean(payload.requirement?.sources?.review_files);
       state.prefilledLinks = Array.isArray(payload.prefilled_links) ? payload.prefilled_links : [];
       state.loaded = true;
       draw(container, ctx, state);
@@ -81,7 +82,7 @@
     if (ctx.step.intake_files) {
       const picker = document.createElement('input');
       picker.type = 'file';
-      picker.multiple = true;
+      picker.multiple = !state.reviewFiles;
       picker.className = 'blueprint-intake-file-input';
       picker.id = `blueprintIntakeFiles-${ctx.step.id}`;
       picker.disabled = state.uploading;
@@ -89,7 +90,11 @@
         picker.accept = ctx.step.intake_accepted_extensions.join(',');
       }
 
-      const label = el('label', 'blueprint-intake-file-label', 'Add files');
+      const label = el(
+        'label',
+        'blueprint-intake-file-label',
+        state.reviewFiles ? 'Choose your syllabus' : 'Add files'
+      );
       label.setAttribute('for', picker.id);
       const hint = el(
         'p',
@@ -98,7 +103,12 @@
           ? `Accepted: ${ctx.step.intake_accepted_extensions.join(', ')}`
           : 'PDF, Office documents, text, Markdown, HTML, JSON, XML, and CSV are supported.'
       );
-      picker.addEventListener('change', () => uploadFiles(container, ctx, state, picker));
+      picker.addEventListener('change', () => {
+        if (!state.reviewFiles)
+          return uploadFiles(container, ctx, state, Array.from(picker.files || []));
+        state.pendingFile = picker.files?.[0];
+        draw(container, ctx, state);
+      });
       actions.append(label, picker, hint);
     }
     if (ctx.step.intake_url) {
@@ -182,10 +192,32 @@
     consentLabel.append(checkbox, document.createTextNode(' I understand and agree.'));
     consent.appendChild(consentLabel);
     container.appendChild(consent);
+    if (state.reviewFiles && state.pendingFile) {
+      const file = state.pendingFile;
+      consent.appendChild(
+        el(
+          'p',
+          'blueprint-intake-hint',
+          `Selected: ${file.name}. Reading copies this file into the workspace. Nothing has been uploaded yet.`
+        )
+      );
+      const read = el('button', 'modern-btn modern-btn-primary', 'Read selected syllabus');
+      read.type = 'button';
+      read.disabled = !state.consent?.accepted || state.uploading;
+      read.addEventListener('click', () => uploadFiles(container, ctx, state, [file]));
+      const cancel = el('button', 'modern-btn modern-btn-secondary', 'Not now');
+      cancel.type = 'button';
+      cancel.disabled = state.uploading;
+      cancel.addEventListener('click', () => {
+        state.pendingFile = null;
+        draw(container, ctx, state);
+        ctx.announce('Selection cleared. Nothing was read.');
+      });
+      consent.append(read, cancel);
+    }
   }
 
-  async function uploadFiles(container, ctx, state, input) {
-    const selected = Array.from(input.files || []);
+  async function uploadFiles(container, ctx, state, selected) {
     if (!selected.length) return;
     const form = new FormData();
     selected.forEach(file => form.append('files', file));
@@ -196,12 +228,12 @@
     try {
       const payload = await request(ctx, '/sources/files', { method: 'POST', body: form });
       state.sources = state.sources.concat(Array.isArray(payload.files) ? payload.files : []);
+      state.pendingFile = null;
       ctx.announce('Files added. Review their status and the content-reading statement.');
     } catch (error) {
       ctx.setError(error.message || 'The files could not be added.');
     } finally {
       state.uploading = false;
-      input.value = '';
       draw(container, ctx, state);
       ctx.setBusy(false);
     }

@@ -103,8 +103,12 @@ func NormalizeRequirements(requirements []workspace.IntakeRequirement, skills []
 
 		sources := workspace.IntakeSources{
 			Files:        requirement.Sources.Files,
+			ReviewFiles:  requirement.Sources.ReviewFiles,
 			URL:          requirement.Sources.URL,
 			DirectoryKey: normalizeKey(requirement.Sources.DirectoryKey),
+		}
+		if sources.ReviewFiles && !sources.Files {
+			return nil, fmt.Errorf("%w: file review requires file sources", ErrInvalidRequirements)
 		}
 		if !sources.Files && !sources.URL && sources.DirectoryKey == "" {
 			return nil, fmt.Errorf("%w: intake %q must enable at least one source", ErrInvalidRequirements, key)

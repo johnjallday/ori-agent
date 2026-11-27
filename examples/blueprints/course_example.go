@@ -36,7 +36,7 @@ func StageCourse(temp string) (string, error) {
 		return "", err
 	}
 	for i := range m.Intake {
-		m.Intake[i].Sources = workspace.IntakeSources{Files: true}
+		m.Intake[i].Sources = workspace.IntakeSources{Files: true, ReviewFiles: true}
 	}
 	m.Wizard.Steps = slices.DeleteFunc(m.Wizard.Steps, func(s workspace.SetupWizardStep) bool { return s.Kind != "intake" && s.Kind != "intake_review" })
 	raw, err = json.Marshal(m)

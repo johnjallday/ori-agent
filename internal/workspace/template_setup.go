@@ -47,6 +47,8 @@ type IntakeSources struct {
 	Files        bool   `json:"files,omitempty"`
 	URL          bool   `json:"url,omitempty"`
 	DirectoryKey string `json:"directory_key,omitempty"`
+	// ReviewFiles keeps selected uploads in the browser until content-reading consent.
+	ReviewFiles bool `json:"review_files,omitempty"`
 }
 
 // IntakeRequirement declares material a blueprint asks the user to provide and

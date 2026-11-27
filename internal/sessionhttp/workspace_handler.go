@@ -1516,7 +1516,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(ctx context.Context, w http.Re
 				seed = h.seedTemplateAgents(ws, tmpl)
 			}
 			if !seed.EntrySet {
-				if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
+				if agentName := h.autoCreateManagerEntryAgent(ctx, ws); agentName != "" {
 					setWorkspaceEntryAgent(ws, agentName)
 					seed.EntrySet = true
 				}
@@ -1569,7 +1569,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(ctx context.Context, w http.Re
 			seed = h.seedTemplateAgents(ws, tmpl)
 		}
 		if !seed.EntrySet {
-			if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
+			if agentName := h.autoCreateManagerEntryAgent(ctx, ws); agentName != "" {
 				setWorkspaceEntryAgent(ws, agentName)
 				seed.EntrySet = true
 			}
