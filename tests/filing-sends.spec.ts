@@ -166,6 +166,10 @@ test.describe('Filing sends files to another workspace', () => {
       // Reachable by Tab: focus moves to it without a pointer.
       await keep.focus();
       await expect(keep).toBeFocused();
+      // Loading the plan redraws these controls. Keep the keyboard on the
+      // same connection instead of dropping it on the document body.
+      await page.evaluate(() => (window as any).FileJanitorConsole.renderBatch());
+      await expect(keep).toBeFocused();
       const width = await page.evaluate(() => document.documentElement.scrollWidth);
       expect(width, 'nothing overflows at 390 px').toBeLessThanOrEqual(392);
       await page.screenshot({

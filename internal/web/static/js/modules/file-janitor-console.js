@@ -3608,7 +3608,7 @@
     // whatever they were on: a folder tick, an "and N more" control, the Trash tick
     // or the main button as much as a table control.
     if (
-      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|ReviewAgain|Retry|Inspect)-|Approve$|TrashAck$|ShowEarlier$|Picture$|Jump(?:Filed|Loose|Trash)$|(?:Filed|Loose|Trash)Title$)/.test(
+      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|ReviewAgain|Retry|Inspect|KeepLeaving|SendLeaving)-|Approve$|TrashAck$|ShowEarlier$|Picture$|Jump(?:Filed|Loose|Trash)$|(?:Filed|Loose|Trash)Title$)/.test(
         focusedReviewControlID
       )
     ) {
