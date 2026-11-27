@@ -296,6 +296,7 @@ export default defineConfig([
       'internal/web/static/js/modules/file-janitor-protection.js',
       'internal/web/static/js/modules/file-janitor-picture.js',
       'internal/web/static/js/modules/file-janitor-receipt.js',
+      'internal/web/static/js/modules/filing-folder-choice.js',
       'internal/web/static/js/modules/file-janitor-connections.js',
       'internal/web/static/js/modules/smartOnboarding.js',
       'internal/web/static/js/modules/workspace-detail.js',

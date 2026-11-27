@@ -272,6 +272,8 @@ func (s *Service) Undo(ctx context.Context, workspaceID, actionID, userID string
 	switch action.Operation {
 	case OperationMove:
 		return s.undoMove(ctx, settings, root, action, userID)
+	case OperationDeliver:
+		return s.undoDelivery(ctx, settings, root, action, userID)
 	case OperationPlace:
 		return s.undoPlacement(ctx, settings, root, action)
 	case OperationTrash:
@@ -417,7 +419,7 @@ func (s *Service) finishUndo(workspaceID string, action FileAction, state UndoSt
 		result.Result = "undone"
 		// A placement is not a category move: nothing in the assistant's category
 		// knowledge cites it, so there is no evidence to notify about.
-		if action.Operation != OperationPlace && action.Operation != OperationSend {
+		if action.Operation == OperationMove || action.Operation == OperationTrash {
 			s.notifyReviewedKnowledge(workspaceID, action.ID, true)
 		}
 	} else {

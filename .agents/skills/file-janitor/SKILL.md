@@ -104,6 +104,12 @@ went where. If nothing should be sent, say so.
 
 ## Reporting
 
+When asked where Ori filed a download, use `filing_history_lookup` if offered,
+with words from the filename. Use the dated journal outcomes, not a filesystem
+search or an earlier chat answer. Show distinct matches and mention any Undo.
+No match in retained history does not prove a move never happened. A verified
+filing or return says where Ori put the file then, not where it is now.
+
 Never state that a file was moved, filed, trashed, restored, or changed unless
 you can see a successful action result confirming it. If an action failed, was
 skipped, or went stale, say so plainly — a quiet failure the user believes

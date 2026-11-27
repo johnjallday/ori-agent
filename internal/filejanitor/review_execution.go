@@ -54,6 +54,9 @@ func validExecutionCandidate(candidate JanitorCandidate, item PlanItem, approval
 	}
 	// A send exists only through the one press of a saved review, for a file whose
 	// kind is still the kind its connection carries.
+	if item.Operation == OperationDeliver && (approval.ReviewRevision == "" || candidate.Decision == DecisionTrash) {
+		return false
+	}
 	if item.Operation == OperationSend {
 		category, err := LookupCategory(string(candidate.EffectiveCategory()))
 		if approval.ReviewRevision == "" || item.ConnectionID == "" || candidate.Decision == DecisionTrash ||
@@ -72,6 +75,15 @@ func (s *Service) appendApprovedAction(settings JanitorSettings, root string, ap
 		candidate, found := state.Candidate(item.CandidateID)
 		if !found || state.IsSkipped(candidate.Fingerprint) || !validExecutionCandidate(candidate, item, approval, false) {
 			return ErrReviewConflict
+		}
+		if d := action.Delivery; d != nil {
+			if !d.matches(settings.WorkspaceID, settings.RootID, d.path) {
+				return ErrReviewConflict
+			}
+			if state.ChosenPaths == nil {
+				state.ChosenPaths = map[string]string{}
+			}
+			state.ChosenPaths[d.Key] = d.path
 		}
 		state.Actions = append(state.Actions, action)
 		for i := range state.Candidates {

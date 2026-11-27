@@ -71,6 +71,7 @@ type FilingReceipt struct {
 	// Sent counts the filed files that went to another workspace (they are in
 	// Filed too), and Sends splits them by receiver. Sent files are never in
 	// ByDestination, which holds this folder's Filed folders only.
+	Delivered     int                  `json:"delivered,omitempty"` // filed to a chosen folder, not under Downloads/Filed
 	Sent          int                  `json:"sent,omitempty"`
 	Sends         []ReceiptSend        `json:"sends,omitempty"`
 	ByDestination []ReceiptDestination `json:"by_destination"`
@@ -88,7 +89,8 @@ type FilingReceipt struct {
 	Undo *FilingUndoSummary `json:"undo,omitempty"`
 	// HistoryTrimmed says older journal entries of this filing were pruned, so the
 	// receipt cannot account for every planned file.
-	HistoryTrimmed bool `json:"history_trimmed,omitempty"`
+	HistoryTrimmed bool            `json:"history_trimmed,omitempty"`
+	ExampleOffers  []FilingExample `json:"example_offers,omitempty"`
 }
 
 // FilingUndoSummary is the state of a filing's Undo all.
@@ -192,6 +194,9 @@ func buildReceipt(state ScanState, record FilingRecord, currentRootID string, of
 			entry.Count++
 		case action.Result == ResultApplied:
 			receipt.Filed++
+			if action.Operation == OperationDeliver {
+				receipt.Delivered++
+			}
 			destination := path.Dir(action.DestinationRelative)
 			entry := byDestination[destination]
 			if entry == nil {
@@ -317,6 +322,7 @@ func (s *Service) ReadFiling(ctx context.Context, owner, workspaceID, filingID s
 		return FilingReceipt{}, err
 	}
 	receipt := buildReceipt(state, record, settings.RootID, offset)
+	receipt.ExampleOffers = s.receiptExamples(owner, workspaceID, state, record)
 	// Names are read now, so a renamed workspace reads as it is called today.
 	for i := range receipt.Sends {
 		id := receipt.Sends[i].ReceiverWorkspaceID
