@@ -996,6 +996,18 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		respondStaffingReviewChanged(w)
 		return
 	}
+	// For a newly reviewed inbox hire the blueprint supplies exactly its
+	// reviewed team. It is NOT the workspace's blueprint: no capabilities,
+	// template tasks, dashboard, wizard or directory grants come with it.
+	prep := buildPreparationContextFrom(r.Context())
+	inboxHire := prep != nil && prep.claim != nil && prep.claim.InboxHireOnly
+	teamTemplate, teamResolved := resolvedTemplate, templateResolved
+	if inboxHire {
+		resolvedTemplate = projecttemplates.Template{}
+		templateResolved = false
+		wantsProject = false
+		req.TemplateID = ""
+	}
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
 	if assistantSetup, ok := assistantSetupCreationFromContext(r.Context()); ok {
 		// This server-only descriptor preallocates identity before any profile or
@@ -1031,7 +1043,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seed, ok := h.selectCreateWorkspaceEntryAgent(r.Context(), w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate, strictFreshTemplate)
+	seed, ok := h.selectCreateWorkspaceEntryAgent(r.Context(), w, ws, req, kind, teamTemplate, teamResolved, strictTemplate, strictFreshTemplate)
 	if !ok {
 		return
 	}
@@ -1162,6 +1174,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		if buildPreparationContextFrom(r.Context()) != nil && buildFolderPlan != nil {
 			assistantSetupCreation.FolderReferenceID = buildFolderPlan.referenceID
+		}
+	}
+	if inboxHire {
+		assistantSetupCreation.InboxWitness = buildFolderPlan.stationWitness
+		assistantSetupCreation.InboxPile = buildFolderPlan.pile
+		if err := h.recordInboxHire(ws.ID, assistantSetupCreation); err != nil {
+			respondBuildPreparationError(w, "hire_unconfirmed", "The workspace was created, but its hire receipt could not be verified. Reopen this same workspace.", http.StatusConflict, nil)
+			return
 		}
 	}
 	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved, seed, assistantSetupCreation, groupSnapshot); capabilityWarning != "" {

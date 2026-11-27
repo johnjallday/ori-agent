@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/charactercatalog"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -29,8 +30,20 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
-	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
+
+// folderReviewProtectedRoots supplies the same policy to the initial look and
+// its later review. Folder selections use physical paths; a configured guard
+// may instead use an alias (for example /var on macOS). Keep both spellings.
+func (b *ServerBuilder) folderReviewProtectedRoots() []string {
+	roots := []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)}
+	for _, root := range roots {
+		if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+			roots = append(roots, resolved)
+		}
+	}
+	return roots
+}
 
 // wireFolderAgent builds "Hire an agent for <folder>" over the folder
 // digest's chooser (picker, chips, typed-path tokens), the ordinary anchored
@@ -51,6 +64,9 @@ func (b *ServerBuilder) wireFolderAgent() {
 				return "", "", false
 			}
 			return b.sessionHandler.AssignedLookRoot(ctx, owner, id, agent, link)
+		},
+		ReleasedAdviceReceipt: func(ctx context.Context, owner, id, agent, link string) bool {
+			return b.sessionHandler != nil && b.sessionHandler.ReleasedDocumentsAdviceReceipt(ctx, owner, id, agent, link)
 		},
 		Store:                  store,
 		Folders:                b.personalAssistantFolderDigest,
@@ -73,7 +89,22 @@ func (b *ServerBuilder) wireFolderAgent() {
 		UndoFiling:             b.fileJanitorService.UndoFiling,
 		UndoFilingFile:         b.fileJanitorService.UndoPlacedFile,
 		FilingStanding:         b.fileJanitorService.DocumentsFilingStanding,
-		DocumentsAccess:        b.documentsOrganizationAccess,
+		StationAvailable:       b.fileJanitorService.StationAvailable,
+		GuidedStation: func(owner, id string) (filejanitor.StationLook, bool) {
+			if b.sessionHandler == nil {
+				return filejanitor.StationLook{}, false
+			}
+			return b.sessionHandler.GuidedStation(owner, id)
+		},
+		StationAnchor:   b.hiredStationAnchor,
+		InboxStation:    b.inboxStation,
+		DocumentsAccess: b.documentsOrganizationAccess,
+		StationPlacements: func(owner, id string, names []string) (map[string]string, bool) {
+			if b.fileJanitorService == nil {
+				return nil, false
+			}
+			return b.fileJanitorService.DocumentPlacementMatches(owner, id, names)
+		},
 		SavedFilingAccess: func(owner, id, agent, link string) (folderagent.DocumentsAccess, error) {
 			if b.sessionHandler == nil {
 				return folderagent.DocumentsAccess{}, folderagent.ErrUnavailable
@@ -82,7 +113,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 		},
 		ReviewOpen:         platform.OpenReviewDocument,
 		OrganizationMemory: workspace.NewMemoryStore(b.workspaceFileStore),
-		DocumentsProtected: func() []string { return []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)} },
+		DocumentsProtected: b.folderReviewProtectedRoots,
 		ReviewModel:        b.documentsReviewModel,
 		DocumentsNotebook: func(ctx context.Context, owner, hq string, fn func(secondbrain.Source, string) error) error {
 			return b.personalAssistantSecondBrain.WithDocumentsNotebook(ctx, owner, hq, fn)
@@ -91,7 +122,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 			return b.personalAssistantSecondBrain.DocumentsSetup(ctx, owner, hq, root, proposal, ref, confirm)
 		},
 		DocumentsScope: func(ctx context.Context, owner string) (folderagent.DocumentsScope, error) {
-			scope := folderagent.DocumentsScope{Protected: []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)}}
+			scope := folderagent.DocumentsScope{Protected: b.folderReviewProtectedRoots()}
 			source, connected, setup, err := b.personalAssistantSecondBrain.DocumentsNotesState(ctx, owner)
 			scope.Setup = setup
 			if connected {
@@ -135,6 +166,44 @@ func (b *ServerBuilder) wireFolderAgent() {
 	if closed := service.SweepInterrupted(); closed > 0 {
 		logger.Info("Closed interrupted folder agent looks", logger.Fields{"count": closed})
 	}
+}
+
+func (b *ServerBuilder) inboxStation(owner, id string) (folderagent.InboxStation, bool) {
+	var no folderagent.InboxStation
+	// Reviewed creation provenance lives in the folder mirror; the primary
+	// workspace row still independently verifies live owner, lead and anchor.
+	ws, err := b.workspaceFileStore.Get(id)
+	if err != nil || ws == nil || ws.OwnerUserID != owner {
+		return no, false
+	}
+	prov := ws.GetTemplateProvenance()
+	if prov == nil || prov.AssistantSetup == nil {
+		return no, false
+	}
+	m := prov.AssistantSetup
+	name := ws.EntryAgentName()
+	a, ok := b.hiredStationAnchor(owner, id, name)
+	if !ok || m.InboxHireLeadID != a.LeadID || m.FolderReferenceID != a.Reference {
+		return no, false
+	}
+	return folderagent.InboxStation{Anchor: a, Manager: name, WorkspaceName: ws.Name, Route: "/workspaces/" + ws.FolderSlug, Operation: m.OperationID, Witness: m.InboxWitness, Pile: m.InboxPile}, true
+}
+
+func (b *ServerBuilder) hiredStationAnchor(owner, id, name string) (folderagent.StationAnchor, bool) {
+	var no folderagent.StationAnchor
+	ws, err := b.workspaceStore.Get(id)
+	if err != nil || ws == nil || ws.OwnerUserID != owner || owner == "" || ws.GetStatus() != workspace.StatusActive || ws.Kind == "group" || ws.GetAssistantProgramState() != nil || !ws.IsAnchored() || ws.EntryAgentName() != name {
+		return no, false
+	}
+	lead, ok := ws.FindUniqueAgentInstance(name, "")
+	if !ok || lead.ID == "" {
+		return no, false
+	}
+	ref, err := ws.GetDirectoryReference(ws.AnchorDirectoryReferenceID())
+	if err != nil || ref == nil || ref.Purpose != "" || !filepath.IsAbs(ref.Path) {
+		return no, false
+	}
+	return folderagent.StationAnchor{Root: ref.Path, Reference: ref.ID, LeadID: lead.ID}, true
 }
 
 // folderAgentTodayItems turns folder records into Today items: a look under
@@ -688,50 +757,6 @@ func (s folderAgentSetups) HomeHireModel() string {
 	return model + " (" + provider + ")"
 }
 
-// addFolderAgentFileCurator installs File Janitor in place on the folder's
-// workspace (the install writes its record only: no folder access, watcher or
-// schedule until its own setup) and gives the hired agent the Curator role.
-// No agent is created or attached. A repeat keeps the same shared association.
-func (b *ServerBuilder) addFolderAgentFileCurator(rec folderagent.Record, set func(kind, state, progress string)) error {
-	workspaceID := rec.WorkspaceID
-	service := b.workspaceCapabilityService
-	if service == nil {
-		return errors.New("workspace capabilities are not wired")
-	}
-	set(folderagent.FolderPlanCapability, personalassistant.FolderLineWorking, "")
-	if _, err := service.Install(workspacecapability.InstallRequest{
-		WorkspaceID: workspaceID, CapabilityID: workspace.CapabilityFileJanitor, Source: workspace.InstallSourceInPlace,
-	}); err != nil {
-		return err
-	}
-	set(folderagent.FolderPlanCapability, personalassistant.FolderLineDone, "")
-	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineWorking, "")
-	fail := func(err error) error {
-		message := rec.AgentName + " could not be linked to filing. Choose the folder's agent in Filing settings. Filing still works without an agent."
-		var capabilityErr *workspacecapability.Error
-		if errors.As(err, &capabilityErr) {
-			message = capabilityErr.Message
-		}
-		set(personalassistant.FolderPlanAgents, personalassistant.FolderLineFailed, message)
-		return err
-	}
-	ws, err := b.workspaceStore.Get(workspaceID)
-	if err != nil {
-		return fail(err)
-	}
-	instance, unique := ws.FindUniqueAgentInstance(rec.AgentName, "")
-	if !unique {
-		return fail(&workspacecapability.Error{Code: workspacecapability.CodeCompanionFailed,
-			Message: rec.AgentName + " could not be linked to filing. Choose the folder's agent in Filing settings. Filing still works without an agent."})
-	}
-	if _, err := service.AssociateCompanion(workspaceID, workspace.CapabilityFileJanitor, instance.ID,
-		workspacecapability.CompanionAssociationOptions{ExpectedLead: rec.AgentName}); err != nil {
-		return fail(err)
-	}
-	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineDone, "")
-	return nil
-}
-
 func (s folderAgentSetups) Readiness(ctx context.Context, userID string) folderlook.Readiness {
 	b := s.builder
 	home, _ := os.UserHomeDir()
@@ -945,9 +970,8 @@ func (s folderAgentSetups) run(ctx context.Context, rec folderagent.Record, plan
 			update(append([]personalassistant.FolderPlanLine(nil), lines...))
 			continue
 		case folderlook.KindFileCurator:
-			if err := b.addFolderAgentFileCurator(rec, set); err != nil {
-				return stop(folderagent.FolderPlanCapability, personalassistant.FolderStopFailed, err)
-			}
+			// A recommendation on a hire plan cannot build. Only the separate reviewed station press installs, associates the lead, grants the folder or scans.
+			set(folderagent.FolderPlanFilingAdvice, personalassistant.FolderLineDone, "")
 			continue
 		case folderlook.KindIntegration:
 		default:

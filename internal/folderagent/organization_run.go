@@ -95,13 +95,35 @@ func (s *Service) OrganizationResults(owner, id string) ([]ReviewResult, error) 
 	if err != nil {
 		return nil, err
 	}
+	var matches map[string]string
+	var station bool
+	if s.deps.StationPlacements != nil {
+		var names []string
+		for _, run := range rec.OrganizationRuns {
+			if run.Authority == auth {
+				for _, f := range run.Result.Files {
+					if !f.Source.Example {
+						names = append(names, f.Source.Path)
+					}
+				}
+			}
+		}
+		matches, station = s.deps.StationPlacements(owner, id, names)
+	}
 	out := []ReviewResult{}
 	for _, run := range rec.OrganizationRuns {
 		if run.Authority == auth {
 			v := s.withFilingStanding(owner, id, run.Result)
 			v.FilingOnly = filingOnly
 			for i := range v.Files {
-				v.Files[i].Placement = placementFor(rec, auth, v.Files[i], convention)
+				if station {
+					v.Files[i].Placement = nil
+					if folder := matches[v.Files[i].Source.Path]; folder != "" && !v.Files[i].Source.Example {
+						v.Files[i].Placement = &PlacementSuggestion{Remembered: true, Destination: folder}
+					}
+				} else {
+					v.Files[i].Placement = placementFor(rec, auth, v.Files[i], convention)
+				}
 			}
 			out = append(out, v)
 		}

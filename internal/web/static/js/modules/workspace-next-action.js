@@ -232,6 +232,29 @@ export function resolveWorkspaceNextAction(input) {
       }
     });
   if (attention.length) return taskDescriptor(attention[0]);
+  const folder = input.folderAgent;
+  if (
+    folder?.stationHire &&
+    folder.stationOffer &&
+    folder.workspaceID === workspaceId &&
+    !known &&
+    !input.filingDeferred
+  )
+    return finish({
+      kind: 'station_offer',
+      title: `Build a Filing station for ${folder.folder}?`,
+      description: folder.filingPile
+        ? `${folder.filingPile.count} loose ${folder.filingPile.count === 1 ? 'file' : 'files'}. Review what Filing will do before building.`
+        : 'Build Filing to scan the loose files directly in this folder. Nothing moves.',
+      tone: 'attention',
+      action: {
+        owner: 'console',
+        kind: 'station_build',
+        id: workspaceId,
+        key: `station-build:${workspaceId}`,
+        label: 'Review station build'
+      }
+    });
   // The folder's Commander waits on the person: its question, plan, stopped step,
   // offer or goal, named once here, directly below a ticket that needs the
   // person and above everything else (running work, filing, finished results and

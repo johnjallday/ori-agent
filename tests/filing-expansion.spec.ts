@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { createRequire } from 'node:module';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 const require = createRequire(import.meta.url);
 import {
@@ -41,6 +42,7 @@ test('earn Craft, build HQ, buy Filing and separately approve its first review',
   const old = new Date(Date.now() - 3600000);
   utimesSync(file, old, old);
 
+  await installLocalCdn(page);
   await page.setViewportSize(small ? { width: 390, height: 844 } : { width: 1440, height: 980 });
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
   await page.addInitScript(theme => localStorage.setItem('ori-theme', theme), theme);
@@ -160,7 +162,7 @@ test('earn Craft, build HQ, buy Filing and separately approve its first review',
   await typed.press('Enter');
   await expect(wizard.locator('.fj-setup-path')).toHaveText(inbox);
   await expect(wizard.getByRole('checkbox', { name: /watch new arrivals/ })).not.toBeChecked();
-  await expect(wizard).toContainText('Create or reuse Filed/');
+  await expect(wizard).toContainText('No folder is created now.');
   await expect(wizard).toContainText('No file contents are opened');
   expect(existsSync(join(inbox, 'Filed'))).toBeFalsy();
   const before = (await progression()).missions;
@@ -177,11 +179,16 @@ test('earn Craft, build HQ, buy Filing and separately approve its first review',
   await capture('#setupWizardDialog', 'folder-permission');
   await allow.press('Enter');
   await expect(wizard).not.toBeVisible();
+  const method = page
+    .locator('#fileJanitorConsoleBody')
+    .getByRole('region', { name: 'Filing method' });
+  await expect(method).toContainText('How should Sandbox Inbox be filed?');
+  await method.getByRole('button', { name: 'By kind', exact: true }).click();
   await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
   await capture('#fileJanitorConsole', 'first-review');
   expect(readFileSync(file, 'utf8')).toBe('synthetic source bytes');
   expect(readdirSync(downloads)).toEqual(['leave-me.pdf']);
-  expect(existsSync(join(inbox, 'Filed'))).toBeTruthy();
+  expect(existsSync(join(inbox, 'Filed'))).toBeFalsy();
   const status = (await get(`/api/workspaces/${id}/file-janitor`)).status;
   expect(status.settings.root_path).toBe(inbox);
   expect(status.settings.setup_decision.mode).toBe('manual');

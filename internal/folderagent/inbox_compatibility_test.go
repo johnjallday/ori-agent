@@ -53,7 +53,8 @@ func TestDownloads_PreFilingReportRequiresFreshConfirmation(t *testing.T) {
 	oldPlan := BuildPlan(*saved, nil)
 	found := false
 	for i := range oldPlan.Lines {
-		if oldPlan.Lines[i].Kind == FolderPlanCapability {
+		if oldPlan.Lines[i].Kind == FolderPlanFilingAdvice {
+			oldPlan.Lines[i].Kind = FolderPlanCapability
 			found = true
 			oldPlan.Lines[i].Name = "Adds File Janitor to " + saved.WorkspaceName
 			oldPlan.Lines[i].Outcome = oldPlan.Lines[i].Name
@@ -75,7 +76,7 @@ func TestDownloads_PreFilingReportRequiresFreshConfirmation(t *testing.T) {
 	if fresh.State != StateReported || fresh.Setup != nil || len(h.setups.runs) != 0 {
 		t.Fatal("stale confirmation installed something", fresh.Setup, h.setups.runs)
 	}
-	if got := fresh.Plan.Lines[0].Outcome; got != "Adds filing to "+saved.WorkspaceName {
+	if got := fresh.Plan.Lines[0].Outcome; got != saved.AgentName+" recommends a Filing station" {
 		t.Fatalf("refreshed outcome = %q", got)
 	}
 	after, err := h.svc.deps.Store.Read(v.WorkspaceID)
@@ -138,12 +139,12 @@ func TestDownloads_CurrentStoppedPlanKeepsItsRecoveryMessage(t *testing.T) {
 	h := downloadsHarness(t, root)
 	v := h.start(t, "")
 	view, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID)
-	message := "The folder's agent attachment is missing or ambiguous. File Janitor still works without an agent."
+	message := "The folder changed before the plan finished. Check it before trying again."
 	_, err := h.svc.deps.Store.Update(v.WorkspaceID, func(r *Record) error {
 		r.State = StateSetUp
 		lines := append([]personalassistant.FolderPlanLine(nil), view.Plan.Lines...)
 		for i := range lines {
-			if lines[i].Kind == personalassistant.FolderPlanAgents {
+			if lines[i].Kind == personalassistant.FolderPlanFolder {
 				lines[i].State, lines[i].Progress = personalassistant.FolderLineFailed, message
 			}
 		}

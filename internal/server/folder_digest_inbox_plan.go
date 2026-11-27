@@ -177,6 +177,7 @@ func (h *folderSetupHost) inboxPlan(ctx context.Context, req personalassistant.F
 		return personalassistant.FolderSetupPlan{}, folderSetupPreviewError("name_taken")
 	}
 	intent := personalassistant.FolderInboxIntent{
+		HireOnly:      true,
 		WorkspaceName: name, SubjectKey: req.Offer.Subject.Key, SubjectIdentity: review.CandidateIdentity,
 		BlueprintID: team.BlueprintID, BlueprintVersion: team.BlueprintVersion, BlueprintDigest: team.BlueprintDigest,
 		PlanRevision: team.PlanRevision,
@@ -208,11 +209,5 @@ func (h *folderSetupHost) inboxPlan(ctx context.Context, req personalassistant.F
 		plan.Hire.Model = loadDefaultSettings().Model
 	}
 	plan.BriefDefault = personalassistant.FolderDefaultBrief(folderdigest.ShapeInbox, roster.Goal)
-	// Watching is optional and off; the plan only says the daily time it would
-	// use: the blueprint recipe's (File Janitor's default when it has none).
-	plan.Monitoring = &personalassistant.FolderMonitoringOffer{Time: filejanitor.DefaultDailyScanLocalTime}
-	if review, err := deps.janitor.ReviewSelectedSetup("", req.Path, nil); err == nil && strings.TrimSpace(review.Terms.DailyScanLocalTime) != "" {
-		plan.Monitoring.Time = review.Terms.DailyScanLocalTime
-	}
 	return plan, nil
 }

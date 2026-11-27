@@ -7,6 +7,12 @@
 // 'ori:workspace-map-rendered' after each Map render, OriWorkspaceMap
 // 'ori:map-mounted' after each mount and 'ori:map-camera' on each camera move.
 
+import {
+  drawFilingPlot,
+  filingStationOffer,
+  stationDeferred,
+  stationPileLine
+} from './filing-station-offer.js';
 import { BALLOON_NARROW_PX, commanderBalloon } from './commander-balloon.js';
 import {
   commanderAutoOpen,
@@ -72,6 +78,9 @@ export function workspaceCommanderMap(
     balloon,
     narrow,
     filingStation: true,
+    plot(view) {
+      drawFilingPlot(workspaceCommanderAnchor(root()), view);
+    },
     // The owner is on the Map tab (FR10's "on this map").
     showing: () => doc?.body?.dataset?.workspaceViewMode === 'map',
     // The Map tab is showing and its map is on the page (FR13, FR14).
@@ -124,6 +133,9 @@ export function workspaceCommanderMap(
     onChange(fn) {
       const handler = () => fn();
       const events = [
+        'ori:filing-build-progress',
+        'ori:filing-offer-changed',
+        'ori:capabilities-changed',
         WORKSPACE_MAP_RENDERED_EVENT,
         MAP_MOUNTED_EVENT,
         VIEW_MODE_EVENT,
@@ -684,11 +696,80 @@ export function commanderPresenter(
   const filingWait = () =>
     map.filingStation && map.showing?.() && commanderWaitingForFiling(last?.view);
 
+  const pileView = () =>
+    map.filingStation &&
+    map.showing?.() &&
+    last?.view?.stationOffer &&
+    !globalThis.window?.WorkspaceCapabilities?.isInstalled?.('file-janitor')
+      ? last.view
+      : null;
   const queue = () => {
     // The report goes first among equals: a look or a setup run in progress
     // outranks the ticket line the same work produces ("Thinking it through…").
     const items = [];
     const speech = last && !filingWait() ? commanderSpeech(last.view) : null;
+    const build =
+      map.filingStation &&
+      map.showing?.() &&
+      globalThis.window?.FileJanitorConsole?.buildProgress?.();
+    const buildVisible = build?.operation_id && (build.running || build.revealing || build.repair);
+    if (buildVisible)
+      items.push({
+        kind: 'live',
+        agent: last?.view?.agent || 'Manager',
+        line: build.line,
+        headline: build.line,
+        signature: `station|${build.operation_id}|${build.line}`,
+        body: doc => {
+          const p = doc.createElement('p');
+          if (build.repair || build.running) {
+            const action = doc.createElement('button');
+            action.type = 'button';
+            action.className = 'btn btn-sm btn-outline-secondary';
+            action.textContent = build.repair ? 'Review setup' : 'View preparation';
+            action.addEventListener('click', () =>
+              globalThis.window?.FileJanitorConsole?.openStationBuild?.(build.id, action)
+            );
+            p.appendChild(action);
+          } else p.textContent = 'Nothing moves.';
+          return p;
+        }
+      });
+    const station =
+      map.filingStation &&
+      map.showing?.() &&
+      globalThis.window?.FileJanitorConsole?.stationState?.();
+    const remembered = station?.rememberedPile;
+    if (
+      !buildVisible &&
+      remembered?.waiting > 0 &&
+      last?.view?.workspaceID ===
+        globalThis.window?.FileJanitorConsole?.getActionState?.().workspaceId
+    ) {
+      const line = `${remembered.waiting} ${remembered.waiting === 1 ? 'file is' : 'files are'} waiting in ${remembered.folder}. ${remembered.placed} ${remembered.placed === 1 ? 'already has' : 'already have'} a place from last time.`;
+      items.push({
+        kind: 'report',
+        agent: last.view.agent,
+        line,
+        headline: line,
+        signature: `remembered|${remembered.batch}|${line}`,
+        body: doc => {
+          const p = doc.createElement('p');
+          p.textContent = 'Open Filing to arrange the picture. Nothing moves until you press File.';
+          return p;
+        }
+      });
+    }
+    const pile = pileView();
+    if (!buildVisible && pile && !stationDeferred(pile.workspaceID))
+      items.push({
+        kind: 'report',
+        agent: pile.agent,
+        line: stationPileLine(pile),
+        headline: stationPileLine(pile),
+        signature: `pile|${JSON.stringify(pile.filingPile)}`,
+        body: doc => filingStationOffer(doc, pile)
+      });
     if (speech) items.push({ kind: REPORT_KIND[speech.phase] || 'working', report: true, speech });
     // The folder agent's own look ticket is the report's work, narrated by
     // the report itself; its ticket line (often stuck at "On it.") stays out.
@@ -801,6 +882,7 @@ export function commanderPresenter(
   // draw: report says the folder agent's view is new (auto-open may apply).
   const draw = ({ report = false, refresh = false } = {}) => {
     const attached = map.attach({ onNarrow: revealHost });
+    map.plot?.(pileView());
     const held = chatHeld();
     // The plan moving between the chat box and the balloon redraws the balloon.
     if (report || refresh || held !== lastHeld || !map.balloon.content)

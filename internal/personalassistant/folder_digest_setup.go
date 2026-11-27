@@ -345,6 +345,11 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			return FolderOfferView{}, planErr
 		}
 		plan = fresh.Stamped()
+		// New inbox hires belong to the reviewed placement creator. Only an
+		// already accepted legacy one-click plan may resume its original run.
+		if plan.Intent.Inbox != nil && plan.Intent.Inbox.HireOnly {
+			return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderReviewRequired
+		}
 		if input.EntryName != "" && !setupEntryOffered(plan, input.EntryName) {
 			return FolderOfferView{}, fmt.Errorf("%w: project file", ErrValidation)
 		}

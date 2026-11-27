@@ -46,7 +46,8 @@ export function receiptWhere(model, ctx) {
     if (here > 0)
       parts.push((here === 1 ? '1 is in ' : here + ' are in ') + folder + '/' + filing + '.');
   } else if (model?.delivered) parts.push('Filed to the chosen folder.');
-  else if ((model?.filed || 0) > 0) parts.push('They are in ' + folder + '/' + filing + '.');
+  else if (!model?.shelfPicture && (model?.filed || 0) > 0)
+    parts.push('They are in ' + folder + '/' + filing + '.');
   if (typeof model?.looseNow === 'number') {
     const loose = model.looseNow;
     parts.push(
@@ -71,6 +72,9 @@ function directoryOf(destination) {
 export function receiptModelFromReceipt(receipt) {
   return {
     filingId: receipt.filing_id,
+    shelfPicture: Boolean(receipt.shelf_picture),
+    placementOffer: receipt.placement_offer,
+    createdFolders: receipt.created_folders || [],
     ...(receipt.example_offers?.length ? { examples: receipt.example_offers } : {}),
     state: receipt.state || 'done',
     filed: receipt.filed || 0,
@@ -112,7 +116,10 @@ export function receiptModelFromResult(result) {
       // Sent to another workspace; the receipt read names which.
       filed += 1;
       sent += 1;
-    } else if (outcome.result === 'applied' && ['deliver', 'move'].includes(outcome.operation)) {
+    } else if (
+      outcome.result === 'applied' &&
+      ['deliver', 'move', 'place'].includes(outcome.operation)
+    ) {
       filed += 1;
       if (outcome.operation === 'deliver') delivered++;
       const folder = directoryOf(outcome.destination);
@@ -130,6 +137,8 @@ export function receiptModelFromResult(result) {
   }
   return {
     filingId: result?.filing_id || '',
+    shelfPicture: Boolean(result?.shelf_picture),
+    createdFolders: result?.created_folders || [],
     state: result?.interrupted ? 'interrupted' : 'done',
     replayed: Boolean(result?.replayed),
     filed,
@@ -206,6 +215,14 @@ export function renderReceipt(doc, model, ctx = {}) {
     );
   const where = receiptWhere(model, ctx);
   if (where) panel.appendChild(h('p', 'fj-receipt-where', where));
+  for (const name of model.createdFolders || [])
+    panel.appendChild(
+      h(
+        'p',
+        'fj-receipt-note',
+        `Created “${name}”. Undo all can put files back, but on this system Ori cannot safely remove just the folder it created.`
+      )
+    );
 
   // One row per receiving workspace, with Open <receiver>, above the Filed rows
   // (FR 31).
@@ -274,13 +291,42 @@ export function renderReceipt(doc, model, ctx = {}) {
       )
     );
 
+  const offer = model.placementOffer;
+  if (offer?.rows?.length && ctx.onChoosePlacements) {
+    const group = h('fieldset', 'fj-setting');
+    group.appendChild(h('legend', 'fj-label', 'Start from these placements next time?'));
+    group.appendChild(
+      h(
+        'p',
+        'fj-sub',
+        'Done saves the checked patterns. Next time you will still choose whether to file.'
+      )
+    );
+    for (const row of offer.rows) {
+      const label = h('label', 'fj-check');
+      const check = h('input');
+      check.type = 'checkbox';
+      check.checked = ctx.chosen.has(row.id);
+      check.disabled = ctx.busy;
+      check.addEventListener('change', () => ctx.onChoosePlacements(row.id, check.checked));
+      label.appendChild(check);
+      label.appendChild(h('span', '', row.label + ' · ' + filesPhrase(row.count)));
+      group.appendChild(label);
+    }
+    if (ctx.placementMessage) {
+      const note = h('p', 'fj-sub', ctx.placementMessage);
+      note.setAttribute('role', 'status');
+      group.appendChild(note);
+    }
+    panel.appendChild(group);
+  }
   const actions = h('div', 'fj-results-actions');
   if (model.undoAvailable)
     actions.appendChild(
       actionButton(
         h,
         'fileJanitorUndoAll',
-        ctx.busy ? 'Putting files back…' : 'Undo all',
+        ctx.busy && !ctx.savingPlacements ? 'Putting files back…' : 'Undo all',
         'fj-btn fj-btn-secondary',
         () => ctx.onUndoAll?.(model),
         ctx.busy
@@ -290,7 +336,7 @@ export function renderReceipt(doc, model, ctx = {}) {
     actionButton(
       h,
       'fileJanitorReceiptDone',
-      'Done',
+      ctx.savingPlacements ? 'Saving placements…' : 'Done',
       'fj-btn fj-btn-primary',
       () => ctx.onDone?.(),
       ctx.busy
@@ -342,6 +388,14 @@ export function renderUndone(doc, result, ctx = {}) {
       h('p', 'fj-receipt-note', 'Ori stopped before it finished putting files back.')
     );
 
+  for (const name of result.retained_folders || [])
+    panel.appendChild(
+      h(
+        'p',
+        'fj-receipt-note',
+        `Undo did not remove “${name}”. On this system Ori cannot safely remove just the folder it created.`
+      )
+    );
   const notBack = (result.outcomes || []).filter(
     outcome => outcome.result === 'failed' || outcome.result === 'interrupted'
   );

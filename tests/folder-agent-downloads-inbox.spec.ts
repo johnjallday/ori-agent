@@ -2,10 +2,11 @@ import { expect, test } from '@playwright/test';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 // Real sandbox HOME/Downloads, chooser, walk, report and built-in install.
 // No model/provider or production policy bypass is used.
-// ./scripts/e2e-fresh.sh --sandbox-env ORI_DOWNLOADS_SANDBOX tests/folder-agent-downloads-inbox.spec.ts
+// ORI_DEMO_SPLIT_PROFILE=1 ./scripts/e2e-fresh.sh --sandbox-env ORI_DOWNLOADS_SANDBOX tests/folder-agent-downloads-inbox.spec.ts
 const sandbox = process.env.ORI_DOWNLOADS_SANDBOX || '';
 const endpoint = '/api/personal-assistant/folder-agent';
 const evidence = resolve('tasks/evidence-downloads-inbox-cleanup');
@@ -29,13 +30,16 @@ async function files(root: string): Promise<string[]> {
   return out.sort();
 }
 
-test('Downloads keeps project evidence and opens Filing without granting or scanning', async ({
+test('legacy Downloads keeps project evidence and opens Filing without granting or scanning', async ({
   page,
   request
 }) => {
   test.skip(!sandbox, 'requires the isolated server HOME');
   test.setTimeout(120_000);
-  const root = join(sandbox, 'Downloads');
+  await installLocalCdn(page);
+  const split = process.env.ORI_DEMO_SPLIT_PROFILE === '1';
+  const root = join(split ? join(sandbox, 'home') : sandbox, 'Downloads');
+  const staging = join(split ? join(sandbox, 'data') : sandbox, 'workspace-staging');
   async function seed(rel: string, content = 'fixture') {
     const path = join(root, rel);
     await mkdir(join(path, '..'), { recursive: true, mode: 0o750 });
@@ -79,7 +83,8 @@ test('Downloads keeps project evidence and opens Filing without granting or scan
   page.on('request', req => {
     if (req.method() === 'POST') mutations.push(req.url());
   });
-  await page.goto('/?panel=today&folder=show');
+  await page.goto('/?view=tree');
+  await page.locator('#cockpitPrimaryActionBtn').click();
   const entry = page.locator('#personalAssistantFolderPathEntry');
   await expect(entry).toBeVisible();
   await entry.locator('input').fill(root);
@@ -87,8 +92,22 @@ test('Downloads keeps project evidence and opens Filing without granting or scan
   const host = page.locator('#personalAssistantFolderAgent');
   await expect(host).toContainText('Hire an agent for Downloads');
   await host.locator('[data-folder-agent-action="start"]').click();
-  await expect(host.getByRole('button', { name: 'Show on map' })).toBeVisible();
-  await host.getByRole('button', { name: 'Show on map' }).click();
+  // This is the pre-station compatibility case. Retain the genuine saved
+  // look but remove evidence a pre-station server did not record. A read must
+  // never manufacture that pile or replace the old permission journey.
+  const reports = async () => (await (await request.get(endpoint)).json()).folder_agents;
+  await expect.poll(async () => (await reports())[0]?.state).toBe('reported');
+  const fresh = (await reports())[0];
+  expect(fresh.station_hire).toBe(true);
+  const sidecars = (await files(staging)).filter(p => p.endsWith('/.ori/folder-agent-v1.json'));
+  const first = JSON.parse(await readFile(sidecars[0], 'utf8'));
+  expect(first.workspace_id).toBe(fresh.workspace_id);
+  delete first.loose_documents;
+  await writeFile(sidecars[0], JSON.stringify(first), { mode: 0o600 });
+  await page.goto(`${fresh.route}?view=details`);
+  const drawer = page.locator('#personalAssistantClose');
+  if (await drawer.isVisible()) await drawer.click();
+  await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
   const report = page
     .locator('.folder-agent-card--report')
     .filter({ hasText: 'Downloads stays an inbox' });
@@ -155,7 +174,9 @@ test('Downloads keeps project evidence and opens Filing without granting or scan
   ).toBe('install');
   expect((await (await request.get(endpoint)).json()).folder_agents).toHaveLength(1);
   // Explicit selection is a second onboarding run, not reanchoring Downloads.
-  await page.goto('/?panel=today&folder=show');
+  await page.goto('/?view=tree');
+  if (await drawer.isVisible()) await drawer.click();
+  await page.locator('#cockpitPrimaryActionBtn').click();
   await entry.locator('input').fill(join(root, 'Music'));
   await entry.getByRole('button').click();
   await expect(host).toContainText('Hire an agent for Music');
@@ -171,6 +192,7 @@ test('Downloads keeps project evidence and opens Filing without granting or scan
     (v: { folder_name: string }) => v.folder_name === 'Music'
   ).route;
   await page.goto(musicRoute);
+  if (await drawer.isVisible()) await drawer.click();
   const openMusicChat = page.getByRole('button', { name: 'Open in chat', exact: true });
   const musicPremise = page.getByRole('button', { name: 'Yes, show me the plan', exact: true });
   await expect(openMusicChat.or(musicPremise).first()).toBeVisible();
@@ -193,7 +215,7 @@ test('Downloads keeps project evidence and opens Filing without granting or scan
 
   // Seed an actual version-1 pending sidecar, as a pre-change server could
   // have left it. GET must project current eligibility without rewriting it.
-  const records = (await files(join(sandbox, 'workspace-staging'))).filter(path =>
+  const records = (await files(staging)).filter(path =>
     path.endsWith('/.ori/folder-agent-v1.json')
   );
   let recordPath = '';

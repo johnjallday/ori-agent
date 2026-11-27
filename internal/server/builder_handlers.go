@@ -1052,6 +1052,16 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 		service.SetCompanionProvisioner(sessionhttp.NewCapabilityCompanionProvisioner(b.sessionHandler))
 	}
 	b.workspaceCapabilityService = service
+	if b.fileJanitorService != nil {
+		b.fileJanitorService.SetPlacementMemory(workspace.NewMemoryStore(b.workspaceFileStore))
+		b.fileJanitorService.SetStationReadHost(func(id, lead string) (filejanitor.StationProcessor, filejanitor.StationChat) {
+			p, chat := b.documentsReviewModel(id, lead)
+			return filejanitor.StationProcessor{Provider: p.Name, Model: p.Model, Pin: p.Pin, OffDevice: chat != nil}, chat
+		}, func() []string { return []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)} })
+		b.fileJanitorService.SetStationHost(func(owner, id string) (filejanitor.StationLook, error) {
+			return b.folderAgentService.StationLook(owner, id)
+		}, service)
+	}
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetTemplateCapabilityService(service)
 	}

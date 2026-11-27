@@ -143,6 +143,20 @@ test('the receipt has one row per destination, Trash on its own row, and Undo al
   assert.deepEqual(calls, [['undo', 'filing-1'], ['done']]);
 });
 
+test('a station receipt names only confirmed created shelves and never says they went under Filed', () => {
+  const r = receiptModelFromResult({
+    shelf_picture: true,
+    created_folders: ['Orders/Winter'],
+    outcomes: [{ result: 'applied', operation: 'place', destination: 'Orders/Winter/order.txt' }]
+  });
+  assert.equal(r.filed, 1);
+  assert.equal(receiptWhere(r, ctx()), '');
+  assert.deepEqual(r.createdFolders, ['Orders/Winter']);
+  const u = renderUndone(doc, { back: 1, retained_folders: ['Orders/Winter'] }, ctx());
+  assert.match(u.textContent, /Undo did not remove “Orders\/Winter”/);
+  assert.doesNotMatch(u.textContent, /empty folder/);
+});
+
 test('Undo all is not offered when nothing can be put back, and both buttons wait while it runs', () => {
   assert.equal(
     byId(renderReceipt(doc, model({ undoAvailable: false }), ctx()), 'fileJanitorUndoAll'),

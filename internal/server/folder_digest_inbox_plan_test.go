@@ -24,14 +24,14 @@ func TestInboxPlan_LinesInTheCardsOrderWithNoModelAndNoDownload(t *testing.T) {
 	}
 	want := []string{
 		"agents: Hire File Curator",
-		"workspace: A Filing workspace named Downloads",
+		"workspace: A workspace named Downloads",
 		"folder: Linked where it is",
-		"task: A first look: a metadata-only scan that proposes the first filing batch",
+		"task: Review Filing on the workspace Map",
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("lines =\n%s", strings.Join(lines, "\n"))
 	}
-	if got := plan.Lines[2].Detail; got != "Ori lists the files directly inside it and reads their names, types, sizes and dates. It creates a Filed folder inside it. Nothing moves until you approve it in the review." {
+	if got := plan.Lines[2].Detail; !plan.Intent.Inbox.HireOnly || plan.Monitoring != nil || got != "The workspace links to this folder. Hiring does not grant Filing access." {
 		t.Errorf("folder disclosure = %q", got)
 	}
 	intent := plan.Intent
@@ -43,7 +43,7 @@ func TestInboxPlan_LinesInTheCardsOrderWithNoModelAndNoDownload(t *testing.T) {
 		t.Fatalf("inbox intent = %+v", intent.Inbox)
 	}
 	visual := plan.Visual
-	if visual == nil || !visual.RequirementsChecked || len(visual.Plugins) != 0 || visual.Builtin != "Filing" ||
+	if visual == nil || !visual.RequirementsChecked || len(visual.Plugins) != 0 || visual.Builtin != "" ||
 		visual.Model == nil || visual.Model.State != personalassistant.FolderSetupModelNotNeeded || visual.Placement != "standalone" ||
 		visual.Entity == nil || visual.Entity.Name != "Downloads" || visual.Entity.Operation != "create" {
 		t.Fatalf("visual = %+v model=%+v", visual, visual.Model)
@@ -86,7 +86,7 @@ func TestInboxPlan_ATakenNameGetsTheNextFreeOne(t *testing.T) {
 	f := newInboxFixture(t, "create")
 	f.team.taken["Downloads"], f.team.taken["Downloads 2"] = true, true
 	plan := f.plan(t)
-	if plan.Intent.Inbox.WorkspaceName != "Downloads 3" || plan.Lines[1].Name != "A Filing workspace named Downloads 3" {
+	if plan.Intent.Inbox.WorkspaceName != "Downloads 3" || plan.Lines[1].Name != "A workspace named Downloads 3" {
 		t.Fatalf("name = %q, line %q", plan.Intent.Inbox.WorkspaceName, plan.Lines[1].Name)
 	}
 }

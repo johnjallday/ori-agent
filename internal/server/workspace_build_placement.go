@@ -32,13 +32,25 @@ func (p inboxBuildPlacement) Acquire(ctx context.Context, owner string, build pe
 // browser receipt or the default source plan. It records facts only: no first
 // task, provider call, scan, dossier production or attachment selection.
 func (p inboxBuildPlacement) RecordPreparedOutcome(ctx context.Context, owner string, build personalassistant.WorkspaceBuildSession, observed sessionhttp.WorkspaceBuildPreparationObservation) error {
-	if p.builder == nil || p.builder.personalAssistantFolderDigest == nil || observed.State != "prepared" ||
-		build.Preparation == nil || observed.WorkspaceID != build.Preparation.WorkspaceID || observed.FolderSlug == "" ||
-		observed.Preparation == nil || observed.Preparation.Result == nil {
+	if p.builder == nil || p.builder.personalAssistantFolderDigest == nil || build.Preparation == nil || observed.WorkspaceID != build.Preparation.WorkspaceID || observed.FolderSlug == "" {
+		return personalassistant.ErrFolderWorkspaceRefused
+	}
+	route := "/workspaces/" + url.PathEscape(observed.FolderSlug)
+	if build.Preparation.InboxHireOnly {
+		if observed.State != "hired" || observed.Preparation != nil || len(observed.Members) != 1 {
+			return personalassistant.ErrFolderWorkspaceRefused
+		}
+		outcome := personalassistant.FolderOutcome{Kind: personalassistant.FolderChoiceProject, WorkspaceID: observed.WorkspaceID, Route: route, Receipt: []personalassistant.FolderReceiptRow{
+			{Kind: "workspace", Name: observed.Name, Route: route, Operation: "create"},
+			{Kind: "agent", Name: observed.Members[0], Assigned: true},
+			{Kind: "folder", Name: observed.FolderName, Detail: "Linked where it is. No Filing access was granted."},
+		}}
+		return p.builder.personalAssistantFolderDigest.RecordInboxPlacementOutcome(ctx, owner, build, outcome)
+	}
+	if observed.State != "prepared" || observed.Preparation == nil || observed.Preparation.Result == nil {
 		return personalassistant.ErrFolderWorkspaceRefused
 	}
 	scan := observed.Preparation.Result
-	route := "/workspaces/" + url.PathEscape(observed.FolderSlug)
 	batchRoute := route + "?panel=file-janitor&preparation=" + url.QueryEscape(observed.Preparation.OperationID)
 	if scan.BatchID != "" {
 		batchRoute += "&batch_id=" + url.QueryEscape(scan.BatchID)

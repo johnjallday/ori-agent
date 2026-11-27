@@ -97,6 +97,7 @@ func invoiceProperty(text string) string {
 }
 
 type PlacementSuggestion struct {
+	Remembered  bool     `json:"remembered,omitempty"`
 	Convention  bool     `json:"convention,omitempty"`
 	Destination string   `json:"destination"`
 	Support     []string `json:"support"`

@@ -164,13 +164,20 @@ disabled known folder does not block another folder.
 
 These three roots stay folders with their hired agents: the host never offers
 or runs whole-root project tools, Home membership or group conversion, including
-old pending reports or forged selections. Downloads and Desktop default to
-File Janitor; Documents offers it unticked and shows the existing stored backup
-protection fact and navigation. Nothing is installed with no step selected.
-File Janitor still requires its own explicit folder preparation and separate
-filing approval. On Desktop its existing `Filed/` destination is disclosed before
-setup. Adding it assigns the workspace's existing hired agent as Curator, with
-no second hire; uninstall leaves that agent attached.
+old pending reports or forged selections. A Filing step on a new hire is a
+recommendation: **Set it up** does not install Filing, grant it access, or scan.
+A recommendation-only plan neither widens nor releases the first-look toolbox.
+An older guided Documents run that already released that exact toolbox may show
+its completed recommendation as a read-only receipt; it cannot authorize Build
+or a Documents review. Build is a separate offer: the original workspace owner,
+manager, reference, access configuration and physical folder must still match.
+A complete current look can supply a count and filenames. With no count, the
+station can still be built; looking inside subfolders is not a prerequisite. On
+**Build the station** the existing manager becomes Curator without another hire;
+uninstall leaves that agent attached. The first scan reads metadata and creates
+no `Filed/`. The filing method and File press come later. Documents retains its
+existing stored backup-protection fact and navigation. An already accepted older
+install or preparation receipt keeps its original meaning.
 
 **Projects inside** lists up to three direct child folders, largest first, with
 found-project counts and kinds, plus a remainder. **Set up <name>** opens a

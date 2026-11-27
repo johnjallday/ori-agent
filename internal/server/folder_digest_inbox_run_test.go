@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
+	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -296,6 +297,20 @@ func (f *inboxFixture) plan(t *testing.T) personalassistant.FolderSetupPlan {
 	return plan
 }
 
+// legacyPlan reconstructs the disclosures stored by an accepted, pre-station
+// one-card run. These tests exercise replay of those terms, not fresh hires.
+func (f *inboxFixture) legacyPlan(t *testing.T) personalassistant.FolderSetupPlan {
+	t.Helper()
+	fresh := f.plan(t)
+	intent := *fresh.Intent.Inbox
+	intent.HireOnly = false
+	p := foldersetup.BuildInboxPlan(foldersetup.InboxFacts{Recipe: fresh.Intent.Recipe, RecipeVersion: fresh.Intent.RecipeVersion, BlueprintLabel: "Filing", Intent: intent})
+	p.Hire = fresh.Hire
+	p.BriefDefault = fresh.BriefDefault
+	p.Monitoring = &personalassistant.FolderMonitoringOffer{Time: "09:00"}
+	return p.Stamped()
+}
+
 // run carries out one pass, as the service would, and returns the last update.
 // The run id the pass saves is kept on the offer, as recordSetup keeps it.
 func (f *inboxFixture) run(t *testing.T, plan personalassistant.FolderSetupPlan) (personalassistant.FolderSetupUpdate, error) {
@@ -328,7 +343,7 @@ func lineState(update personalassistant.FolderSetupUpdate, kind string) personal
 
 func TestInboxRun_CreatesTheWorkspaceGrantsTheFolderAndPreparesTheFirstBatch(t *testing.T) {
 	f := newInboxFixture(t, "create")
-	plan := f.plan(t)
+	plan := f.legacyPlan(t)
 	update, err := f.run(t, plan)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -396,12 +411,12 @@ func TestInboxRun_CreatesTheWorkspaceGrantsTheFolderAndPreparesTheFirstBatch(t *
 func TestInboxRun_ATickedCheckboxTurnsWatchingOnAndNothingElseDoes(t *testing.T) {
 	f := newInboxFixture(t, "create")
 	f.monitoring = true
-	plan := f.plan(t)
+	plan := f.legacyPlan(t)
 	if plan.Monitoring == nil || plan.Monitoring.Time != "09:00" {
 		t.Fatalf("the plan names the daily time: %+v", plan.Monitoring)
 	}
 	// The tick is not part of the digest the user confirmed.
-	if again := f.plan(t); again.Digest != plan.Digest {
+	if again := f.legacyPlan(t); again.Digest != plan.Digest {
 		t.Fatal("the checkbox changed the plan digest")
 	}
 	update, err := f.run(t, plan)
@@ -434,7 +449,7 @@ func TestInboxRun_ReviewDoesNotAcceptOrPerformSetup(t *testing.T) {
 
 func TestInboxRun_ReplayOfASettledRunWritesNothingAgain(t *testing.T) {
 	f := newInboxFixture(t, "create")
-	plan := f.plan(t)
+	plan := f.legacyPlan(t)
 	if _, err := f.run(t, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +481,7 @@ func TestInboxRun_RefusesBeforeAnyWrite(t *testing.T) {
 	for name, arrange := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := newInboxFixture(t, "create")
-			plan := f.plan(t)
+			plan := f.legacyPlan(t)
 			arrange(f)
 			update, err := f.run(t, plan)
 			if err != nil {
@@ -478,7 +493,7 @@ func TestInboxRun_RefusesBeforeAnyWrite(t *testing.T) {
 		})
 	}
 	f := newInboxFixture(t, "create")
-	plan := f.plan(t)
+	plan := f.legacyPlan(t)
 	f.janitor.reviewErr = &filejanitor.SetupError{Code: filejanitor.CodeInvalidPath, Message: "Choose a folder inside your home folder."}
 	update, _ := f.run(t, plan)
 	if got := lineState(update, personalassistant.FolderPlanFolder).Detail; got != "Choose a folder inside your home folder." {
@@ -501,7 +516,7 @@ func TestInboxRun_AFailureStopsAtItsStepAndKeepsWhatFinished(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newInboxFixture(t, "create")
-			plan := f.plan(t)
+			plan := f.legacyPlan(t)
 			tc.arrange(f)
 			update, err := f.run(t, plan)
 			if err != nil {
@@ -553,7 +568,7 @@ func replaceInboxFolder(t *testing.T, path string) {
 // is a failed one, and Retry runs the scan alone under an attempt of its own.
 func TestInboxRun_AFirstScanThatDidNotCompleteIsRetriedAlone(t *testing.T) {
 	f := newInboxFixture(t, "create")
-	plan := f.plan(t)
+	plan := f.legacyPlan(t)
 	f.reviewer.prepareErr = errors.New("scan failed")
 	update, err := f.run(t, plan)
 	if err != nil {
@@ -608,7 +623,7 @@ func TestInboxRun_AFirstScanThatDidNotCompleteIsRetriedAlone(t *testing.T) {
 
 func TestInboxRun_RefusesAStaleOrForeignRecipe(t *testing.T) {
 	f := newInboxFixture(t, "create")
-	plan := f.plan(t)
+	plan := f.legacyPlan(t)
 	stale := plan
 	stale.Intent.RecipeVersion = 99
 	if err := f.host.Run(context.Background(), personalassistant.FolderSetupRequest{UserID: "local", Offer: f.offer, Path: f.path, Plan: stale,
@@ -628,7 +643,7 @@ func TestInboxRun_RefusesAStaleOrForeignRecipe(t *testing.T) {
 
 func TestInboxRun_AFolderReplacedSinceTheReviewNeedsAFreshPick(t *testing.T) {
 	f := newInboxFixture(t, "create")
-	plan := f.plan(t)
+	plan := f.legacyPlan(t)
 	replaceInboxFolder(t, f.path)
 	update, err := f.run(t, plan)
 	if err != nil || update.StopReason != personalassistant.FolderStopNeedsPick || len(f.world.writes) != 0 {

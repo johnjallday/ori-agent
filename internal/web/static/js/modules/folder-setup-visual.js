@@ -294,7 +294,7 @@
             view.agent.model
               ? `Model: ${view.agent.model}`
               : view.agent.modelNotNeeded
-                ? 'No model needed for the first batch'
+                ? 'No model needed for setup'
                 : 'Model not yet known'
           ]
             .filter(Boolean)
@@ -322,9 +322,8 @@
       return {
         state: MODEL_NOT_NEEDED,
         label: 'Model',
-        status: 'Not needed for the first batch',
-        detail:
-          'The first look is a metadata-only scan. No model is called and nothing waits for one.',
+        status: 'Not needed for setup',
+        detail: 'This setup does not call a model or wait for one.',
         saved,
         settings: ''
       };

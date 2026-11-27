@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/directoryid"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -212,6 +213,16 @@ type Deps struct {
 	// FilingPermission reads only the stored grant, never a health probe.
 	// A missing reader or read error is unknown, not a missing permission.
 	FilingPermission func(workspaceID string) (bool, error)
+	StationAvailable func(owner, workspaceID string) bool
+	// StationPlacements projects confirmed workspace feedback; an opted-in station
+	// replaces the legacy Documents placement inference, not its saved views.
+	StationPlacements func(owner, id string, names []string) (map[string]string, bool)
+	// StationAnchor resolves only metadata for an ordinary hired folder. It is not DocumentsAccess and cannot authorize a content read.
+	GuidedStation func(owner, id string) (filejanitor.StationLook, bool)
+	StationAnchor func(owner, id, lead string) (StationAnchor, bool)
+	InboxStation  func(owner, id string) (InboxStation, bool)
+	// ReleasedAdviceReceipt verifies display of an old guided recommendation only.
+	ReleasedAdviceReceipt func(ctx context.Context, owner, id, agent, link string) bool
 	// Songs reads the Home's song-details consent for the offer to learn the
 	// songs. Nil makes no offer.
 	Songs Songs
@@ -604,6 +615,11 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	if m == nil {
 		if strings.HasPrefix(rec.AssignedLink, GuidedDocumentsLinkPrefix) {
 			loose, opts.ObserveRootFile = s.observeLooseDocuments(root)
+		} else if rec.AssignedLink == "" && s.deps.StationAnchor != nil {
+			if anchor, ok := s.deps.StationAnchor(rec.OwnerUserID, workspaceID, rec.AgentName); ok && anchor.Root == root {
+				loose, opts.ObserveRootFile = s.observeLooseNames(root, stationFileName)
+				loose.StationBinding = scopeHash(anchor)
+			}
 		}
 		m, err = foldermap.Walk(root, opts)
 	} else {
@@ -1024,6 +1040,16 @@ func (s *Service) Record(userID, workspaceID string) (*Record, error) {
 // View reads the report for one workspace.
 func (s *Service) View(ctx context.Context, userID, workspaceID string) (View, error) {
 	rec, err := s.Record(userID, workspaceID)
+	if errors.Is(err, ErrWrongState) {
+		if v, ok := s.releasedAdviceView(ctx, userID, workspaceID); ok {
+			return v, nil
+		}
+	}
+	if errors.Is(err, ErrNoRecord) {
+		if v, _, ok := s.inboxStation(userID, workspaceID); ok && s.deps.StationAvailable != nil && s.deps.StationAvailable(userID, workspaceID) {
+			return v, nil
+		}
+	}
 	if err != nil {
 		return View{}, err
 	}
@@ -1044,6 +1070,14 @@ func (s *Service) List(ctx context.Context, userID string) []View {
 	for _, id := range ids {
 		rec, err := s.deps.Store.Read(id)
 		if err != nil || rec.OwnerUserID != userID {
+			continue
+		}
+		// A completed guided recommendation may now be a receipt only. The
+		// Map must not surface a richer report than its workspace can open.
+		if strings.HasPrefix(rec.AssignedLink, GuidedDocumentsLinkPrefix) && completed(rec) && filingAdviceOnly(rec.Setup.Lines) {
+			if v, err := s.View(ctx, userID, id); err == nil {
+				out = append(out, v)
+			}
 			continue
 		}
 		out = append(out, s.viewOf(ctx, rec))
@@ -1169,6 +1203,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		return View{}, err
 	}
 	applyHireFaces(&plan, faces)
+	adviceOnly := filingAdviceOnly(plan.Lines)
 	rec, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
 		if !setUpAllowed(r) {
 			return ErrWrongState
@@ -1186,7 +1221,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		r.HireFaces, r.HireEdits = faces, cloneHireEdits(edits)
 		// Once the run is done the Commander offers to learn the songs; a
 		// folder set up before this build never is.
-		r.OffersSongs = true
+		r.OffersSongs = !adviceOnly
 		// The first step is under way from this moment; the run marks each
 		// line as it reaches it.
 		lines := append([]personalassistant.FolderPlanLine(nil), plan.Lines...)
@@ -1210,7 +1245,11 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 	if err != nil {
 		return View{}, err
 	}
-	s.pin(workspaceID, rec.AgentName, true)
+	// Recommending a station is not authority to widen OR release the
+	// first-look pin. Leave the manager exactly as the owner had it.
+	if !adviceOnly {
+		s.pin(workspaceID, rec.AgentName, true)
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -1229,7 +1268,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		}
 		status, reason := result.Status, result.StopReason
 		nextID := ""
-		if status == personalassistant.FolderSetupDone {
+		if status == personalassistant.FolderSetupDone && !adviceOnly {
 			nextID = s.createNextTicket(s.effectiveRecord(rec))
 			// The first look is over: the agent works with the workspace's
 			// tools, including any the run just added.

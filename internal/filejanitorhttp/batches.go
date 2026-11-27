@@ -271,6 +271,16 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 		"limit":                  limit,
 		"offset":                 offset,
 	}
+	if settings.Settings.FilingMethod == filejanitor.MethodFolders {
+		if owner, e := h.currentOwner(r.Context()); e == nil {
+			if pile := h.service.RememberedPile(owner, workspaceID, batch.ID); pile != nil {
+				result["batch"] = struct {
+					filejanitor.JanitorBatch
+					Pile *filejanitor.StationPile `json:"station_pile"`
+				}{batch, pile}
+			}
+		}
+	}
 	if inspectionRevision != "" {
 		result["inspection_revision"] = inspectionRevision
 	}

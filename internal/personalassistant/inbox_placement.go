@@ -256,7 +256,7 @@ func (s *FolderObservationService) HandoffInbox(ctx context.Context, userID stri
 				return err
 			}
 			plan = plan.Stamped()
-			if plan.Intent.Inbox == nil || plan.Intent.Placement != "standalone" || plan.Digest != input.PlanDigest {
+			if plan.Intent.Inbox == nil || (plan.Intent.Inbox.HireOnly && input.Monitoring) || plan.Intent.Placement != "standalone" || plan.Digest != input.PlanDigest {
 				return placementError("source_changed")
 			}
 			prepared, err := seed(ctx, plan, input)

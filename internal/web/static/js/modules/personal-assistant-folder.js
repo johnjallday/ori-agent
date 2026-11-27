@@ -43,6 +43,7 @@ import {
   fetchFolderAgent,
   folderAgentCardView,
   folderAgentLive,
+  unavailableFolderStatus,
   folderAgentReportView,
   notifyPlacement,
   openFolderAgentPlace,
@@ -7193,28 +7194,29 @@ function scheduleAgentPoll() {
   if (!folderAgentLive(view)) return;
   state.agent.poll = setTimeout(async () => {
     state.agent.poll = 0;
-    const next = await fetchFolderAgent(view.workspace_id).catch(() => null);
-    if (next && state.agent.view?.workspace_id === view.workspace_id) {
-      // The map behind the drawer builds the place as it is made, before the
-      // run's end opens it, so the open waits for that motion.
-      notifyPlacement(view, next);
-      // The look ended with something for the person: the chat box comes back to
-      // the width it had before the hire, once, unless the person has changed it
-      // since (visual-hire FR22, FR23). The panel answers 'kept' or 'none' and
-      // moves nothing then; a closed box stays closed.
-      if (folderLookEnded(view, next))
-        window.PersonalAssistantPanel?.restoreHireWidth?.(next.workspace_id);
-      // A run watched to its end opens the place, as the card's link would;
-      // a card no longer on the page opens nothing.
-      const finished = setupFinished(view, next);
-      state.agent.view = next;
-      state.agent.opening =
-        finished &&
-        document.getElementById('personalAssistantFolderAgent')?.isConnected !== false &&
-        openFolderAgentPlace(next);
-      render();
-      if (next.state === 'reported' || finished) window.PersonalAssistantPanel?.refreshToday?.();
-    }
+    const fetched = await fetchFolderAgent(view.workspace_id).catch(() => null);
+    if (state.agent.view !== view) return;
+    const next =
+      fetched?.workspace_id === view.workspace_id ? fetched : unavailableFolderStatus(view);
+    // The map behind the drawer builds the place as it is made, before the
+    // run's end opens it, so the open waits for that motion.
+    notifyPlacement(view, next);
+    // The look ended with something for the person: the chat box comes back to
+    // the width it had before the hire, once, unless the person has changed it
+    // since (visual-hire FR22, FR23). The panel answers 'kept' or 'none' and
+    // moves nothing then; a closed box stays closed.
+    if (folderLookEnded(view, next))
+      window.PersonalAssistantPanel?.restoreHireWidth?.(next.workspace_id);
+    // A run watched to its end opens the place, as the card's link would;
+    // a card no longer on the page opens nothing.
+    const finished = setupFinished(view, next);
+    state.agent.view = next;
+    state.agent.opening =
+      finished &&
+      document.getElementById('personalAssistantFolderAgent')?.isConnected !== false &&
+      openFolderAgentPlace(next);
+    render();
+    if (next.state === 'reported' || finished) window.PersonalAssistantPanel?.refreshToday?.();
     scheduleAgentPoll();
   }, 1000);
 }

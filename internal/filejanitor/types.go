@@ -142,6 +142,9 @@ type AssistedAutomationReceipt struct {
 // letting saved-only readers recognize it without resolving symlinks. Execution
 // still resolves and validates the actual root. Missing legacy proof is inert.
 type ApprovedReferenceSpelling struct {
+	// Witness pins the physical directory for the station picture without
+	// exposing its inode. Missing legacy proof is never upgraded on a read.
+	Witness     string `json:"witness_digest,omitempty"`
 	RootID      string `json:"root_id"`
 	ReferenceID string `json:"reference_id"`
 	Path        string `json:"path"`
@@ -179,6 +182,13 @@ type JanitorSettings struct {
 	// Always DefaultFilingRootName in version 1; stored so the value the user
 	// was shown at setup stays recorded rather than being re-derived.
 	FilingRootName string `json:"filing_root_name,omitempty"`
+	// Station setup grants metadata access without creating a destination.
+	DeferredDestination bool `json:"deferred_destination,omitempty"`
+	// The local layout is presentation, not approval. Its revision invalidates a picture from before a change, even if the person later switches back.
+	FilingMethod   string `json:"filing_method,omitempty"`
+	MethodRevision string `json:"method_revision,omitempty"`
+	// A stopped build keeps its completed part; this note grants nothing.
+	StoppedStationPart string `json:"stopped_station_part,omitempty"`
 	// DailyScanLocalTime is the daily catch-up time as "HH:MM" wall clock.
 	DailyScanLocalTime string `json:"daily_scan_local_time,omitempty"`
 	// Timezone is the IANA zone the daily time is interpreted in. Empty means
@@ -295,6 +305,15 @@ func (s JanitorSettings) Normalize() JanitorSettings {
 		out.SetupDecision = nil
 		out.SetupPreparation = nil
 		out.SendsTo = nil
+		out.FilingMethod, out.MethodRevision = "", ""
+	}
+	if !validFilingMethod(out.FilingMethod) || !managedRootGeneration.MatchString(out.MethodRevision) {
+		out.FilingMethod, out.MethodRevision = "", ""
+	}
+	switch out.StoppedStationPart {
+	case "plot", "foundation", "walls", "roof":
+	default:
+		out.StoppedStationPart = ""
 	}
 	out.SchemaVersion = SettingsSchemaVersion
 	out.WorkspaceID = strings.TrimSpace(out.WorkspaceID)

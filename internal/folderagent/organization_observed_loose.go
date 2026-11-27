@@ -7,15 +7,23 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
-	"github.com/johnjallday/ori-agent/internal/foldermap"
 )
 
 // This is a hint about the saved look, not a selection or permission to read.
-// Do not retain a list of filenames or send this observation to the model.
+// Only the owner-facing report gets samples, never the model or a file action.
 type LooseDocumentObservation struct {
-	Eligible     bool      `json:"eligible,omitempty"`
-	RootModified time.Time `json:"root_modified"`
-	Policy       string    `json:"policy"`
+	Pile           *LooseFilePile `json:"pile,omitempty"`
+	Eligible       bool           `json:"eligible,omitempty"`
+	RootModified   time.Time      `json:"root_modified"`
+	Policy         string         `json:"policy"`
+	StationBinding string         `json:"station_binding,omitempty"` // hashed hired anchor/manager at the walk; never a read grant
+}
+
+// LooseFilePile is bounded display evidence. Older boolean-only observations
+// cannot supply a count and must not be upgraded by re-listing the directory.
+type LooseFilePile struct {
+	Count int      `json:"count"`
+	Names []string `json:"names"`
 }
 
 func (s *Service) protectedReviewRoots() []string {
@@ -25,17 +33,27 @@ func (s *Service) protectedReviewRoots() []string {
 	return nil
 }
 func (s *Service) observeLooseDocuments(root string) (*LooseDocumentObservation, func(string)) {
+	return s.observeLooseNames(root, reviewableDocumentName)
+}
+func (s *Service) observeLooseNames(root string, allowed func(string) bool) (*LooseDocumentObservation, func(string)) {
 	protected := s.protectedReviewRoots()
-	out := &LooseDocumentObservation{Policy: scopeHash(protected)}
+	out := &LooseDocumentObservation{Policy: scopeHash(protected), Pile: &LooseFilePile{}}
 	if info, err := os.Lstat(root); err == nil && info.IsDir() {
 		out.RootModified = info.ModTime()
 	}
 	return out, func(name string) {
-		if out.Eligible || !reviewableDocumentName(name) {
+		if !allowed(name) {
 			return
 		}
 		path := filepath.Join(root, name)
-		out.Eligible = !slices.ContainsFunc(protected, func(p string) bool { return filejanitor.RootsOverlap(path, p) })
+		if slices.ContainsFunc(protected, func(p string) bool { return filejanitor.RootsOverlap(path, p) }) {
+			return
+		}
+		out.Eligible = true
+		out.Pile.Count++
+		if len(out.Pile.Names) < 6 {
+			out.Pile.Names = append(out.Pile.Names, name)
+		}
 	}
 }
 
@@ -53,15 +71,20 @@ func (s *Service) looseDocumentHint(rec *Record) string {
 		return "history"
 	}
 	seen := rec.LooseDocuments
-	if seen == nil || seen.RootModified.IsZero() || (walked.State != foldermap.StateWalked && walked.State != foldermap.StateClosed) {
+	if seen == nil || seen.Pile == nil || seen.RootModified.IsZero() || !completeStationMap(rec.Map) {
 		return "partial"
 	}
-	info, err := os.Lstat(access.Root) // #nosec G304 G703 -- live host-resolved anchor; stat only, never enumerated on read.
-	if err != nil || !info.ModTime().Equal(seen.RootModified) || seen.Policy != scopeHash(s.protectedReviewRoots()) {
+	if !s.currentLooseObservation(rec, access.Root) {
 		return "stale"
 	}
 	if seen.Eligible {
 		return "eligible"
 	}
 	return "empty"
+}
+
+func (s *Service) currentLooseObservation(rec *Record, root string) bool {
+	seen := rec.LooseDocuments
+	info, err := os.Lstat(root) // #nosec G304 G703 -- live host-resolved anchor; stat only, never enumerated on read.
+	return seen != nil && err == nil && info.IsDir() && info.ModTime().Equal(seen.RootModified) && seen.Policy == scopeHash(s.protectedReviewRoots())
 }

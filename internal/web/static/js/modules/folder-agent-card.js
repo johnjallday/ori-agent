@@ -4,9 +4,11 @@
 // sends a path. Words come from the server's view (facts line, stage line,
 // tools); this module only lays them out.
 
+import { filingStationOffer, stationPile } from './filing-station-offer.js';
 import { documentsOrganizationOffer } from './documents-organization.js';
+
 import { renderHireDraftEditor } from './folder-agent-hire-editor.js';
-import { publishFolderAgentChat } from './folder-agent-chat.js';
+import { chatRefOf, publishFolderAgentChat } from './folder-agent-chat.js';
 import {
   chatDestination,
   chatFollowUp,
@@ -159,6 +161,7 @@ export function folderAgentReportView(view) {
   if (!view || !view.workspace_id) return null;
   const agent = String(view.agent_name || 'The agent');
   const folder = String(view.folder_name || 'this folder');
+  const filingPile = stationPile(view.filing_pile);
   const out = {
     workspaceID: String(view.workspace_id),
     workspace: String(view.workspace_name || folder),
@@ -184,9 +187,13 @@ export function folderAgentReportView(view) {
     rootPolicy: String(view.root_policy || ''),
     organizationReview: view.organization_review === true,
     filingReviewHint: String(view.filing_review_hint || ''),
+    stationOffer: view.station_offer === true || Boolean(filingPile),
+    filingPile,
+    stationHire: view.station_hire === true,
     policyNote: String(view.policy_note || ''),
     // The setup is done but filing was not allowed yet: one step left.
     filingPermissionRequired: Boolean(view.filing_permission_required),
+    filingRecommendationDone: view.filing_recommendation_done === true,
     exploreFolder: Boolean(view.explore_folder),
     tools: [],
     toolsSentence: String(view.tools_sentence || ''),
@@ -270,13 +277,19 @@ export function folderAgentReportView(view) {
   // picks still belong to this card. Keep the same by-name choice state.
   if (view.hireFaces instanceof Map) out.hireFaces = view.hireFaces;
   if (view.hireDrafts instanceof Map) out.hireDrafts = view.hireDrafts;
+  if (out.state === 'status_unavailable') {
+    out.title = 'Folder status unavailable';
+    return out;
+  }
   if (out.state === 'looking') {
     out.title = `${agent} is looking around ${folder}`;
     out.receipt = String(view.receipt || 'Looking around…');
     out.progress = String(view.progress_line || '');
     return out;
   }
-  if (out.state === 'failed') {
+  if (out.filingRecommendationDone) {
+    out.title = 'Filing recommendation saved';
+  } else if (out.state === 'failed') {
     out.title = `${agent} could not finish looking around ${folder}`;
   } else if (out.state === 'setting_up') {
     out.title = `Setting up ${out.workspace}`;
@@ -2328,6 +2341,18 @@ export function renderFolderAgentReport(
   );
   card.dataset.folderAgentCard = view.state;
   card.dataset.workspaceId = view.workspaceID;
+  if (view.state === 'status_unavailable') {
+    card.setAttribute('role', 'status');
+    card.append(
+      el(
+        doc,
+        'p',
+        'folder-agent-card__note',
+        'The current folder status could not be verified. Reload the workspace to check again. No setup was retried.'
+      )
+    );
+    return card;
+  }
   // The steps left ticked, and the plan they make: a tick asks the server
   // for the plan (and digest) with that choice.
   const selecting = Boolean(view.plan?.steps?.length) && view.actions.some(a => a.id === 'set_up');
@@ -2675,7 +2700,18 @@ export function renderFolderAgentReport(
   // none; beside it, it would only repeat the counts.
   if (!premiseLine && view.facts && (!view.whatItIs || view.policyNote))
     card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
-  if (view.organizationReview && fetchImpl)
+  if (view.filingRecommendationDone) {
+    card.append(
+      el(
+        doc,
+        'p',
+        'folder-agent-card__note',
+        'Your manager recommended Filing. That step did not build a station or scan the folder.'
+      )
+    );
+  }
+  if (view.stationOffer) card.append(filingStationOffer(doc, view));
+  else if (view.organizationReview && fetchImpl)
     card.append(
       documentsOrganizationOffer(
         doc,
@@ -2692,7 +2728,8 @@ export function renderFolderAgentReport(
   else {
     const note = {
       empty: 'This look found no loose documents supported for filing review.',
-      partial: 'This look did not fully cover the loose documents in this folder.',
+      partial:
+        'This look covered only part of Documents. It does not give a verified count of loose files.',
       stale:
         'The folder has changed since this look. Look again before reviewing filing suggestions.',
       unavailable:
@@ -2721,6 +2758,7 @@ export function renderFolderAgentReport(
     });
   }
   const downloadsReview =
+    !view.stationHire &&
     view.rootPolicy === 'downloads_inbox' &&
     view.route.startsWith('/workspaces/') &&
     ['reported', 'set_up'].includes(view.state);
@@ -3637,6 +3675,17 @@ export function folderAgentReading(view) {
   return view?.learning?.status === 'running' || view?.learning?.status === 'summarizing';
 }
 
+// Drop stale progress and actions on a refused status read. Keep only the
+// identity needed to replace the card in its original conversation.
+export function unavailableFolderStatus(current) {
+  const ref = chatRefOf(current);
+  return {
+    workspace_id: current.workspace_id,
+    state: 'status_unavailable',
+    ...(ref && { chat: { session_id: ref.sessionID, message_id: ref.messageID } })
+  };
+}
+
 // followFolderAgent polls one folder agent while it looks, sets up or reads the
 // songs, and hands each fresh view to onView(next, finished), finished marking
 // the end of a run it watched. Returns a stop function.
@@ -3646,18 +3695,23 @@ export function followFolderAgent(
 ) {
   let timer = 0;
   let current = view;
+  let stopped = false;
   const stop = () => {
+    stopped = true;
     if (timer) clearTimeout(timer);
     timer = 0;
   };
   const tick = () => {
-    stop();
-    if (!current?.workspace_id || !folderAgentLive(current)) return;
+    if (stopped || !current?.workspace_id || !folderAgentLive(current)) return;
     timer = setTimeout(async () => {
       timer = 0;
       if (!isActive()) return;
       const next = await fetchFolderAgent(current.workspace_id, fetchImpl).catch(() => null);
-      if (!next || !isActive()) return;
+      if (stopped || !isActive()) return;
+      if (!next || next.workspace_id !== current.workspace_id) {
+        onView?.(unavailableFolderStatus(current), false);
+        return;
+      }
       const finished = setupFinished(current, next);
       // Home's map builds the place behind the card as it is made: it
       // refreshes, animated, on placement lines only, never on every poll.
@@ -3743,7 +3797,7 @@ export function mountFolderAgentReports(
         if (folderAgentLive(next)) return;
         follows.delete(id);
         // The list's counts follow, unless the page is about to leave.
-        if (!opening) onDone?.();
+        if (!opening && next.state !== 'status_unavailable') onDone?.();
       }
     };
     if (pollMs) options.pollMs = pollMs;
@@ -3948,7 +4002,7 @@ export async function mountWorkspaceFolderAgent(
         // A fresh view from the server settles an answer whose outcome was unknown.
         if (!acting) chatState.pending = false;
         let opening = false;
-        if (finished && openPlace) {
+        if (finished && openPlace && !next.filing_recommendation_done) {
           const open = { navigate };
           if (openDelayMs !== undefined) open.delayMs = openDelayMs;
           opening = openFolderAgentPlace(next, open);
@@ -4072,6 +4126,15 @@ export async function mountFolderAgentChoice(
 
 if (typeof window !== 'undefined') {
   window.FolderAgentCard = {
+    savedReviews: (doc, id) =>
+      documentsOrganizationOffer(
+        doc,
+        `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(id)}`,
+        window.fetch.bind(window),
+        window.location.pathname,
+        'Earlier Documents reviews',
+        true
+      ),
     folderAgentReportView,
     folderAgentTileLine,
     listFolderAgents,

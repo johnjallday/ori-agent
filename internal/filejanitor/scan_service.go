@@ -136,10 +136,14 @@ func (s *Service) ScanNow(workspaceID string, source ScanSource) (JanitorBatch, 
 	// An explicit fresh scan supersedes an unconfirmed initial attempt, without
 	// changing its saved access, mode, or monitoring. It is not an old-confirmation
 	// replay and must not leave a permanent initial-result warning afterward.
+	var stopped *JanitorSettings
 	if source == ScanSourceManual {
 		settings, err := s.store.LoadSettings(workspaceID)
 		if err != nil {
 			return JanitorBatch{}, false, err
+		}
+		if settings.StoppedStationPart != "" {
+			stopped = &settings
 		}
 		if p := settings.SetupPreparation; p != nil && settings.IsSetUp() {
 			_, found, err := s.preparedScanReceipt(workspaceID, *p)
@@ -163,12 +167,21 @@ func (s *Service) ScanNow(workspaceID string, source ScanSource) (JanitorBatch, 
 		}
 	}
 	batch, created, _, err := s.scanNow(workspaceID, source, nil)
+	if err == nil && stopped != nil {
+		_, err = s.store.UpdateSettings(workspaceID, func(current *JanitorSettings) error {
+			if current.RootID == stopped.RootID && current.UpdatedAt.Equal(stopped.UpdatedAt) {
+				current.StoppedStationPart = ""
+			}
+			return nil
+		})
+	}
 	return batch, created, err
 }
 
 var ErrScanOperationConflict = fmt.Errorf("scan operation no longer matches File Janitor state")
 
 type ScanOperationRequest struct {
+	Context context.Context
 	// PreparationID is optional for legacy/assistant-led callers; when set,
 	// the accepted setup must still be current under the scan-state lock.
 	PreparationID string
@@ -267,7 +280,14 @@ func (s *Service) scanNow(workspaceID string, source ScanSource, operation *Scan
 			at := capability.InstalledAt
 			installedAt = &at
 		}
-		result, scanErr := scanner.Scan(settings, *state, source)
+		var progress func(int, int) error
+		if operation != nil && operation.PreparationID != "" {
+			progress = func(n, total int) error {
+				s.buildActivity.count(operation.PreparationID, n, total)
+				return preparationContextError(operation.Context)
+			}
+		}
+		result, scanErr := scanner.scan(settings, *state, source, progress)
 		if scanErr != nil {
 			return scanErr
 		}
@@ -275,6 +295,9 @@ func (s *Service) scanNow(workspaceID string, source ScanSource, operation *Scan
 			return err
 		}
 		if operation != nil && operation.PreparationID != "" {
+			if err := preparationContextError(operation.Context); err != nil {
+				return err
+			}
 			// Lifecycle/ownership can change in the workspace store while metadata
 			// is enumerated. Do not publish a batch/receipt under stale authority.
 			if err := s.validatePreparationBoundary(settings, operation.PreparationID); err != nil {

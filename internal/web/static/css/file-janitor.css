@@ -8,6 +8,174 @@
   display: none;
 }
 
+/* Stages are evidence, not a clock. Reduced motion keeps the whole building
+   visible and each completed step in text. Only the workspace depot is staged. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-station-part="foundation"] [data-depot-part]:not([data-depot-part="foundation"]),
+  [data-station-part="walls"] :is([data-depot-part="roof"], [data-depot-part="open"]),
+  [data-station-part="roof"] [data-depot-part="open"] {
+    visibility: hidden;
+  }
+}
+
+.fj-shelves-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.9rem;
+  margin-block: 1rem;
+}
+.fj-shelf {
+  border: 1px solid var(--bs-border-color);
+  border-bottom: 4px double var(--bs-border-color);
+  border-radius: 0.5rem 0.5rem 0.2rem 0.2rem;
+  padding: 0.85rem;
+  min-width: 0;
+}
+.fj-method .fj-shelf {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+.fj-method .fj-shelf .fj-btn {
+  margin-top: auto;
+}
+.fj-method-suggested {
+  font-weight: 600;
+  border-inline-start: 0.2rem solid currentColor;
+  padding-inline-start: 0.5rem;
+}
+.fj-shelf-tools .fj-label input {
+  display: block;
+  max-width: 100%;
+}
+.fj-shelf-new {
+  border-style: dashed;
+}
+.fj-shelf-new :is(input, select) {
+  max-width: 100%;
+  min-width: 0;
+}
+.fj-shelf-loose {
+  border-style: dashed;
+}
+.fj-shelf-title {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.fj-shelf-files,
+.fj-shelf-tools,
+.fj-shelf-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.7rem;
+}
+.fj-shelf-file {
+  color: var(--bs-body-color);
+  background: var(--bs-tertiary-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.25rem;
+  padding: 0.35rem 0.6rem;
+  text-align: start;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+.fj-shelf-file[aria-pressed="true"] {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+.fj-drop-ready {
+  outline: 2px dashed currentColor;
+  outline-offset: -3px;
+}
+.fj-drop-over {
+  outline-style: solid;
+  background: var(--bs-tertiary-bg);
+}
+.fj-shelves :is(input, select, button) {
+  max-width: 100%;
+}
+.fj-shelves .fj-btn {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (pointer: coarse) {
+  .fj-shelves :is(input, select, button) {
+    min-height: 44px;
+  }
+}
+@media (max-width: 36rem) {
+  .fj-shelf-tools,
+  .fj-shelf-tools > label {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+.fj-shelf-footer {
+  border-top: 1px solid var(--bs-border-color);
+  padding-block-start: 0.8rem;
+  justify-content: space-between;
+}
+
+.filing-station-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.8rem;
+  border-inline-start: 0.25rem solid var(--bs-primary);
+}
+.filing-station-offer :is(strong, p) {
+  width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.fj-station-stack {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-start: 0;
+  min-width: 1.6rem;
+  padding: 0.1rem 0.4rem;
+  background: var(--bg-secondary);
+  border: 1px solid currentColor;
+  box-shadow:
+    2px 2px var(--bg-secondary),
+    3px 3px currentColor;
+  font-size: 0.8rem;
+}
+.filing-station-plot {
+  position: absolute;
+  inset-inline-start: 100%;
+  bottom: 0;
+  width: 3.2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border: 2px dashed currentColor;
+  border-radius: 42%;
+  color: var(--bs-body-color);
+  font-size: 0.8rem;
+  font-weight: 700;
+  isolation: isolate;
+  pointer-events: none;
+}
+.filing-station-plot:not(:empty)::before {
+  content: "";
+  position: absolute;
+  width: 1.6rem;
+  height: 1.1rem;
+  transform: rotate(-7deg);
+  z-index: -1;
+  background: var(--bs-body-bg);
+  border: 1px solid currentColor;
+  box-shadow:
+    2px 2px var(--bs-secondary-color),
+    4px 4px var(--bs-body-bg);
+}
+
 /* Saved proposals: compact plan cards inside the existing review console. */
 .fj-saved-batches {
   margin-block: 1rem;
@@ -2412,6 +2580,20 @@
     max-height: 100%;
     border: 0;
     border-radius: 0;
+  }
+
+  /* At high zoom the wrapping header can fill the viewport. Give the shelf
+     picture and its heading one scroll surface so every target remains reachable. */
+  .fj-console:has(.fj-shelves) {
+    display: block;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .fj-console:has(.fj-shelves) .fj-console-head {
+    position: static;
+  }
+  .fj-console-body:has(.fj-shelves) {
+    overflow: visible;
   }
 
   /* On a small screen the actions need the full width rather than being

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { mkdir, readFile, readdir, realpath, rename, utimes, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -26,6 +26,65 @@ test('the manager offers a first look on Open; dismissal and return do not start
   expect(
     (await (await request.get('/api/settings/workspace-root')).json()).default_workspace_root
   ).toBe(join(home, 'Ori Workspaces'));
+  const advice = process.env.ORI_STATION_ADVICE;
+  const buildWithoutCount = async (button: Locator, id: string, count: number) => {
+    await button.click();
+    const station = page.getByRole('dialog', { name: 'Filing', exact: true });
+    const confirm = station.getByRole('button', { name: 'Build the station', exact: true });
+    await expect(confirm).toBeVisible();
+    await expect(page.locator('body')).toHaveAttribute('data-workspace-view-mode', 'map');
+    expect(
+      (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+    ).toBe(false);
+    const prepared = page.waitForResponse(
+      r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/prepare-review')
+    );
+    await confirm.click();
+    const response = await prepared;
+    expect(response.status(), await response.text()).toBe(200);
+    const { result } = (await response.json()).preparation;
+    expect(result.eligible_count ?? 0).toBe(count);
+    const depot = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
+    await expect(depot).toBeVisible();
+    if (count) await expect(depot).toContainText(`Review ${count} files`);
+    await expect(depot).not.toHaveAttribute('data-station-part', /foundation|walls|roof/);
+    expect(
+      (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+    ).toBe(true);
+  };
+  if (advice === 'legacy-check') {
+    // Reopen the same isolated workspace on the fixed build; do not recreate
+    // the hire or rewrite the older build's toolbox or run receipt.
+    const wsFile = join(home, 'Ori Workspaces', 'documents', 'workspace.json');
+    const ws = JSON.parse(await readFile(wsFile, 'utf8'));
+    const endpoint = `/api/personal-assistant/folder-agent/${ws.id}`;
+    const receipt = await request.get(endpoint);
+    expect(receipt.status()).toBe(200);
+    const view = (await receipt.json()).folder_agent;
+    expect(view.filing_recommendation_done).toBe(true);
+    expect(view.filing_review_hint).toBe('partial');
+    expect(view.filing_pile).toBeUndefined();
+    await installLocalCdn(page);
+    await page.goto('/workspaces/documents?mode=details');
+    await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
+    const card = page.locator('.folder-agent-card--report:visible');
+    await expect(card).toContainText('That step did not build a station or scan the folder.');
+    expect(view.station_offer).toBe(true);
+    await expect(card).toContainText('No need to explore its subfolders');
+    await expect(card.getByRole('button', { name: 'Look further' })).toHaveCount(0);
+    await card.screenshot({ path: info.outputPath('historical-advice-receipt.png') });
+    const after = JSON.parse(await readFile(wsFile, 'utf8'));
+    expect(after.toolboxes).toEqual(ws.toolboxes);
+    expect(after.toolbox_assignments).toEqual(ws.toolbox_assignments);
+    expect(after.mcp_bindings).toEqual(ws.mcp_bindings);
+    await buildWithoutCount(
+      card.getByRole('button', { name: 'Build a Filing station' }),
+      ws.id,
+      13
+    );
+    expect((await readdir(join(home, 'Documents', 'Orders'))).length).toBe(2001);
+    return;
+  }
   const hq = await freshGuidedHQ(request);
   const root = join(home, 'Documents');
   await mkdir(root, { mode: 0o750 });
@@ -33,11 +92,35 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await writeFile(join(root, 'estimate.txt'), 'Synthetic estimate for cabinet order PO-4387.', {
       mode: 0o600
     });
+  if (!empty) {
+    const old = new Date(Date.now() - 3600000);
+    await utimes(join(root, 'estimate.txt'), old, old);
+  }
   const fixtures = {
     'estimate.txt': 'Synthetic estimate for cabinet order PO-4387.',
     'packing-slip.txt': 'Kitchen remodel at Maple Street. Packing slip for cabinet order PO-4387.',
     'invoice.txt': 'Kitchen remodel at Maple Street. Invoice for cabinet order PO-4387.'
   };
+  // The station acceptance starts with four real shelves and thirteen loose
+  // files. Eight have unambiguous names; the others need a person's choice.
+  const stationFiles: Record<string, string> = { 'estimate.txt': fixtures['estimate.txt'] };
+  const stationFolders = ['Orders', 'Photos', 'Trips', 'Work'];
+  if (!empty && !liveModel) {
+    for (const folder of stationFolders) await mkdir(join(root, folder), { mode: 0o750 });
+    const old = new Date(Date.now() - 3600_000);
+    for (let i = 1; i <= 12; i++) {
+      const name = i <= 8 ? `order-${i}.txt` : `note-${i - 8}.txt`;
+      stationFiles[name] = `Synthetic ${name}`;
+      await writeFile(join(root, name), stationFiles[name], { mode: 0o600 });
+      await utimes(join(root, name), old, old);
+    }
+  }
+  if (advice === 'partial' || advice === 'legacy-seed') {
+    // Exceed the walk's entry budget inside an existing shelf. The loose
+    // count must not be presented as complete or required before Build.
+    for (let i = 0; i < 2001; i++) await writeFile(join(root, 'Orders', `fixture-${i}.txt`), '');
+  }
+  const stationTree = [...Object.keys(stationFiles), ...stationFolders].sort();
   if (liveModel) {
     const configured = await request.post('/api/settings/system-model', {
       data: { provider: 'claude', model: liveModel }
@@ -90,9 +173,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
       expect(await readdir(root)).toEqual([]);
       return;
     }
-    for (const [name, body] of Object.entries(
-      liveModel ? fixtures : { 'estimate.txt': fixtures['estimate.txt'] }
-    ))
+    for (const [name, body] of Object.entries(liveModel ? fixtures : stationFiles))
       expect(await readFile(join(root, name), 'utf8')).toBe(body);
   };
   await verifyBytes();
@@ -119,11 +200,12 @@ test('the manager offers a first look on Open; dismissal and return do not start
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   await card.screenshot({ path: info.outputPath('first-open.png') });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' });
-  await page.evaluate(() => {
-    localStorage.setItem('ori-theme', 'dark');
-    document.documentElement.setAttribute('data-bs-theme', 'dark');
-  });
+  const theme = process.env.ORI_STATION_THEME === 'light' ? 'light' : 'dark';
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: theme });
+  await page.evaluate(value => {
+    localStorage.setItem('ori-theme', value);
+    document.documentElement.setAttribute('data-bs-theme', value);
+  }, theme);
   await card.screenshot({ path: info.outputPath('narrow-invite.png') });
   await card.getByRole('button', { name: 'Not now' }).press('Enter');
   const manual = card.getByRole('button', { name: 'Show Documents first look' });
@@ -136,6 +218,16 @@ test('the manager offers a first look on Open; dismissal and return do not start
   expect(starts).toEqual([]);
   expect(effects).toEqual([]);
   await verifyBytes();
+  if (advice === 'before-look') {
+    await buildWithoutCount(
+      card.getByRole('button', { name: 'Build a Filing station' }),
+      id,
+      empty ? 0 : 13
+    );
+    expect(starts).toEqual([]);
+    await verifyBytes();
+    return;
+  }
   await action.press('Enter');
   const report = card.getByRole('button', { name: 'View report' });
   await expect(report).toBeVisible({ timeout: 60000 });
@@ -149,6 +241,11 @@ test('the manager offers a first look on Open; dismissal and return do not start
     (await (await request.get('/api/personal-assistant/folder-agent')).json()).folder_agents.filter(
       (r: { workspace_id: string }) => r.workspace_id === id
     );
+  const historical = process.env.ORI_STATION_SAVED_REVIEW === '1';
+  if (historical)
+    execFileSync('python3', ['tests/helpers/seed-saved-documents-review.py', base, id], {
+      input: JSON.stringify(folder)
+    });
   const observed = await records();
   expect(observed).toHaveLength(1);
   const ticket = observed[0].ticket_id;
@@ -156,15 +253,432 @@ test('the manager offers a first look on Open; dismissal and return do not start
   await report.click();
   const savedReport = page.locator('.folder-agent-card--report:visible');
   await expect(savedReport).toBeVisible();
+  if (advice) {
+    const recordURL = `/api/personal-assistant/folder-agent/${id}`;
+    const workspaceFile = join(home, 'Ori Workspaces', folder.folder_slug, 'workspace.json');
+    const pin = async () => {
+      const ws = JSON.parse(await readFile(workspaceFile, 'utf8'));
+      return [ws.toolboxes, ws.toolbox_assignments, ws.mcp_bindings];
+    };
+    const original = await pin();
+    await savedReport.getByRole('checkbox').check();
+    await savedReport.locator('[data-folder-agent-action="set_up"]').click();
+    if (advice === 'legacy-seed') {
+      await expect.poll(async () => (await request.get(recordURL)).status()).toBe(409);
+      const sidecar = join(
+        home,
+        'Ori Workspaces',
+        folder.folder_slug,
+        '.ori',
+        'folder-agent-v1.json'
+      );
+      await expect
+        .poll(async () => JSON.parse(await readFile(sidecar, 'utf8')).setup.status)
+        .toBe('done');
+      expect(await pin()).not.toEqual(original);
+      return;
+    }
+    await expect(savedReport).toContainText(
+      'That step did not build a station or scan the folder.'
+    );
+    await expect(savedReport.locator('.folder-agent-card__run-clock[data-started-at]')).toHaveCount(
+      0
+    );
+    const actual = await request.get(recordURL);
+    expect(actual.status()).toBe(200);
+    expect((await actual.json()).folder_agent.setup.status).toBe('done');
+    expect(await pin()).toEqual(original);
+    expect(
+      (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+    ).toBe(false);
+    await verifyBytes();
+    if (advice === 'partial') {
+      await expect(savedReport).toContainText('No need to explore its subfolders');
+      expect((await actual.json()).folder_agent.filing_pile).toBeUndefined();
+      expect(effects).toEqual([]);
+      await savedReport.screenshot({ path: info.outputPath('partial-advice-receipt.png') });
+      await buildWithoutCount(
+        savedReport.getByRole('button', { name: 'Build a Filing station' }),
+        id,
+        13
+      );
+      expect((await readdir(join(root, 'Orders'))).length).toBe(2001);
+      await verifyBytes();
+      return;
+    }
+  }
   const suggestionButton = savedReport.getByRole('button', { name: 'Review filing suggestions' });
   if (empty) {
     await expect(suggestionButton).toHaveCount(0);
     await expect(savedReport).toContainText(
-      'This look found no loose documents supported for filing review.'
+      'Build the station to scan loose files directly in this folder.'
     );
     await savedReport.screenshot({ path: info.outputPath('empty-report.png') });
     await verifyBytes();
     expect(effects).toEqual([]);
+    return;
+  }
+  // New looks with a measured pile use one station build. A saved review is
+  // still reachable after a grant narrows (covered below for legacy reports).
+  if (!liveModel) {
+    const offer = savedReport.getByRole('region', { name: 'Filing station offer' });
+    await expect(offer).toContainText('13 loose files in Documents');
+    await expect(offer).toContainText('and 7 more');
+    await offer.getByRole('button', { name: 'Not now' }).click();
+    await expect(offer.getByRole('button', { name: 'Build a Filing station' })).toHaveCount(0);
+    expect((await readdir(root)).sort()).toEqual(stationTree);
+    expect(
+      (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+    ).toBe(false);
+    await offer.getByRole('button', { name: 'Show Filing station offer' }).click();
+    const mapURL = new URL(page.url());
+    mapURL.searchParams.set('mode', 'map');
+    await page.goto(mapURL.toString());
+    const closeReport = page.getByRole('button', { name: 'Close personal assistant' });
+    if (await closeReport.isVisible()) await closeReport.click();
+    await expect(page.locator('.filing-station-plot')).toHaveText('13');
+    const pileLine = page
+      .locator('.commander-balloon-line:visible')
+      .filter({ hasText: '13 loose files in Documents' });
+    if (!(await page.locator('.commander-balloon:visible .filing-station-offer').count()))
+      await pileLine.click();
+    const bubble = page.locator('.commander-balloon:visible .filing-station-offer');
+    await expect(bubble).toContainText('and 7 more');
+    await page.screenshot({ path: info.outputPath('map-offer.png') });
+    await bubble.getByRole('button', { name: 'Build a Filing station' }).click();
+    const station = page.getByRole('dialog', { name: 'Filing', exact: true });
+    await expect(
+      station.getByRole('heading', { name: 'Build a Filing station for Documents' })
+    ).toBeVisible();
+    await expect(
+      station.getByRole('checkbox', { name: 'Also watch for new files and look once a day' })
+    ).not.toBeChecked();
+    await station.screenshot({ path: info.outputPath('build-card.png') });
+    const reduced = historical || process.env.ORI_STATION_REDUCED === '1';
+    await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
+    const building = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
+    const builtParts: string[] = [];
+    await page.exposeFunction('observeBuildPart', (part: string) => {
+      if (!builtParts.includes(part)) builtParts.push(part);
+    });
+    await page.evaluate(() => {
+      new MutationObserver(() => {
+        const part = document
+          .querySelector('[data-cmd-hq-station="file-janitor"]')
+          ?.getAttribute('data-station-part');
+        if (part) void (window as any).observeBuildPart(part);
+      }).observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['data-station-part']
+      });
+    });
+    const prepared = page.waitForResponse(
+      r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/prepare-review')
+    );
+    await station.getByRole('button', { name: 'Build the station', exact: true }).click();
+    const response = await prepared;
+    expect(response.status(), await response.text()).toBe(200);
+    const result = (await response.json()).preparation;
+    expect(result.result.outcome).toBe('batch');
+    expect(result.result.eligible_count).toBe(13);
+    expect((await readdir(root)).sort()).toEqual(stationTree);
+    await verifyBytes();
+    if (!reduced) await expect.poll(() => builtParts).toEqual(['foundation', 'walls', 'roof']);
+    await expect(building).toContainText('Review 13 files');
+    if (await closeReport.isVisible()) await closeReport.click();
+    const collapse = page.locator('.commander-balloon:visible .commander-balloon__close');
+    if (await collapse.isVisible()) await collapse.click();
+    await building.screenshot({ path: info.outputPath('depot-open.png') });
+    await building.click();
+    await expect(station.getByRole('tab', { name: 'History' })).toBeVisible();
+    await page.screenshot({ path: info.outputPath('station-built.png') });
+    await page.reload();
+    await expect(building).toContainText('Review 13 files');
+    await expect(building).not.toHaveAttribute('data-station-part', /foundation|walls|roof/);
+    // A shelf is an existing folder the person chooses, not one created by
+    // setup or by selecting a chip. Exercise the admitted File and Undo too.
+    expect((await readdir(root)).sort()).toEqual(stationTree);
+    if (!(await station.isVisible())) await building.press('Enter');
+    const method = station.getByRole('region', { name: 'Filing method' });
+    await expect(method).toContainText('How should Documents be filed?');
+    await expect(method).toContainText('Suggested · This folder already has shelves.');
+    await expect(method.getByRole('button', { name: 'Send to another workspace' })).toBeDisabled();
+    await method.screenshot({ path: info.outputPath('method-chooser.png') });
+    await method.getByRole('button', { name: 'Into my folders', exact: true }).press('Enter');
+    const shelves = station.locator('.fj-shelves');
+    await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
+    await expect(shelves).toContainText('8 ready to file · 5 stay loose');
+    await page.reload();
+    if (!(await station.isVisible())) await building.press('Enter');
+    await expect(shelves).toContainText('8 ready to file · 5 stay loose');
+    await expect(method).toHaveCount(0);
+    const readCard = shelves.getByRole('region', { name: 'Optional first-lines read' });
+    const ask = readCard.getByRole('button', { name: /Read the first lines of the 5 loose files/ });
+    await ask.press('Enter');
+    await expect(readCard).toContainText('No supported model');
+    await expect(readCard.getByRole('button', { name: 'Approve this read' })).toHaveCount(0);
+    await readCard.getByRole('button', { name: 'Back to picture' }).press('Enter');
+    await expect(ask).toBeFocused();
+    await verifyBytes();
+    if (historical) {
+      await station.getByRole('tab', { name: 'History', exact: true }).click();
+      const old = station.locator('[data-saved-document-reviews]');
+      await old.getByRole('button', { name: 'Earlier Documents reviews' }).press('Enter');
+      await expect(old).toContainText('Earlier trip notes');
+      await expect(old.getByRole('button', { name: 'Open original' })).toHaveCount(0);
+      await old.getByText('Review filing', { exact: true }).click();
+      await old.getByRole('checkbox', { name: 'note-4.txt', exact: true }).check();
+      await old.getByRole('button', { name: 'Check selected files' }).click();
+      await old.getByLabel('Folder in Documents').fill('Trips');
+      await old.getByRole('button', { name: 'Preview filing' }).click();
+      await verifyBytes();
+      await old.getByRole('button', { name: 'File 1 document into Trips' }).click();
+      await expect(old).toContainText('Filed 1 into Trips.');
+      expect(await readFile(join(root, 'Trips', 'note-4.txt'), 'utf8')).toBe(
+        stationFiles['note-4.txt']
+      );
+      await station.screenshot({ path: info.outputPath('history-earlier-review.png') });
+      await old.getByRole('button', { name: 'Put back', exact: true }).click();
+      await expect.poll(() => readdir(join(root, 'Trips'))).toEqual([]);
+      await verifyBytes();
+      return;
+    }
+    // A controlled processor card exercises disclosure and decline without a
+    // live account. Go tests separately run the actual one-use/version checks.
+    const pictureUrl = `/api/workspaces/${id}/file-janitor/batches/${result.result.batch_id}/picture`;
+    const picture = (await (await request.get(pictureUrl + '?layout=shelves')).json()).picture;
+    const estimate = picture.files.find((f: { name: string }) => f.name === 'estimate.txt');
+    const trips = picture.folders.find((f: { name: string }) => f.name === 'Trips');
+    let approvals = 0;
+    await page.route('**/picture/read-review', r =>
+      r.fulfill({
+        json: {
+          review: {
+            files: ['estimate.txt'],
+            folders: ['Trips'],
+            remaining: 4,
+            processor: { provider: 'Example cloud', model: 'Pinned model', off_device: true },
+            approval: 'test-card'
+          }
+        }
+      })
+    );
+    await page.route('**/picture/read-lines', r => {
+      approvals++;
+      return r.fulfill({
+        json: { result: { read: 1, remaining: 4, placements: { [estimate.id]: trips.key } } }
+      });
+    });
+    await ask.press('Enter');
+    await expect(readCard).toContainText('Example cloud · Pinned model');
+    await expect(readCard).toContainText('leave this device');
+    await expect(readCard).toContainText('4 loose files are outside this read');
+    await readCard.screenshot({ path: info.outputPath('first-lines-consent.png') });
+    await readCard.getByRole('button', { name: 'Not now' }).press('Enter');
+    expect(approvals).toBe(0);
+    await ask.press('Enter');
+    await readCard.getByRole('button', { name: 'Approve this read' }).press('Enter');
+    await expect(shelves).toContainText(
+      '1 read · 4 not read · 1 placed in the picture. Nothing moved.'
+    );
+    await verifyBytes();
+    expect(approvals).toBe(1);
+    await shelves.getByRole('button', { name: 'estimate.txt', exact: true }).press('Enter');
+    await shelves.getByRole('button', { name: 'Leave loose', exact: true }).press('Enter');
+    await expect(shelves).toContainText('8 ready to file · 5 stay loose');
+    await shelves.getByRole('textbox', { name: /Existing folder name/ }).fill('Trips');
+    await shelves.getByRole('button', { name: 'Add named shelf' }).press('Enter');
+    await expect(shelves).toContainText('Trips is in the picture.');
+    await shelves.getByRole('button', { name: 'estimate.txt', exact: true }).press('Enter');
+    await shelves.getByRole('button', { name: 'Move here: Trips', exact: true }).press('Enter');
+    await expect(shelves).toContainText('9 ready to file · 4 stay loose');
+    await shelves.getByRole('button', { name: 'Filing into my folders · Change' }).press('Enter');
+    await expect(method).toContainText('Changing the method replaces your unfiled picture.');
+    await method.getByRole('button', { name: 'Keep current picture' }).press('Enter');
+    await expect(shelves).toContainText('9 ready to file · 4 stay loose');
+    await verifyBytes();
+    await page.screenshot({ path: info.outputPath('own-shelves.png') });
+    const loose = shelves.getByRole('region', { name: 'Still loose in Documents' });
+    const tripShelf = shelves.getByRole('region', { name: 'Trips', exact: true });
+    const dragged = shelves.getByRole('button', { name: 'note-2.txt', exact: true });
+    await dragged.dragTo(tripShelf.getByRole('heading', { name: 'Trips' }));
+    await expect(tripShelf.getByRole('button', { name: 'note-2.txt' })).toBeVisible();
+    await dragged.dragTo(loose.getByRole('heading'));
+    await expect(loose.getByRole('button', { name: 'note-2.txt' })).toBeVisible();
+    // A coarse pointer has no drag dependency. At a narrow viewport and
+    // 200% scale both the loose chip and its separate Move here work by tap.
+    const viewport = page.viewportSize()!;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+    await page.setViewportSize({ width: 480, height: 800 });
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '2';
+    });
+    const tap = async (loc: typeof dragged) => {
+      await loc.evaluate(el =>
+        el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+      );
+      const b = await loc.boundingBox();
+      expect(b).toBeTruthy();
+      const point = { x: b!.x + b!.width / 2, y: b!.y + b!.height / 2 };
+      expect(
+        await loc.evaluate((el, p) => el.contains(document.elementFromPoint(p.x, p.y)), point)
+      ).toBe(true);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    await tap(dragged);
+    const moveHere = tripShelf.getByRole('button', { name: 'Move here: Trips' });
+    await expect(moveHere).toBeEnabled();
+    expect(await shelves.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await tap(moveHere);
+    await expect(tripShelf.getByRole('button', { name: 'note-2.txt' })).toBeVisible();
+    await verifyBytes();
+    await page.screenshot({ path: info.outputPath('shelf-touch-zoom.png') });
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '';
+    });
+    await page.setViewportSize(viewport);
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await cdp.detach();
+    // Redraw with the current pointer capabilities, then use the new shelf
+    // drop target. Checking its name still creates nothing on disk.
+    await dragged.press('Enter');
+    await dragged.press('Enter');
+    await shelves
+      .getByRole('button', { name: 'note-1.txt', exact: true })
+      .dragTo(shelves.getByRole('heading', { name: 'New folder', exact: true }));
+    await shelves.getByRole('textbox', { name: 'New folder name' }).fill('Orders');
+    await shelves.getByRole('button', { name: 'Use this folder name' }).press('Enter');
+    await expect(shelves).toContainText('That name is not available here');
+    await expect(
+      shelves.getByRole('button', { name: 'File 10 files', exact: true })
+    ).toBeDisabled();
+    await shelves.getByRole('textbox', { name: 'New folder name' }).fill('Invoices');
+    await shelves.getByRole('button', { name: 'Use this folder name' }).press('Enter');
+    await expect(shelves).toContainText('No folder has been created');
+    expect((await readdir(root)).sort()).toEqual(stationTree);
+    await verifyBytes();
+    await expect(shelves).toContainText('11 ready to file · 2 stay loose');
+    await shelves.getByRole('button', { name: 'File 11 files', exact: true }).press('Enter');
+    const undo = station.getByRole('button', { name: 'Undo all', exact: true });
+    await expect(undo).toBeVisible();
+    await expect(station.locator('#fileJanitorReceipt')).toContainText('Created “Invoices”');
+    await expect(station.locator('#fileJanitorReceipt')).toContainText('11 files filed.');
+    await expect(station.locator('#fileJanitorReceipt')).toContainText(
+      '2 files stay loose in Documents.'
+    );
+    expect(await readFile(join(root, 'Invoices', 'note-1.txt'), 'utf8')).toBe(
+      stationFiles['note-1.txt']
+    );
+    expect(await readFile(join(root, 'Trips', 'estimate.txt'), 'utf8')).toBe(
+      stationFiles['estimate.txt']
+    );
+    expect((await readdir(join(root, 'Orders'))).sort()).toEqual(
+      Object.keys(stationFiles)
+        .filter(n => n.startsWith('order-'))
+        .sort()
+    );
+    expect((await readdir(root)).sort()).toEqual(
+      [...stationFolders, 'Invoices', 'note-3.txt', 'note-4.txt'].sort()
+    );
+    const rulesUrl = `/api/workspaces/${id}/file-janitor/placements`;
+    const rules = async () => (await (await request.get(rulesUrl)).json()).placements.rows;
+    const remember = station.getByRole('group', { name: 'Start from these placements next time?' });
+    await expect(remember.getByRole('checkbox', { name: /Files named "order"/ })).toBeChecked();
+    await expect(remember.getByRole('checkbox', { checked: true })).toHaveCount(1);
+    expect(await rules()).toEqual([]);
+    await station.screenshot({ path: info.outputPath('shelf-receipt.png') });
+    await station.locator('#fileJanitorReceiptDone').press('Enter');
+    await expect.poll(rules).toHaveLength(1);
+    const additions = ['order-20.txt', 'order-21.txt', 'order-22.txt', 'postcard.txt'];
+    const oldTime = new Date(Date.now() - 3600_000);
+    for (const name of additions) {
+      await writeFile(join(root, name), `Added ${name}`, { mode: 0o600 });
+      await utimes(join(root, name), oldTime, oldTime);
+    }
+    await station.getByRole('button', { name: 'Scan now', exact: true }).click();
+    await station.getByRole('button', { name: 'Show the newer scan' }).press('Enter');
+    await expect(shelves.getByText('From last time', { exact: true })).toHaveCount(3);
+    await expect(
+      shelves
+        .getByRole('region', { name: 'Orders', exact: true })
+        .getByRole('button', { name: 'order-22.txt' })
+    ).toBeVisible();
+    for (const name of additions)
+      expect(await readFile(join(root, name), 'utf8')).toBe(`Added ${name}`);
+    await station.getByRole('button', { name: 'Back to map' }).click();
+    await expect(building.locator('.fj-station-stack')).toHaveText('4');
+    await expect(
+      page
+        .locator('.commander-balloon-line:visible')
+        .filter({ hasText: '3 already have a place from last time' })
+    ).toBeVisible();
+    await page.screenshot({ path: info.outputPath('remembered-pile.png') });
+    await building.press('Enter');
+    await station.getByRole('tab', { name: 'History', exact: true }).click();
+    await station.locator('#fileJanitorLastFilingUndo').press('Enter');
+    await expect(station.locator('#fileJanitorUndone')).toContainText(
+      'Undo did not remove “Invoices”'
+    );
+    await expect.poll(() => readdir(join(root, 'Invoices'))).toEqual([]);
+    await page.screenshot({ path: info.outputPath('undo-retained-folder.png') });
+    await verifyBytes();
+    expect((await readdir(root)).sort()).toEqual([...stationTree, ...additions, 'Invoices'].sort());
+    await rename(join(root, 'Orders'), join(root, 'Orders moved'));
+    await station.getByRole('tab', { name: 'Settings', exact: true }).click();
+    const saved = station.getByRole('region', { name: 'Saved placements' });
+    await expect(saved).toContainText('Broken: the original folder or placement is unavailable.');
+    await saved.getByRole('button', { name: /Remove Files named/ }).press('Enter');
+    await expect.poll(rules).toHaveLength(0);
+    await rename(join(root, 'Orders moved'), join(root, 'Orders'));
+    await station.locator('#fileJanitorChangeMethod').press('Enter');
+    await method.getByRole('button', { name: 'By kind', exact: true }).press('Enter');
+    await expect(station).toContainText('Filing by kind');
+    expect((await readdir(root)).sort()).toEqual([...stationTree, ...additions, 'Invoices'].sort());
+    return;
+  }
+  // A fresh counted look now offers a station, not the retired one-click
+  // report entry. Exercise its real, separately approved direct processor.
+  const liveOffer = savedReport.getByRole('button', { name: 'Build a Filing station' });
+  if (liveModel && (await liveOffer.count())) {
+    await liveOffer.click();
+    const station = page.getByRole('dialog', { name: 'Filing', exact: true });
+    await station.getByRole('button', { name: 'Build the station', exact: true }).click();
+    const choose = station.getByRole('button', { name: 'Into my folders', exact: true });
+    if (!(await choose.isVisible())) {
+      await expect
+        .poll(
+          async () =>
+            (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+        )
+        .toBe(true);
+      if (!(await station.isVisible())) await page.locator('#fileJanitorCardOpen').click();
+    }
+    await choose.press('Enter');
+    const shelves = station.locator('.fj-shelves');
+    const ask = shelves.getByRole('button', { name: /Read the first lines of the 3 loose files/ });
+    await ask.press('Enter');
+    const seal = shelves.getByRole('region', { name: 'Optional first-lines read' });
+    await expect(seal).toContainText('Anthropic (api.anthropic.com)');
+    await expect(seal).toContainText(liveModel);
+    await expect(seal).toContainText('leave this device');
+    await verifyBytes();
+    await seal.getByRole('button', { name: 'Not now' }).click();
+    await ask.press('Enter');
+    const done = page.waitForResponse(
+      r => new URL(r.url()).pathname.endsWith('/picture/read-lines'),
+      { timeout: 100_000 }
+    );
+    await seal.getByRole('button', { name: 'Approve this read' }).press('Enter');
+    const r = await done;
+    expect(r.status(), (await r.json()).code || 'approved station read').toBe(200);
+    await expect(shelves).toContainText('3 read · 0 not read');
+    await verifyBytes();
+    expect(await readdir(join(root, 'Project receipts'))).toEqual([]);
+    await station.screenshot({ path: info.outputPath('approved-station-read.png') });
     return;
   }
   await expect(suggestionButton).toBeVisible();

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { checkReviewLayout } from './helpers/documents-review-layout';
@@ -115,6 +116,18 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
     return;
   }
   await expect(report).toContainText('Documents stays a folder with its agent');
+  // A fresh hired Documents report recommends the station. Verify that
+  // entry, then restore the shape of a pre-station report to exercise its
+  // independent content grant and original saved-view journey below.
+  await expect(report.getByRole('button', { name: 'Build a Filing station' })).toBeVisible();
+  execFileSync('python3', [
+    'tests/helpers/seed-saved-documents-review.py',
+    sandbox!,
+    (await view()).workspace_id,
+    'pre-station-hire'
+  ]);
+  await page.reload();
+  await expect(report).toBeVisible();
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   await report.screenshot({ path: join(evidence, 'direct-return.png') });
   const offer = report.getByRole('button', { name: 'Read documents and suggest groups' });

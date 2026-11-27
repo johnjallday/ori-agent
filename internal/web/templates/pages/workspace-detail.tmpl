@@ -158,6 +158,7 @@
           </div>
           <div class="documents-look__actions">
             <button class="btn btn-primary" type="button" data-documents-action>Look around Documents</button>
+            <button class="btn btn-outline-primary" type="button" data-documents-build hidden>Build a Filing station</button>
             <button class="btn btn-outline-secondary" type="button" data-documents-dismiss>Not now</button>
           </div>
           <p class="form-text mb-0" role="status" tabindex="-1" data-documents-status></p>
@@ -9523,6 +9524,9 @@
        window.workspaceOverlayCoordinator lazily, when the user opens something,
        never at load time. -->
   <script type="module" src="/js/modules/workspace-overlay-coordinator.js"></script>
+  <script defer src="/js/modules/filing-station-build.js"></script>
+  <script defer src="/js/modules/filing-station-method.js"></script>
+  <script defer src="/js/modules/filing-station-shelves.js"></script>
   <script defer src="/js/modules/file-janitor-console.js"></script>
   <!-- The review drawn as a picture of the folder after filing. A module, like
        the protection helper: the console reads window.FileJanitorPicture when it

@@ -546,6 +546,37 @@ const asking = () =>
 const withFolder = (folderAgent, extra = {}) =>
   resolve({ workspaceId: 'w', tasks: { state: 'ready', items: [] }, folderAgent, ...extra });
 
+test('a fresh hired pile opens the reviewed station card in Map and Overview, never an install', () => {
+  const folder = folderView({
+    station_hire: true,
+    filing_pile: { count: 2, names: ['a.png', 'b.pdf'] },
+    state: 'set_up',
+    setup: { status: 'done', lines: [] }
+  });
+  for (const onMap of [true, false]) {
+    const offer = withFolder(folder, { onMap });
+    assert.equal(offer.kind, 'station_offer');
+    assert.deepEqual(offer.action, {
+      owner: 'console',
+      kind: 'station_build',
+      id: 'w',
+      key: 'station-build:w',
+      label: 'Review station build'
+    });
+    assert.notEqual(withFolder(folder, { onMap, filingDeferred: true }).kind, 'station_offer');
+    assert.notEqual(withFolder(folder, { onMap, console: consoleState() }).kind, 'station_offer');
+    assert.notEqual(
+      withFolder({ ...folder, workspaceID: 'different' }, { onMap }).kind,
+      'station_offer'
+    );
+    assert.equal(
+      withFolder(folder, { onMap, tasks: { state: 'ready', items: [task('failed', 'urgent')] } })
+        .kind,
+      'task'
+    );
+  }
+});
+
 test('the strip names the question, the plan and the other waiting moments in the shared words', () => {
   const setUp = {
     status: 'done',

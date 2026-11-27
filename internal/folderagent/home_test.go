@@ -46,7 +46,7 @@ func TestBuildPlan_ExistingHomeIsJoinedNotCreated(t *testing.T) {
 	}
 }
 
-func TestBuildPlan_DumpAddsFileJanitorInPlaceWithFileCurator(t *testing.T) {
+func TestBuildPlan_DumpRecommendsFilingWithoutInstalling(t *testing.T) {
 	rec := Record{FolderName: "Messy", WorkspaceName: "Messy", AgentName: "Messy Manager", Stage: foldermap.StageTools,
 		Facts:      foldermap.Facts{Dump: true, RootLooseFiles: 40, RootLooseKinds: 6},
 		Candidates: folderlook.RequiredCandidates(foldermap.Facts{Dump: true}, folderlook.Readiness{})}
@@ -55,11 +55,11 @@ func TestBuildPlan_DumpAddsFileJanitorInPlaceWithFileCurator(t *testing.T) {
 	for _, l := range plan.Lines {
 		names = append(names, l.Name)
 	}
-	want := []string{"Adds filing to Messy", "Messy Manager explains proposed filing", "Nothing in Messy is moved, copied or read"}
+	want := []string{"Messy Manager recommends a Filing station", "Nothing in Messy is moved, copied or read"}
 	if !plan.Runnable || plan.Unavailable != "" || !reflect.DeepEqual(names, want) {
 		t.Fatalf("plan runnable=%v unavailable=%q lines=%v", plan.Runnable, plan.Unavailable, names)
 	}
-	if plan.Lines[0].Kind != FolderPlanCapability {
+	if plan.Lines[0].Kind != FolderPlanFilingAdvice {
 		t.Fatalf("first line kind = %q", plan.Lines[0].Kind)
 	}
 }

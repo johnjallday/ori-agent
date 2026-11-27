@@ -200,7 +200,12 @@ type Service struct {
 	claimMu sync.Mutex
 	// prepareMu single-flights explicit setup confirmations. Setup is rare; a
 	// bounded service lock avoids a permanent per-workspace lock registry.
-	prepareMu sync.Mutex
+	buildActivity    buildActivity
+	prepareMu        sync.Mutex
+	stationLook      func(string, string) (StationLook, error)
+	stationInstaller StationInstaller
+	placementMemory  placementMemory
+	stationRead      stationReadHost
 }
 
 // NewService wires the Janitor service to its settings store and the workspace
@@ -693,18 +698,23 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 			return Status{}, err
 		}
 	}
-	if req.ExpectedRootIdentity != "" {
-		info, err := os.Stat(root) // #nosec G304 -- previously canonicalized reviewed root; identity rechecked before consequences
-		if err != nil || platformFileID(info) != req.ExpectedRootIdentity {
-			return Status{}, setupErr(CodeFolderChanged, "The reviewed folder changed. Choose it again.", RepairChooseFolder, nil)
-		}
+	info, err := os.Lstat(root) // #nosec G304 G703 -- canonical approved root; pin its identity at the grant, never on a picture read
+	if err != nil || !info.IsDir() {
+		return Status{}, setupErr(CodeFolderChanged, "The reviewed folder changed. Choose it again.", RepairChooseFolder, err)
 	}
-	if err := ensureFilingRoot(filepath.Join(root, filingRootName)); err != nil {
-		return Status{}, err
+	witness := platformFileID(info)
+	if req.ExpectedRootIdentity != "" && witness != req.ExpectedRootIdentity {
+		return Status{}, setupErr(CodeFolderChanged, "The reviewed folder changed. Choose it again.", RepairChooseFolder, nil)
 	}
 	var preparation *SetupPreparation
 	if operation != nil && operation.PreparationID != "" {
 		preparation = current.SetupPreparation
+	}
+	deferDestination := current.DeferredDestination || preparation != nil && (preparation.Station != nil || preparation.Terms.DeferDestination)
+	if !deferDestination {
+		if err := ensureFilingRoot(filepath.Join(root, filingRootName)); err != nil {
+			return Status{}, err
+		}
 	}
 	referenceID, err := s.ensureWorkspaceAccess(workspaceID, root, req.DirectoryReferenceID, preparation, req.relinkAnchor)
 	if err != nil {
@@ -725,7 +735,7 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 	if err != nil || resolvedReference != root {
 		return Status{}, setupErr(CodeFolderChanged, "The approved folder reference changed. Review access again.", RepairChooseFolder, err)
 	}
-	proof := &ApprovedReferenceSpelling{RootID: rootID, ReferenceID: referenceID, Path: ref.Path}
+	proof := &ApprovedReferenceSpelling{RootID: rootID, ReferenceID: referenceID, Path: ref.Path, Witness: shelfWitness(rootID, witness)}
 	completedAt := s.clock()
 	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 		if operation != nil {
@@ -745,12 +755,14 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 		settings.RootID = rootID
 		settings.RootPath = root
 		settings.FilingRootName = filingRootName
+		settings.DeferredDestination = deferDestination
 		settings.DirectoryReferenceID = referenceID
 		settings.ApprovedReference = proof
 		settings.DailyScanLocalTime = dailyTime
 		settings.Timezone = timezone
 		settings.LastAssistedAutomation = nil
 		if rootChanged {
+			settings.FilingMethod, settings.MethodRevision = "", ""
 			settings.AutomationApprovedAt = time.Time{}
 			settings.SetupDecision = nil
 		}
@@ -1208,7 +1220,10 @@ func (s *Service) checkDirectoryAccess(settings JanitorSettings) ComponentCheck 
 func (s *Service) checkDestination(settings JanitorSettings) ComponentCheck {
 	check := ComponentCheck{Component: ComponentDestination, Status: ComponentOK}
 	path := settings.FilingRootPath()
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
+	if settings.DeferredDestination && os.IsNotExist(err) {
+		return check // A station is ready before anyone files by kind.
+	}
 	switch {
 	case err == nil && info.IsDir():
 		return check

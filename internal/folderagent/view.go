@@ -42,6 +42,9 @@ type View struct {
 	ProgressLine string   `json:"progress_line,omitempty"`
 
 	ProjectHolders     *ProjectHoldersView    `json:"project_holders,omitempty"`
+	StationHire        bool                   `json:"station_hire,omitempty"` // this look uses the separate Build press, not the old Downloads install route
+	StationOffer       bool                   `json:"station_offer,omitempty"`
+	FilingPile         *LooseFilePile         `json:"filing_pile,omitempty"`
 	FilingReviewHint   string                 `json:"filing_review_hint,omitempty"`
 	OrganizationReview bool                   `json:"organization_review,omitempty"`
 	RootPolicy         folderlook.RootPolicy  `json:"root_policy,omitempty"`
@@ -57,6 +60,8 @@ type View struct {
 	Actions            []string               `json:"actions,omitempty"`
 	Plan               *PlanView              `json:"plan,omitempty"`
 	Setup              *Setup                 `json:"setup,omitempty"`
+	// FilingRecommendationDone describes a completed recommendation, not an install.
+	FilingRecommendationDone bool `json:"filing_recommendation_done,omitempty"`
 	// FilingPermissionRequired is live display state, never persisted or hashed.
 	FilingPermissionRequired bool          `json:"filing_permission_required,omitempty"`
 	Failure                  string        `json:"failure,omitempty"`
@@ -269,12 +274,20 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	v.ProjectHolders = projectHoldersView(rec)
 	v.RootPolicy = rec.RootPolicy
 	if strings.HasPrefix(rec.AssignedLink, GuidedDocumentsLinkPrefix) {
-		v.FilingReviewHint = s.looseDocumentHint(rec)
+		// During setup review access is deliberately inactive. That is not
+		// evidence of a broken binding. A partial walk is already known.
+		if rec.State != StateSettingUp {
+			v.FilingReviewHint = s.looseDocumentHint(rec)
+		} else if !completeStationMap(rec.Map) {
+			v.FilingReviewHint = "partial"
+		}
 		v.OrganizationReview = v.FilingReviewHint == "eligible" || v.FilingReviewHint == "history"
 	} else if rec.RootPolicy == folderlook.RootDocuments || completed(rec) {
 		_, err := s.organizationAccess(rec.OwnerUserID, rec)
 		v.OrganizationReview = err == nil
 	}
+	s.stationOffer(rec, &v)
+	v.StationHire = rec.AssignedLink == "" && rec.LooseDocuments != nil && rec.LooseDocuments.StationBinding != ""
 	v.PolicyNote = folderlook.PolicyLine(rec.RootPolicy)
 	v.ExploreFolder = rec.RootPolicy.IsCatchAll() && rec.RootPolicy != folderlook.RootDownloads
 	if rec.RootPolicy == folderlook.RootDocuments {
@@ -295,6 +308,7 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	}
 	plan := BuildPlan(*rec, selected)
 	if completed(rec) {
+		v.FilingRecommendationDone = filingAdviceOnly(rec.Setup.Lines)
 		// A completed card is a receipt, not a newly generated offer catalog.
 		// Retain the confirmed lines and omit alternatives it never ran.
 		plan.Lines = rec.Setup.Lines
@@ -882,18 +896,8 @@ func BuildPlan(rec Record, selected []string) Plan {
 				plan.HiresNote = note
 			}
 		case folderlook.KindFileCurator:
-			// File Janitor goes into this workspace in place (the folder is
-			// already its anchor); the hired agent explains proposed filing.
-			janitor, curator := "Adds filing to "+rec.WorkspaceName, rec.AgentName+" explains proposed filing"
-			plan.Lines = append(plan.Lines,
-				personalassistant.FolderPlanLine{
-					Kind: FolderPlanCapability, Name: janitor, Outcome: janitor,
-					Detail: "Watching and the daily scan stay off until you turn them on in its setup.",
-				},
-				personalassistant.FolderPlanLine{
-					Kind: personalassistant.FolderPlanAgents, Name: curator, Outcome: curator,
-					Detail: "You approve every move.",
-				})
+			advice := rec.AgentName + " recommends a Filing station"
+			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: FolderPlanFilingAdvice, Name: advice, Outcome: advice, Detail: "Hiring does not add Filing, grant access or scan the folder. Review Build a Filing station on the workspace Map."})
 		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
 			line := addOnLine(c, rec.WorkspaceName)
 			// A plugin the install block lists is not repeated in the outcome.
@@ -1187,7 +1191,8 @@ const FolderPlanAddOn = "add_on"
 
 // FolderPlanCapability is the plan line kind of a built-in capability
 // installed in place (File Janitor for a folder of loose files).
-const FolderPlanCapability = "capability"
+const FolderPlanCapability = "capability" // historical install receipts
+const FolderPlanFilingAdvice = "filing_recommendation"
 
 // addOnLine words one selected add-on: "Installs <plugin>", "Adds skill
 // <name>", "Adds <server>", each labelled "found by search" (PRD FR33).

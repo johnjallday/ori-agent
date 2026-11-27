@@ -1,6 +1,7 @@
 package filejanitor
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -26,6 +27,7 @@ type PreparationRequest struct {
 	Operation          AssistedAutomationOperation
 	ScanOperationID    string
 	BeforeScan         func() error
+	ScanContext        context.Context
 	// Ephemeral proof of a newly persisted dispatch, never reconstructed on replay.
 	FreshScanAttempt func() bool
 }
@@ -146,7 +148,7 @@ func (s *Service) PrepareMetadataReview(request PreparationRequest, automation P
 	result.ScanAttempted = true
 	result.Scan, err = s.ScanNowOperation(request.WorkspaceID, ScanSourceAssistantSetup, ScanOperationRequest{
 		OperationID: request.ScanOperationID, RootID: request.RootID, PrivacyMode: ContentModeMetadataOnly,
-		PreparationID:           request.Operation.PreparationID,
+		Context: request.ScanContext, PreparationID: request.Operation.PreparationID,
 		FreshPreparationAttempt: request.FreshScanAttempt != nil && request.FreshScanAttempt(),
 	})
 	if err != nil {

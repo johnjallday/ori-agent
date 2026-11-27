@@ -55,6 +55,7 @@ import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js'
 import { folderAgentWaiting, resolveWorkspaceNextAction } from './workspace-next-action.js';
 import { commanderWaitingForFiling } from './commander-speech.js';
 import { chatRefOf } from './folder-agent-chat.js';
+import { stationDeferred } from './filing-station-offer.js';
 import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
 import {
   parseWorkspaceUpdateIntent,
@@ -646,6 +647,7 @@ export class WorkspaceCommandView {
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('keydown', this.boundGlobalKeydown);
       document.addEventListener('ori:workspace-goal-state', this.boundGoalState);
+      document.addEventListener('ori:filing-offer-changed', this.boundGoalState);
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('popstate', this.boundPopState);
@@ -2508,7 +2510,10 @@ export class WorkspaceCommandView {
     if (this.viewMode === 'map' && commanderWaitingForFiling(view))
       return `filing-permission:${view.agent}`;
     const waiting = folderAgentWaiting(view, this.workspaceId());
-    return waiting ? [waiting.phase, waiting.text, waiting.action, waiting.status].join('|') : '';
+    const words = waiting
+      ? [waiting.phase, waiting.text, waiting.action, waiting.status].join('|')
+      : '';
+    return view?.stationOffer ? `${words}|station:${view.filingPile?.count ?? 'unscanned'}` : words;
   }
 
   // folderAgentWaitingFor is the waiting words when the named agent is the
@@ -2662,6 +2667,7 @@ export class WorkspaceCommandView {
         page.workspace?.shared_data?.entry_agent_name ||
         '',
       updates: this.updatesView(),
+      filingDeferred: stationDeferred(this.workspaceId()),
       folderAgent: this.folderAgentView()
     });
     view.narratedElsewhere = Array.isArray(page.tasks) && items.length !== page.tasks.length;
@@ -2974,6 +2980,7 @@ export class WorkspaceCommandView {
     } else if (action.owner === 'console') {
       const console = typeof window === 'undefined' ? null : window.FileJanitorConsole;
       if (action.kind === 'retry') return void console?.refresh?.();
+      if (action.kind === 'station_build') return console?.openStationBuild?.(action.id, trigger);
       if (action.kind === 'setup')
         return console?.focusSetup?.(trigger, { source: 'workspace-next-action' });
       console?.open?.({
@@ -9514,6 +9521,7 @@ export class WorkspaceCommandView {
           (state.tone ? ' is-' + escapeHtml(state.tone) : '') +
           '" data-cmd-hq-station="' +
           escapeHtml(station.key) +
+          (state.buildPart ? '" data-station-part="' + escapeHtml(state.buildPart) : '') +
           (visualMarkup ? '" data-station-visual="' + escapeHtml(visualVariant) : '') +
           '" style="--station-x:' +
           (pos.x * 100).toFixed(2) +
@@ -9527,6 +9535,11 @@ export class WorkspaceCommandView {
               visualMarkup +
               '</span>'
             : '<span class="ws-cmd-map-hq-station-icon">' + icon + '</span>') +
+          (review && state.pile
+            ? '<span class="fj-station-stack" aria-hidden="true">' +
+              escapeHtml(String(state.reviewCount)) +
+              '</span>'
+            : '') +
           '<span class="ws-cmd-map-hq-station-label">' +
           escapeHtml(station.label) +
           '</span>' +

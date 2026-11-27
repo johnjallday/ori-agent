@@ -20,6 +20,28 @@ Every move/Trash still requires the existing file-action review. Build chat has 
 different disclosure: its path-free folder metadata can reach the configured
 model. Do not describe that conversation as necessarily on-device.
 
+### Building on the workspace Map
+
+A verified workspace can offer Filing beside the manager without a file count.
+A complete current look can add the loose count and up to six sample names.
+Opening Build from a report or the Documents welcome card goes to the Map's
+read-only review, not a recursive look. Missing or partial evidence is not zero.
+Dismissing or restoring the offer cannot start work. **Build the station** reviews
+the existing folder, install and manager, metadata grant, first scan and optional
+monitoring. The building shows only stages proved by receipts. Reload observes
+those receipts; it does not replay setup. No file moves and no `Filed/` is made.
+
+A new assistant inbox placement uses **Hire and create workspace**. It binds
+the reviewed folder and team, not the station. **Set it up** on a new folder
+hire can record a recommendation but cannot install Filing. Accepted historical
+preparations keep the terms they actually showed. Buying the HQ workspace is
+also separate from authorizing the folder or choosing a filing method.
+
+Fresh stations offer **Into my folders** when usable shelves exist, otherwise
+**By kind**. The latter creates `Filed/` at the first approved filing for deferred
+setups. An older configured workspace stays By kind until the owner chooses
+Change. **Send** opens the separate connection card; it is not a connection grant.
+
 ## Owners and selected seam
 
 - `sessionhttp` owns exact draft/team validation and creation, reserved workspace

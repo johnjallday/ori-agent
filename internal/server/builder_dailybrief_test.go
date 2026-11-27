@@ -40,6 +40,11 @@ func (noReviewedTestReleases) Resolve(context.Context, reviewedintegration.Entry
 // which has no HTTP route (only first-open/manual are exposed to clients).
 func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 	t.Helper()
+	return newDailyBriefTestServerWithHome(t, "")
+}
+
+func newDailyBriefTestServerWithHome(t *testing.T, home string) (*ServerBuilder, http.Handler) {
+	t.Helper()
 	originalWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get working directory: %v", err)
@@ -49,12 +54,12 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 		t.Fatalf("failed to chdir to temp dir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(originalWD) })
-	// DefaultWorkspaceRoot() resolves to $HOME/Ori Workspaces regardless of
-	// CWD (it does not respect ORI_DATA_DIR either) — this test actually
-	// creates a workspace, so without this it would write into the real
-	// user's home directory. t.Setenv restores the original HOME after the
-	// test.
-	t.Setenv("HOME", tmpDir)
+	// The default sandbox puts staging and app data under HOME. Tests that
+	// need a real user folder outside protected app data pass a separate HOME.
+	if home == "" {
+		home = tmpDir
+	}
+	t.Setenv("HOME", home)
 	t.Setenv("ORI_DATA_DIR", tmpDir)
 
 	builder, err := NewServerBuilder()

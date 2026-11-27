@@ -205,6 +205,25 @@ type InstallRequest struct {
 	// Source records which flow performed the install (FR-5). Defaults to
 	// InstallSourceInPlace.
 	Source string
+
+	// Internal, exact installation claimed by a reviewed Filing preparation.
+	station *stationInstall
+}
+
+type stationInstall struct {
+	at       time.Time
+	manager  string
+	validate func(*workspace.Workspace) error
+}
+
+// InstallFilingStation binds the install and existing manager association to a
+// reviewed operation in the same workspace update. It never adds agent tools.
+func (s *Service) InstallFilingStation(id, manager string, at time.Time, validate func(*workspace.Workspace) error) error {
+	if at.IsZero() || manager == "" || validate == nil {
+		return errors.New("missing station review")
+	}
+	_, err := s.Install(InstallRequest{WorkspaceID: id, CapabilityID: workspace.CapabilityFileJanitor, Source: workspace.InstallSourceInPlace, station: &stationInstall{at, manager, validate}})
+	return err
 }
 
 // InstallResult describes the outcome of an install.
@@ -290,7 +309,7 @@ func (s *Service) Install(req InstallRequest) (result InstallResult, resultErr e
 	// Idempotent fast path. Also checked inside the Update below, under the
 	// per-workspace lock, which is what actually makes concurrent installs safe;
 	// this only avoids a pointless write.
-	if existing, ok := ws.GetInstalledCapability(def.ID); ok {
+	if existing, ok := ws.GetInstalledCapability(def.ID); ok && req.station == nil {
 		if def.Owner != nil {
 			if s.plugins == nil {
 				return InstallResult{}, &Error{
@@ -333,7 +352,20 @@ func (s *Service) Install(req InstallRequest) (result InstallResult, resultErr e
 		if err := enforceOrdinaryCapabilityWorkspace(w, def); err != nil {
 			return err
 		}
+		if st := req.station; st != nil {
+			if err := st.validate(w); err != nil {
+				return err
+			}
+			if w.CapabilityWasRemoved(def.ID) {
+				return errors.New("the Filing capability was removed")
+			}
+			record.InstalledAt = st.at
+			record.OwnedResources = []workspace.CapabilityResource{{Kind: workspace.ResourceCompanionAgent, ID: st.manager, Shared: true}}
+		}
 		if existing, ok := w.GetInstalledCapability(def.ID); ok {
+			if req.station != nil && !existing.InstalledAt.Equal(req.station.at) {
+				return errors.New("the Filing installation changed")
+			}
 			alreadyInstalled = true
 			record = existing
 			return nil

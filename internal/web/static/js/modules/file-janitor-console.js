@@ -33,6 +33,32 @@
   let busy = false;
   let lastStatus = null;
   let setupReview = null;
+  let stationBuildWorkspace = '';
+  let buildProgress = null;
+  const buildObserver = window.FilingStationBuild?.observer({
+    reduced: () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+    async read(id) {
+      const r = await fetch(apiBase(id) + '/setup-review?station=progress', { cache: 'no-store' });
+      if (!r.ok) throw Error();
+      const b = (await r.json()).build;
+      if (id !== wsId() || disposed) throw Error();
+      return { ...b, id };
+    },
+    paint(b) {
+      const previous = buildProgress;
+      buildProgress = b;
+      notifySubscribers();
+      document.dispatchEvent(new CustomEvent('ori:filing-build-progress'));
+      if (consoleOpen) {
+        const line = document.getElementById('fileJanitorBuildProgress');
+        if (line && b.running && previous?.running && b.operation_id === previous.operation_id)
+          line.textContent = b.line;
+        else if (preparation || previous?.running || b.running) renderConsole();
+      }
+      if (!preparation && previous?.running && !b.running) void refresh();
+    }
+  });
+  const stationBuildOpen = () => Boolean(stationBuildWorkspace && stationBuildWorkspace === wsId());
   let setupSelection = null;
   let setupReviewRequest = 0;
   let setupDraft = null;
@@ -285,6 +311,8 @@
   // Page teardown invalidates asynchronous callbacks, not operations already sent.
   function dispose() {
     disposed = true;
+    buildObserver?.reset();
+    buildProgress = null;
     preparation = null;
     close({ keepUrl: true });
     invalidateFolderState();
@@ -2950,6 +2978,114 @@
   // the picture read says. A tick or untick is one saved edit through the same
   // lifecycle as every other choice, and the picture is redrawn from the server's
   // next read, never from this module's own arithmetic.
+  let shelfVisit = null,
+    methodVisit = null;
+  function filingMethod() {
+    const s = lastStatus?.settings;
+    return s?.filing_method || (s?.deferred_destination ? '' : 'by_kind');
+  }
+  function changeMethod() {
+    if (!window.FilingStationMethod || busy || pressing || shelfVisit?.surface?.pending()) return;
+    const scope = requestScope();
+    const root = lastStatus?.settings?.root_id;
+    if (!root) return;
+    const was = filingMethod();
+    const visit = { scope, root };
+    methodVisit = visit;
+    const current = () =>
+      methodVisit === visit &&
+      consoleOpen &&
+      scopeCurrent(scope) &&
+      lastStatus?.settings?.root_id === root;
+    visit.surface = window.FilingStationMethod.create({
+      doc: document,
+      base: apiBase(scope.id),
+      current,
+      hasPicture: !!shelfVisit,
+      cancel: was
+        ? () => {
+            if (current()) {
+              methodVisit = null;
+              renderBatch();
+              document.getElementById('fileJanitorChangeMethod')?.focus();
+            }
+          }
+        : null,
+      send: () => {
+        if (current()) {
+          methodVisit = null;
+          openConnectFromReview();
+        }
+      },
+      saved(method) {
+        if (!current()) return;
+        methodVisit = null;
+        if (method !== was) {
+          shelfVisit = null;
+          discardProtectionApproval();
+          resetPicture();
+          // The method revision is part of the displayed File plan, even if
+          // the batch and the selected candidate IDs haven't changed.
+          resetPlan();
+        }
+        lastStatus.settings.filing_method = method;
+        renderBatch();
+        void refresh();
+      }
+    });
+    reviewView = 'groups';
+    if (consoleTab !== 'review') selectTab('review');
+    renderBatch();
+    void visit.surface.load();
+  }
+  function methodControl() {
+    const m = filingMethod();
+    const row = el('div', 'fj-shelf-tools');
+    row.appendChild(
+      el(
+        'span',
+        'fj-label',
+        m === 'own_folders'
+          ? 'Filing into my folders'
+          : m === 'by_kind'
+            ? 'Filing by kind'
+            : 'How this folder is filed'
+      )
+    );
+    const b = button(m ? 'Change' : 'Choose filing method', 'fj-link', changeMethod);
+    b.id = 'fileJanitorChangeMethod';
+    row.appendChild(b);
+    return row;
+  }
+  function openShelfPicture() {
+    if (!lastBatch || !window.FilingStationShelves || shelfVisit || busy) return;
+    const scope = requestScope(),
+      batch = lastBatch.id;
+    const visit = { batch, scope };
+    const current = () => shelfVisit === visit && scopeCurrent(scope) && lastBatch?.id === batch;
+    shelfVisit = visit;
+    lastResults = null;
+    visit.surface = window.FilingStationShelves.create({
+      doc: document,
+      batch,
+      base: apiBase(scope.id) + '/batches/' + encodeURIComponent(batch),
+      current,
+      key: newClientKey,
+      back() {
+        if (current()) changeMethod();
+      },
+      async receipt(result) {
+        if (!current()) return;
+        await showReceipt(scope, result);
+        if (!current()) return;
+        shelfVisit = null;
+        await loadBatch();
+        if (!scopeCurrent(scope)) return;
+        await loadHistory();
+      }
+    });
+    void visit.surface.load();
+  }
   function renderPictureView() {
     const section = el('section', 'fj-picture-host');
     const drawing = window.FileJanitorPicture;
@@ -3228,7 +3364,14 @@
   function renderBatch() {
     const container = document.getElementById('fileJanitorBatch');
     if (!container) return;
-    const focusedReviewControlID = String(document.activeElement?.id || '');
+    const focusedReviewControl = document.activeElement;
+    const focusedReviewControlID = String(focusedReviewControl?.id || '');
+    const restoreSurfaceFocus = surface => {
+      // The chooser and shelf controls are retained nodes. A batch refresh
+      // temporarily detaches them; keep a keyboard user's exact control.
+      if (focusedReviewControl && surface?.contains?.(focusedReviewControl))
+        focusedReviewControl.focus({ preventScroll: true });
+    };
     const fileFocus = captureFileFocus();
     const scroller = document.getElementById('fileJanitorConsoleBody');
     const scrollTop = scroller?.scrollTop;
@@ -3272,6 +3415,29 @@
     const otherScan = otherScanLine();
     if (otherScan) container.appendChild(otherScan);
 
+    if (
+      consoleOpen &&
+      window.FilingStationMethod &&
+      lastStatus?.settings?.root_id &&
+      reviewView === 'groups'
+    ) {
+      if (
+        methodVisit &&
+        (!scopeCurrent(methodVisit.scope) || methodVisit.root !== lastStatus.settings.root_id)
+      )
+        methodVisit = null;
+      if (!methodVisit && !filingMethod() && !lastResults && !busy && !pressing) {
+        changeMethod();
+        return;
+      }
+      if (methodVisit) {
+        container.appendChild(methodVisit.surface.host);
+        restoreSurfaceFocus(methodVisit.surface.host);
+        if (headerAllFiles) headerAllFiles.hidden = true;
+        return;
+      }
+      if (!lastResults && filingMethod() !== 'own_folders') container.appendChild(methodControl());
+    }
     if (!lastBatch) {
       if (batchLoadState === 'loading' || batchLoadState === 'error') return;
       const empty = el('div', 'fj-empty');
@@ -3316,6 +3482,17 @@
     if (reviewView === 'groups') {
       // The picture owns the decision summary. All files stays reachable from
       // the header and owns the progress, picker and filters.
+      if (shelfVisit && (!scopeCurrent(shelfVisit.scope) || shelfVisit.batch !== lastBatch.id))
+        shelfVisit = null;
+      if (consoleOpen && filingMethod() === 'own_folders' && window.FilingStationShelves) {
+        if (lastResults) return;
+        if (!shelfVisit) openShelfPicture();
+        if (shelfVisit?.surface) {
+          container.appendChild(shelfVisit.surface.host);
+          restoreSurfaceFocus(shelfVisit.surface.host);
+        }
+        return;
+      }
       container.appendChild(renderPictureView());
       if (protection) container.appendChild(protection);
       appendReviewFooter(container, focusedReviewControlID);
@@ -3431,7 +3608,7 @@
     // whatever they were on: a folder tick, an "and N more" control, the Trash tick
     // or the main button as much as a table control.
     if (
-      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|ReviewAgain|Retry|Inspect)-|Approve$|TrashAck$|ShowEarlier$|Picture$|Jump(?:Filed|Loose|Trash)$|(?:Filed|Loose|Trash)Title$)/.test(
+      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|ReviewAgain|Retry|Inspect|KeepLeaving|SendLeaving)-|Approve$|TrashAck$|ShowEarlier$|Picture$|Jump(?:Filed|Loose|Trash)$|(?:Filed|Loose|Trash)Title$)/.test(
         focusedReviewControlID
       )
     ) {
@@ -3628,6 +3805,15 @@
     const title = el('h3', 'fj-settings-title', 'Settings');
     title.id = 'fileJanitorSettingsTitle';
     panel.appendChild(title);
+    if (window.FilingStationMethod && consoleOpen && settings.root_id)
+      panel.appendChild(methodControl());
+    if (consoleOpen && settings.filing_method && window.FilingStationShelves?.placementSettings)
+      panel.appendChild(
+        window.FilingStationShelves.placementSettings(document, apiBase(wsId()), () => {
+          shelfVisit = null;
+          void loadBatch();
+        })
+      );
 
     // Daily catch-up time.
     const timeRow = el('div', 'fj-setting');
@@ -4482,6 +4668,7 @@
   function renderHistory() {
     const host = document.getElementById('fileJanitorHistoryHost');
     if (!host) return;
+    const saved = host.querySelector?.('[data-saved-document-reviews]');
     clear(host);
     if (!historyLoaded) return;
 
@@ -4499,6 +4686,17 @@
       onUndoAll: summary => void undoAll(summary.filing_id)
     });
     if (lastLine) panel.appendChild(lastLine);
+    // Use the original review's File and Undo controls, not a second plan.
+    // The component reads only saved reviews; an empty History is not a read offer.
+    const id = wsId();
+    if (id && window.FolderAgentCard?.savedReviews) {
+      const reviews =
+        saved?.dataset.savedDocumentReviews === id
+          ? saved
+          : window.FolderAgentCard.savedReviews(document, id);
+      reviews.dataset.savedDocumentReviews = id;
+      panel.appendChild(reviews);
+    }
 
     const form = el('form', 'fj-filters');
     form.setAttribute('role', 'search');
@@ -4806,7 +5004,14 @@
     if (!drawing || !view) return;
 
     const receiptScope = requestScope();
+    const offer = view.model?.placementOffer;
+    if (offer && !view.chosen)
+      view.chosen = new Set(offer.rows.filter(r => r.count >= 2).map(r => r.id));
     const ctx = {
+      chosen: view.chosen,
+      savingPlacements: view.savingPlacements,
+      placementMessage: view.placementMessage,
+      onChoosePlacements: (id, on) => (on ? view.chosen.add(id) : view.chosen.delete(id)),
       onRemember: example =>
         void editFolderExample(example, 'remember', receiptScope, view.filingId),
       folderName: compactFolderName(lastStatus?.settings?.root_path),
@@ -4814,7 +5019,7 @@
       busy: receiptBusy,
       onUndoAll: summary => void undoAll(summary.filingId || summary.filing_id),
       onScanAgain: () => void scanAgainAfterUndo(view.filingId),
-      onDone: () => closeResults()
+      onDone: () => (offer && view.chosen.size ? void rememberAndClose(view) : closeResults())
     };
     // Focus moves to the panel below, so the user is taken to the outcome rather
     // than told about it from elsewhere. The panel is a labelled group, not a live
@@ -4862,10 +5067,44 @@
   }
 
   // Done closes the account and puts focus back on the picture.
+  async function rememberAndClose(view) {
+    if (lastResults !== view || receiptBusy) return;
+    const scope = requestScope();
+    receiptBusy = true;
+    view.savingPlacements = true;
+    renderResults(view);
+    try {
+      const r = await fetch(
+        apiBase(scope.id) + '/filings/' + encodeURIComponent(view.filingId) + '/placements',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            revision: view.model.placementOffer.revision,
+            rows: [...view.chosen]
+          })
+        }
+      );
+      if (!r.ok) throw Error();
+      if (scopeCurrent(scope) && lastResults === view) closeResults();
+    } catch {
+      if (scopeCurrent(scope) && lastResults === view)
+        view.placementMessage =
+          'Could not confirm the saved placements. Check Settings. Uncheck the patterns to leave without saving.';
+    } finally {
+      if (scopeCurrent(scope)) {
+        receiptBusy = false;
+        view.savingPlacements = false;
+        if (lastResults === view) renderResults(view);
+      }
+    }
+  }
+
   function closeResults() {
     lastResults = null;
     const host = document.getElementById('fileJanitorResultsHost');
     if (host) clear(host);
+    if (filingMethod() === 'own_folders') renderBatch();
     // The button that was pressed is gone. Focus goes to the picture; when the
     // review has nothing left to draw, to the Scan now button, then to the tab, so a
     // keyboard user is never dropped at the top of the page.
@@ -5394,20 +5633,52 @@
       }
       return;
     }
-    if (!status) {
-      host.appendChild(el('p', 'fj-sub', 'Loading Filing…'));
-      return;
-    }
-    if (preparation && consoleTab === 'review') {
-      const progress = el('p', 'fj-sub', 'Preparing your preview…');
+    const build = buildProgress?.id === wsId() ? buildProgress : null;
+    if ((preparation || build?.running) && consoleTab === 'review') {
+      const progress = el(
+        'p',
+        'fj-sub',
+        (!preparation || preparation.station) && build?.operation_id
+          ? build.line
+          : 'Preparing your preview…'
+      );
+      progress.id = 'fileJanitorBuildProgress';
       progress.setAttribute('role', 'status');
       host.appendChild(progress);
+      if (build?.operation_id && build.running)
+        host.appendChild(
+          button('Stop preparation', 'fj-btn fj-btn-secondary', async e => {
+            e.currentTarget.disabled = true;
+            try {
+              await requestStopBuild(build.operation_id);
+              await refresh();
+            } catch {
+              showError('Could not confirm the stop. Check setup again.');
+            }
+          })
+        );
+      return;
+    }
+    if (!status && !stationBuildOpen()) {
+      host.appendChild(el('p', 'fj-sub', 'Loading Filing…'));
       return;
     }
     if (
       ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state) ||
       !isConfigured(status)
     ) {
+      if (stationBuildOpen() && !setupReview?.build_station && !setupReview?.operation_id) {
+        host.appendChild(
+          el(
+            'p',
+            'fj-sub',
+            statusLoadState === 'loading'
+              ? 'Checking the workspace folder and its manager…'
+              : 'This station offer is no longer current. Return to the map and check the folder.'
+          )
+        );
+        return;
+      }
       if (renderLinkedSetupReview(host)) {
         host.appendChild(errorRegion());
         return;
@@ -5792,7 +6063,14 @@
     // The check is against a status we have actually read: on a cold load
     // lastStatus is still null, and refusing then would make the first press
     // of a station do nothing (FR-93).
-    if (lastStatus && !lastStatus.applies && !downloadsReviewRequested()) return false;
+    if (
+      lastStatus &&
+      !lastStatus.applies &&
+      !downloadsReviewRequested() &&
+      !stationBuildOpen() &&
+      !(buildProgress?.id === id && buildProgress?.running)
+    )
+      return false;
     const host = consoleHost();
     if (!host) return false;
 
@@ -5887,8 +6165,15 @@
   function close(options = {}) {
     if (!consoleOpen) return false;
     discardProtectionApproval();
+    shelfVisit = null;
+    methodVisit = null;
     lastResults = null;
     consoleOpen = false;
+    if (stationBuildOpen()) {
+      stationBuildWorkspace = '';
+      setupReview = null;
+      setupReviewRequest++;
+    }
     consoleVisit++;
     settingsOpen = false;
     // Read connections again on the next visit: the other workspace may have
@@ -6070,7 +6355,12 @@
     renderConsoleBody(body, status);
 
     paintError();
-    const liveFocus = focusId && document.getElementById(focusId);
+    const retained =
+      ancestor === host &&
+      (methodVisit?.surface?.host.contains?.(focused) ||
+        shelfVisit?.surface?.host.contains?.(focused));
+    const liveFocus =
+      retained && host.contains?.(focused) ? focused : focusId && document.getElementById(focusId);
     if (isVisibleFocusTarget(liveFocus)) liveFocus.focus();
     else focusRequestedItem() || focusConsole();
   }
@@ -6168,7 +6458,7 @@
       actions.appendChild(scan);
       actions.appendChild(pauseControl(settings));
     }
-    const backToMap = workspaceViewMode() === 'map' && currentPreview()?.batchId;
+    const backToMap = workspaceViewMode() === 'map';
     const closeButton = button(backToMap ? 'Back to map' : 'Close', 'fj-btn fj-btn-secondary', () =>
       close()
     );
@@ -6250,7 +6540,10 @@
   function selectTab(tab) {
     const next = validTab(tab);
     if (!next) return;
-    if (consoleTab !== next) consoleVisit++;
+    if (consoleTab !== next) {
+      consoleVisit++;
+      if (next !== 'review') methodVisit = null;
+    }
     // Coming back to Review reads what arrived again: a send may have landed, or
     // been undone from the other workspace, meanwhile.
     if (next === 'review' && consoleTab !== next) arrivalsLoadState = 'idle';
@@ -6277,6 +6570,8 @@
     if (typeof window === 'undefined' || !window.history || !window.location) return;
     const url = new URL(window.location.href);
     const before = url.search;
+    if (stationBuildOpen() && consoleOpen) url.searchParams.set('station', 'build');
+    else url.searchParams.delete('station');
     if (consoleOpen) {
       url.searchParams.set('panel', CONSOLE_PANEL_PARAM);
       if (
@@ -6320,6 +6615,7 @@
       if (consoleOpen) close({ keepUrl: true });
       return;
     }
+    stationBuildWorkspace = params.get('station') === 'build' ? wsId() : '';
     const tab = validTab(params.get('tab'));
     const item = String(params.get('item') || '');
     const requestedBatch = params.get('batch_id') || '';
@@ -6449,7 +6745,7 @@
     const sequence = ++setupReviewRequest;
     try {
       const response = await fetch(
-        apiBase(id) + '/setup-review',
+        apiBase(id) + '/setup-review' + (stationBuildOpen() ? '?station=build' : ''),
         choice
           ? {
               method: 'POST',
@@ -6608,6 +6904,14 @@
     window.history.replaceState({ fileJanitor: consoleOpen }, '', url.toString());
   }
 
+  async function requestStopBuild(operation_id) {
+    const r = await fetch(apiBase(wsId()) + '/stop-preparation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation_id })
+    });
+    if (!r.ok) throw Error();
+  }
   function renderLinkedSetupReview(host, ctx) {
     const review = setupReview;
     if (
@@ -6640,9 +6944,11 @@
           ? 'Preparation changed'
           : review.operation_id
             ? 'Finish preparing your review'
-            : selectedFolder
-              ? 'Allow filing in ' + safeName(selectedFolder.name)
-              : 'Choose which folder to file'
+            : review.build_station && selectedFolder
+              ? 'Build a Filing station for ' + safeName(selectedFolder.name)
+              : selectedFolder
+                ? 'Allow filing in ' + safeName(selectedFolder.name)
+                : 'Choose which folder to file'
       )
     );
     const candidate = selectedFolder || (review.candidates || [])[0];
@@ -6690,7 +6996,7 @@
       if (isVisibleFocusTarget(target)) target.focus();
       else host.querySelector('button')?.focus();
     };
-    if (!setupSelection && (review.candidates || []).length > 1) {
+    if (!review.build_station && !setupSelection && (review.candidates || []).length > 1) {
       const label = el('label', 'fj-label', 'Attached folder');
       const select = el('select', 'fj-input');
       select.id = 'fileJanitorReviewFolder';
@@ -6726,9 +7032,15 @@
     const terms = review.terms || {};
     const disclosure = el('ul', 'fj-disclosure');
     [
-      'Create or reuse Filed/ inside this folder. This changes the folder on disk.',
+      review.build_station
+        ? 'Filing is added to this workspace. Your manager explains suggestions. No folder is created.'
+        : terms.defer_destination
+          ? 'No folder is created now. Filed/ is used only when you choose By kind and press File.'
+          : 'Create or reuse Filed/ inside this folder. This changes the folder on disk.',
       'Scan top-level file names, types, sizes, and dates once. No file contents are opened.',
-      'Nothing is moved or sent to Trash in this preview. Both require separate approval.'
+      review.build_station
+        ? 'Nothing moves until you press File. You can undo a filing. Reading inside a file always needs separate approval.'
+        : 'Nothing is moved or sent to Trash in this preview. Both require separate approval.'
     ].forEach(line => disclosure.appendChild(el('li', 'fj-disclosure-item', line)));
     card.appendChild(disclosure);
     const monitorLabel = el('label', 'fj-setup-monitor');
@@ -6745,7 +7057,15 @@
       void repaint(choice, monitor);
     });
     monitorLabel.appendChild(monitor);
-    monitorLabel.appendChild(el('span', '', 'Also watch new arrivals and run a daily scan'));
+    monitorLabel.appendChild(
+      el(
+        'span',
+        '',
+        review.build_station
+          ? 'Also watch for new files and look once a day'
+          : 'Also watch new arrivals and run a daily scan'
+      )
+    );
     card.appendChild(monitorLabel);
     card.appendChild(
       el(
@@ -6777,7 +7097,9 @@
     const confirm = button(
       review.operation_id
         ? 'Retry preparation'
-        : 'Allow filing in ' + safeName(candidate?.name, 'folder'),
+        : review.build_station
+          ? 'Build the station'
+          : 'Allow filing in ' + safeName(candidate?.name, 'folder'),
       'fj-btn fj-btn-primary',
       async () => {
         if (
@@ -6792,6 +7114,7 @@
         const mode = workspaceViewMode();
         const intent = {
           id: wsId(),
+          station: review.build_station === true,
           path: window.location?.pathname,
           ownsOverlay: () =>
             workspaceViewMode() === mode &&
@@ -6802,6 +7125,10 @@
         const token = !review.operation_id ? setupSelection : '';
         setupSelection = null;
         preparation = intent;
+        if (review.build_station && mode === 'map' && !ctx) close();
+        void buildObserver?.watch(intent.id, !review.operation_id, () =>
+          preparationCurrent(intent)
+        );
         confirm.disabled = true;
         monitor.disabled = true;
         showError('');
@@ -6809,16 +7136,19 @@
         else if (consoleOpen) renderConsole();
         notifySubscribers();
         try {
-          const response = await fetch(apiBase(intent.id) + '/prepare-review', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              reference_id: review.reference_id,
-              ...(token ? { selection_token: token } : {}),
-              monitoring: Boolean(review.monitoring),
-              review_revision: review.review_revision
-            })
-          });
+          const response = await fetch(
+            apiBase(intent.id) + '/prepare-review' + (review.build_station ? '?station=build' : ''),
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                reference_id: review.reference_id,
+                ...(token ? { selection_token: token } : {}),
+                monitoring: Boolean(review.monitoring),
+                review_revision: review.review_revision
+              })
+            }
+          );
           const body = await response.json().catch(() => ({}));
           if (!response.ok)
             throw new Error(
@@ -6833,6 +7163,10 @@
             throw new Error(
               'The initial result could not be confirmed. Reload this workspace to observe the accepted preparation; do not create again.'
             );
+          }
+          if (review.build_station && preparationCurrent(intent)) {
+            stationBuildWorkspace = '';
+            await window.WorkspaceCapabilities?.reloadAfterStationBuild?.();
           }
           if (preparationCurrent(intent))
             await landOnPreparedReview(body.preparation.result, intent, ctx);
@@ -6891,7 +7225,7 @@
       }
     });
     change.disabled = busy || Boolean(setupDraft) || Boolean(review.operation_id);
-    actions.appendChild(change);
+    if (!review.build_station) actions.appendChild(change);
     if (setupSelection) actions.appendChild(deferExpansionFolder(ctx));
     if (review.operation_id) {
       const stop = button('Stop here — keep saved setup', 'fj-btn fj-btn-secondary', async () => {
@@ -7445,11 +7779,22 @@
       const status = body.status;
       if (!current()) return;
       if (typeof status?.applies !== 'boolean') throw new Error('invalid status');
+      if (!preparation && !buildProgress?.revealing && !buildProgress?.running) {
+        if (
+          status.settings?.setup_preparation &&
+          !status.settings.setup_preparation.scan_receipt_digest
+        )
+          void buildObserver?.watch(id, false, () => false);
+        else if (buildProgress?.repair) {
+          buildObserver?.reset();
+          buildProgress = null;
+        }
+      }
       if (downloads && !['install', 'access', 'ready'].includes(status.downloads_review))
         throw new Error('invalid review status');
       if (
         !downloads &&
-        status?.applies &&
+        (stationBuildOpen() || status?.applies) &&
         (!isConfigured(status) || status.settings?.setup_preparation)
       ) {
         await loadSetupReview();
@@ -7696,11 +8041,36 @@
   }
 
   function stationState() {
+    const b = buildProgress?.id === wsId() ? buildProgress : null;
+    if (
+      b &&
+      b.operation_id &&
+      b.part !== 'open' &&
+      b.part !== 'plot' &&
+      (preparation || b.running || b.repair || b.revealing)
+    )
+      return {
+        applies: true,
+        buildPart: b.part,
+        value: b.line,
+        description: b.repair ? 'Open Filing to repair this step.' : 'Nothing moves.',
+        tone: b.repair ? 'attention' : 'idle'
+      };
     if (!lastStatus || !lastStatus.applies) return { applies: false };
     const readiness = lastStatus.readiness || {};
     const settings = lastStatus.settings || {};
     const privacy = lastStatus.privacy || {};
 
+    if (settings.stopped_station_part)
+      return {
+        applies: true,
+        value: 'Preparation stopped',
+        buildPart: settings.stopped_station_part,
+        description: isConfigured(lastStatus)
+          ? 'Open Filing to scan again.'
+          : 'Open Filing to continue setup.',
+        tone: 'attention'
+      };
     if (readiness.state === 'needs_attention') {
       return {
         applies: true,
@@ -7721,7 +8091,11 @@
     if (preview) {
       return {
         applies: true,
-        value: preview.count ? reviewCountLabel(preview.count) : 'No eligible files',
+        value: preview.count
+          ? reviewCountLabel(preview.count)
+          : settings.deferred_destination
+            ? 'Nothing to file yet'
+            : 'No eligible files',
         reviewCount: preview.count,
         reviewBatchId: preview.batchId,
         actionTab: 'review',
@@ -7752,6 +8126,7 @@
       return {
         applies: true,
         value: 'Setup needed',
+        buildPart: 'foundation',
         description: reviewedFolderName()
           ? 'Waiting for folder access'
           : 'waiting for you to choose a folder to file',
@@ -7776,11 +8151,24 @@
         reviewCount: pending,
         reviewBatchId: lastBatch?.id,
         actionTab: 'review',
+        pile: settings.filing_method === 'own_folders',
+        rememberedPile:
+          lastBatch?.station_pile?.batch === lastBatch?.id &&
+          lastBatch?.station_pile?.waiting === pending
+            ? lastBatch.station_pile
+            : null,
         description: 'Nothing moves until you file.',
         tone: 'attention'
       };
     }
     const folder = settings.root_path ? safeName(settings.root_path) : '';
+    if (settings.deferred_destination && batchLoadState === 'loaded' && !pending)
+      return {
+        applies: true,
+        value: 'Nothing to file yet',
+        description: 'Open Filing to look again.',
+        tone: 'idle'
+      };
     if (manualScansOnly(settings)) {
       return { applies: true, value: 'Ready', description: 'Manual scans only', tone: 'idle' };
     }
@@ -8176,6 +8564,21 @@
     subscribe,
     open,
     openLatestReview,
+    buildProgress: () => (buildProgress?.id === wsId() ? buildProgress : null),
+    openStationBuild(id, trigger) {
+      if (!id || id !== wsId() || disposed) return false;
+      // Take report and welcome entries to the same plot as the manager's
+      // Map offer. Navigation opens the review only; it never replays Build.
+      if (workspaceViewMode() !== 'map' || trigger?.closest?.('.folder-agent-card--report')) {
+        window.location.assign(
+          window.location.pathname + '?mode=map&panel=file-janitor&station=build'
+        );
+        return true;
+      }
+      setupReview = null;
+      stationBuildWorkspace = id;
+      return open({ source: 'station-build', tab: 'review', trigger });
+    },
     close,
     focusSetup,
     isOpen: () => consoleOpen,
@@ -8257,6 +8660,9 @@
     // workspace — so a test that did not reset it would inherit the previous
     // test's tab and assert against a surface it never opened.
     _resetForTest: () => {
+      stationBuildWorkspace = '';
+      buildObserver?.reset();
+      buildProgress = null;
       consoleOpen = false;
       consoleTab = 'review';
       consoleItem = '';
@@ -8373,8 +8779,13 @@
         const catalog = window.WorkspaceCapabilities;
         const item =
           catalog && typeof catalog.find === 'function' ? catalog.find('file-janitor') : null;
-        if (!item || !item.installed || item.available === false) return null;
-        const status = item.status || {};
+        const underway =
+          buildProgress?.id === wsId() &&
+          buildProgress.operation_id &&
+          buildProgress.part !== 'plot' &&
+          (buildProgress.running || buildProgress.revealing);
+        if ((!item?.installed && !underway) || item?.available === false) return null;
+        const status = item?.status || {};
         const folder =
           lastStatus?.applies && isConfigured(lastStatus)
             ? compactFolderName(lastStatus.settings.root_path)
@@ -8391,6 +8802,7 @@
             if (derived && derived.applies) return derived;
             return {
               applies: true,
+              ...(status.state === 'setup_required' ? { buildPart: 'foundation' } : {}),
               value: status.detail || '',
               description: status.detail || '',
               tone: status.state === 'needs_attention' ? 'degraded' : ''

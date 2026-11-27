@@ -23,6 +23,7 @@ var (
 // and no model witness: the first batch is a metadata-only scan, so nothing
 // about it waits on a model.
 type FolderInboxIntent struct {
+	HireOnly      bool   `json:"hire_only,omitempty"` // fresh hire via placement; never the legacy grant/scan runner
 	WorkspaceName string `json:"workspace_name"`
 	// SubjectKey and SubjectIdentity witness the one directory the review was
 	// about: its canonical path's key and the directory itself.

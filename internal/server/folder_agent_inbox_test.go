@@ -11,6 +11,26 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
+func TestInboxLookExcludesPhysicalFilesUnderAnAliasedDataDir(t *testing.T) {
+	data, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "data")
+	if err := os.Symlink(data, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ORI_DATA_DIR", alias)
+	if err := os.WriteFile(filepath.Join(data, "invoice.pdf"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	b := &ServerBuilder{}
+	r, err := folderagent.ObserveInbox(data, b.folderReviewProtectedRoots())
+	if err != nil || r.Pile != nil {
+		t.Fatalf("pile from protected folder: %+v, err=%v", r.Pile, err)
+	}
+}
+
 type inboxAnchor struct {
 	folderagent.Workspaces
 	root string
