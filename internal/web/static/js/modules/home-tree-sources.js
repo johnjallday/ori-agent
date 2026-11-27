@@ -831,7 +831,8 @@ export async function loadLinkedPage(parent, { fetchImpl } = {}) {
           trashSelection: entry.trash_selection,
           moveSelection: entry.move_selection,
           destinationSelection: entry.destination_selection,
-          colorKey: entry.color_key
+          colorKey: entry.color_key,
+          folderStamp: entry.folder_stamp
         }
       )
     )

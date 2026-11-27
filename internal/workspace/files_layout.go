@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -92,6 +93,27 @@ func placeFilesLinks(links []filesLink) {
 	}
 }
 
+// Resolve the existing prefix, not just the entire folder: on macOS a missing
+// /var/... child still belongs to its /private/var/... parent. This key is
+// presentation only, and never substitutes for a path in a file operation.
+func filesLocation(path string) string {
+	clean := filepath.Clean(path)
+	for prefix := clean; ; prefix = filepath.Dir(prefix) {
+		resolved, err := filepath.EvalSymlinks(prefix)
+		if err == nil {
+			tail, err := filepath.Rel(prefix, clean)
+			if err == nil {
+				return filepath.Join(resolved, tail)
+			}
+			break
+		}
+		if !os.IsNotExist(err) || prefix == filepath.Dir(prefix) {
+			break
+		}
+	}
+	return clean
+}
+
 // GetFilesLayout only arranges references that already feed the scoped Files
 // reader. It neither walks the disk nor grants access to a directory page.
 func (h *HTTPHandler) GetFilesLayout(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +145,7 @@ func (h *HTTPHandler) GetFilesLayout(w http.ResponseWriter, r *http.Request) {
 			if name == "" || filepath.IsAbs(name) {
 				name = filepath.Base(ref.Path)
 			}
-			links = append(links, filesLink{WorkspaceID: owner, ID: ref.ID, Name: name, path: filepath.Clean(ref.Path)})
+			links = append(links, filesLink{WorkspaceID: owner, ID: ref.ID, Name: name, path: filesLocation(ref.Path)})
 		}
 	}
 	placeFilesLinks(links)

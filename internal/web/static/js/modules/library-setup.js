@@ -133,12 +133,22 @@ function entryPath(id) {
  * eligibility read fails goes to the dashboard bucket with that error as its
  * reason rather than being dropped, so the totals stay honest (FR-6).
  */
-export async function loadSetupRows(client, { sections = false, rootID = '', cursor = '' } = {}) {
+export async function loadSetupRows(
+  client,
+  { sections = false, rootID = '', cursor = '', entryID = '' } = {}
+) {
   const query = new URLSearchParams(RECENT_SONGS_QUERY);
   if (sections) query.set('folder_sections', '1');
   if (rootID) query.set('root_id', rootID);
   if (cursor) query.set('cursor', cursor);
-  const page = await client.request(`/projects?${query}`);
+  // A Files row targets one exact saved entry, even if it is beyond the
+  // first shelf page. The sheet still reloads eligibility before review.
+  let page;
+  if (entryID) {
+    const detail = await client.request(entryPath(entryID));
+    if (detail?.row?.id !== entryID) throw new Error('This project is no longer on the shelf.');
+    page = { ...detail, rows: [detail.row], total: 1 };
+  } else page = await client.request(`/projects?${query}`);
   const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(
     row => row && typeof row.id === 'string' && row.id !== ''
   );

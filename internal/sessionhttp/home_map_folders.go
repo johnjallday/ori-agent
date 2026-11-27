@@ -17,13 +17,23 @@ func (h *Handler) GetHomeMapFolders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if r.URL.RawQuery != "" {
+	files := r.URL.RawQuery == "files=1"
+	if r.URL.RawQuery != "" && !files {
 		_ = orihttp.RespondBadRequest(w, "Invalid map folders request")
 		return
 	}
 	state := home.GetAssistantProgramState()
-	if home.Kind != "group" || home.Status == workspace.StatusTrashed || home.Status == workspace.StatusMissing || state.Declaration == nil {
+	if home.Kind != "group" || home.Status == workspace.StatusTrashed || home.Status == workspace.StatusMissing || state == nil || state.Declaration == nil {
 		_ = orihttp.RespondNotFound(w, "Home unavailable")
+		return
+	}
+	if files {
+		view, err := h.assistantLibraryStore().ReadFilesMarks(scope, home)
+		if err != nil {
+			respondLibraryReadError(w, err)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, view)
 		return
 	}
 	canAdd := h.MapFeedProvider(scope.OwnerUserID, home) != ""

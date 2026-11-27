@@ -111,7 +111,8 @@ export function previewHTML(value, name) {
 }
 
 export class WorkspaceFilesView {
-  constructor(host, root) {
+  constructor(host, root, openSetup) {
+    this.openSetup = openSetup;
     this.host = host;
     this.root = root;
     this.expanded = new Set([root.id]);
@@ -129,10 +130,13 @@ export class WorkspaceFilesView {
     this.picked = new Map(); // visible rows and the exact tokens originally selected
   }
 
-  enter(root) {
+  enter(root, home = false) {
+    const changedHome = this.home !== home;
+    this.home = home;
     const renamed = this.root.name !== root.name;
     this.root = root;
     if (this.controller) {
+      if (changedHome) void this.readMarks();
       if (renamed) {
         this.tree.setAttribute('aria-label', `${root.name} contents`);
         this.paintTree();
@@ -167,10 +171,37 @@ export class WorkspaceFilesView {
     if (!this.controller || this.layoutRequest !== request) return;
     this.layoutRequest = null;
     this.layout = result;
+    this.layoutFailed = !result;
     if (this.root.kind === 'group' && result?.folders.length && !this.membershipStatus)
       void this.loadMembers();
     this.applyLayout();
     this.paintTree();
+    void this.readMarks();
+    this.syncExpanded();
+  }
+
+  async readMarks() {
+    const request = (this.marksRequest = {});
+    let result;
+    if (!this.home && !this.marks) {
+      this.marksRequest = null;
+      return;
+    }
+    if (this.home && this.layout?.folders.length) {
+      try {
+        const res = await this.scopedFetch()(
+          `/api/workspaces/${encodeURIComponent(this.root.id)}/assistant-program/map-folders?files=1`
+        );
+        if (res.ok) result = await res.json();
+      } catch {
+        /* Plain folders remain usable. */
+      }
+    }
+    if (!this.controller || this.marksRequest !== request) return;
+    this.marksRequest = null;
+    this.marks = result;
+    this.paintTree();
+    this.paintPreview();
     this.syncExpanded();
   }
 
@@ -188,13 +219,9 @@ export class WorkspaceFilesView {
     // Cached listings at a nested boundary belong to the source that served
     // them. Rebinding or removing that source must not leave its children.
     for (const row of this.rows || []) {
-      if (!row.contentsSource) continue;
+      if (!isFolder(row)) continue;
       const nested = this.disk?.nested.get(`${row.workspaceId}/l/${row.meta.dirId}`);
-      if (
-        !nested?.some(
-          grant => grant.id === row.contentsSource.id && grant.inside.path === row.meta.path
-        )
-      )
+      if (nested?.find(grant => grant.inside.path === row.meta.path)?.id !== row.contentsSource?.id)
         this.sections.delete(row.id);
     }
     for (const row of disk.roots) {
@@ -221,12 +248,16 @@ export class WorkspaceFilesView {
       !!this.layoutRequest ||
       this.membershipStatus === 'loading' ||
       [...this.sections.values()].some(s => !s.rows && !s.error);
-    if (!row && pending) return;
+    if (
+      (!row && pending) ||
+      (isFolder(row) && this.saved.hadPreview && (this.layoutRequest || this.marksRequest))
+    )
+      return;
     const saved = this.saved;
     this.saved = null;
     this.focusKey =
       row?.id || saved.ancestors.find(key => this.rows.some(r => r.id === key)) || this.root.id;
-    if (row && saved.hadPreview) {
+    if (row && saved.hadPreview && (!isFolder(row) || row.song || row.project)) {
       this.showPreview = saved.showPreview;
       void this.select(row, { restore: true });
     } else {
@@ -267,6 +298,8 @@ export class WorkspaceFilesView {
     this.members.clear();
     this.membershipStatus = null;
     this.layoutRequest = this.disk = this.layout = null;
+    this.layoutFailed = false;
+    this.marksRequest = this.marks = null;
     this.sections.clear();
     this.previewVersion++;
     this.selected = this.value = this.error = null;
@@ -283,6 +316,10 @@ export class WorkspaceFilesView {
     const ok = group?.id === rootId && isGroupNode(group);
     const previous = this.members;
     this.membershipStatus = ok ? 'ready' : 'failed';
+    if (!ok && this.layout?.folders.length) {
+      this.expanded.add(this.linkedKey);
+      this.expanded.add(this.storedKey);
+    }
     this.members = new Map((ok ? flattenTree([group]) : []).map(node => [node.id, node]));
     const allowed = key => {
       const owner = key.split('/')[0];
@@ -329,10 +366,22 @@ export class WorkspaceFilesView {
   // Flatten visible rows only. A section is queried only when disclosed.
   visibleRows() {
     const rows = [];
-    const visit = (row, level, parent) => {
+    const visit = (row, level, parent, inFeed = false) => {
+      const source = row.contentsSource || row;
+      const inSong =
+        inFeed &&
+        row.contentsSource &&
+        this.marks?.songs?.[source.workspaceId] === source.meta.dirId &&
+        this.members.has(source.workspaceId);
+      const project = row.kind === 'linkedFolder' && this.marks?.projects?.[row.meta.folderStamp];
+      if (inSong) row = { ...row, song: source.workspaceId };
+      else if (project) row = { ...row, project };
       rows.push({ ...row, level, parent });
       if (!this.expanded.has(row.id)) return;
-      const child = entry => visit(entry, level + 1, row.id);
+      const fed =
+        inFeed ||
+        (source.kind === 'linked' && this.marks?.feeds?.[source.workspaceId] === source.meta.dirId);
+      const child = entry => visit(entry, level + 1, row.id, fed);
       const memberRows = owner =>
         directMembers(this.members.get(owner)).forEach(node =>
           child({ id: node.id, kind: isGroupNode(node) ? 'group' : 'workspace', label: node.name })
@@ -405,6 +454,12 @@ export class WorkspaceFilesView {
                 : 'Loading…'
           });
       } else row.children?.forEach(child);
+      if (row.id === this.root.id && this.layoutFailed)
+        child({
+          id: sectionKey(row.id, 'layout-failed'),
+          kind: 'layoutRetry',
+          label: 'Linked folders unavailable. Retry'
+        });
     };
     visit(
       {
@@ -421,6 +476,14 @@ export class WorkspaceFilesView {
   paintTree() {
     const focused = this.tree.contains(document.activeElement);
     this.rows = this.visibleRows();
+    if (isFolder(this.selected)) {
+      const current = this.rows.find(r => r.id === this.selected.id);
+      if (current?.song !== this.selected.song || current?.project !== this.selected.project) {
+        ++this.previewVersion;
+        this.selected = this.value = this.error = null;
+        this.showPreview = false; // New marks never upgrade an old selection's action tokens.
+      }
+    }
     const live = new Map(this.rows.filter(trashable).map(r => [r.id, r.meta.trashSelection]));
     for (const [id, r] of this.picked)
       if (live.get(id) !== r.meta.trashSelection) this.picked.delete(id);
@@ -451,7 +514,7 @@ export class WorkspaceFilesView {
           ['workspace', 'group', 'section', 'members', 'folder', 'stored'].includes(r.kind);
         const expanded = this.expanded.has(r.id);
         const color = folderColor(r);
-        return `<div role="treeitem" ${color ? `data-folder-color="${color.name}" aria-description="${color.name} folder"` : ''} tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" ${r.meta?.moveSelection ? 'draggable="true"' : ''} data-key="${esc(r.id)}" aria-level="${r.level}" aria-selected="${this.picked.size ? this.picked.has(r.id) : (this.selected?.id || this.branchSelection) === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level};${color ? `--wf-folder-color:${color.hex}` : ''}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(r.kind === 'members' ? 'linkedFolders' : rowIconName(r))}<span>${esc(r.label)}</span>${r.kind === 'linked' ? '<small class="wf-source-label">Linked folder</small>' : ''}</div>`;
+        return `<div role="treeitem" ${color ? `data-folder-color="${color.name}" aria-description="${color.name} folder"` : ''} tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" ${r.meta?.moveSelection ? 'draggable="true"' : ''} data-key="${esc(r.id)}" aria-level="${r.level}" aria-selected="${this.picked.size ? this.picked.has(r.id) : (this.selected?.id || this.branchSelection) === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level};${color ? `--wf-folder-color:${color.hex}` : ''}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(r.kind === 'members' ? 'linkedFolders' : r.kind === 'stored' ? 'folder' : rowIconName(r))}<span>${esc(r.label)}</span>${r.song || r.project ? `<small class="wf-source-label">${r.song ? 'on the map' : 'not set up'}</small>` : ''}${r.kind === 'linked' ? '<small class="wf-source-label">Linked folder</small>' : ''}</div>`;
       })
       .join('');
     if (focused) this.focusRow(this.focusKey);
@@ -483,6 +546,12 @@ export class WorkspaceFilesView {
     }
     if (event.target.closest('[data-color-picked]')) {
       this.colorRows([...this.picked.values()]);
+      return;
+    }
+    const setup = event.target.closest('[data-files-setup]');
+    if (setup) {
+      const project = this.rows.find(r => r.id === this.selected?.id)?.project;
+      if (project && this.marks?.can_set_up) this.openSetup?.(setup, project);
       return;
     }
     if (event.target.closest('[data-open-linked]')) {
@@ -707,6 +776,10 @@ export class WorkspaceFilesView {
 
   activate(row) {
     if (row.kind === 'status') return;
+    if (row.kind === 'layoutRetry') {
+      void this.readLayout();
+      return;
+    }
     this.saved = null;
     this.picked.clear();
     this.pickAnchor = null;
@@ -715,7 +788,8 @@ export class WorkspaceFilesView {
       void this.select(row);
       return;
     }
-    if (isFolder(row) && trashable(row)) {
+    if (row.song || row.project) void this.select(row);
+    else if (isFolder(row) && trashable(row)) {
       this.picked.set(row.id, row);
       this.pickAnchor = row;
       ++this.previewVersion;
@@ -844,7 +918,14 @@ export class WorkspaceFilesView {
       this.host.scrollIntoView({ behavior: 'instant', block: 'start' });
     }
     try {
-      const value = await readPreview(row, { fetchImpl: this.scopedFetch() });
+      let value;
+      if (row.song && this.members.has(row.song)) {
+        const { rows } = await loadWorkspaceContents(row.song, 'notes', {
+          fetchImpl: this.scopedFetch()
+        });
+        value = { notes: rows };
+      } else if (row.project) value = {};
+      else value = await readPreview(row, { fetchImpl: this.scopedFetch() });
       if (version !== this.previewVersion) return;
       this.value = value;
     } catch (error) {
@@ -882,7 +963,8 @@ export class WorkspaceFilesView {
     const parent = rows[0].parent;
     let moved = 0;
     try {
-      const choice = await reviewItems(rows, controller.signal, destinations, dropped);
+      const reviewRows = rows.map(row => this.rows.find(r => r.id === row.id) || row);
+      const choice = await reviewItems(reviewRows, controller.signal, destinations, dropped);
       if (!choice) return;
       const target = move
         ? [choice.meta.dirName, choice.meta.path].filter(Boolean).join(' / ')
@@ -1026,7 +1108,21 @@ export class WorkspaceFilesView {
         : this.value
           ? previewHTML(this.value, row.label)
           : '<p role="status">Loading preview…</p>';
-    if (row?.kind === 'linkedFile' && (row.meta.selection || row.meta.trashSelection)) {
+    if (row?.song || row?.project) {
+      const body = this.article.querySelector('.wf-body');
+      if (row.song) {
+        const member = this.members.get(row.song);
+        const notes = this.value?.notes;
+        body.innerHTML = member
+          ? `<p>Song on the map · <a href="/workspaces/${encodeURIComponent(member.folder_slug || member.id)}">Open workspace</a></p><h3>Notes</h3>${this.error ? '<p>Notes unavailable.</p><button type="button" data-retry-preview>Retry</button>' : !notes ? '<p>Loading notes…</p>' : notes.length ? `<ul>${notes.map(n => `<li>${esc(n.label)}</li>`).join('')}</ul>` : '<p>No notes yet</p>'}`
+          : '';
+      } else
+        body.innerHTML = `<p>Project not set up</p>${this.marks?.can_set_up ? '<button type="button" class="wf-action" data-files-setup>Set up this project</button>' : ''}`;
+    }
+    if (
+      (row?.kind === 'linkedFile' || row?.song || row?.project) &&
+      (row.meta.selection || row.meta.trashSelection)
+    ) {
       const pending = this.opening.has(row.id);
       const stale = this.openResult?.stale || [404, 409].includes(this.error?.status);
       const disabled = pending || stale ? 'disabled' : '';

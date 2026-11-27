@@ -4093,8 +4093,11 @@ export class WorkspaceCommandView {
       return;
     }
     host.hidden = false;
-    this.filesView ??= new WorkspaceFilesView(host, root);
-    this.filesView.enter(root);
+    this.filesView ??= new WorkspaceFilesView(host, root, (element, entryID) =>
+      this.openLibrarySetupSheet(element, null, '', entryID)
+    );
+    const home = (this.groupTemplateStatus || root.group_template)?.kind === 'managed_home';
+    this.filesView.enter(root, home);
   }
 
   /**
@@ -14547,7 +14550,7 @@ export class WorkspaceCommandView {
    * FR-6). After a run the members reload, the lot gives way to the new
    * tiles, and the camera frames them.
    */
-  openLibrarySetupSheet(element, beside = null, intakeRootID = '') {
+  openLibrarySetupSheet(element, beside = null, intakeRootID = '', entryID = '') {
     const homeID = this.workspaceId();
     if (!homeID) return false;
     const host = this.ensureDetachmentHost();
@@ -14555,6 +14558,7 @@ export class WorkspaceCommandView {
     const sheet = openLibrarySheet({
       homeID,
       intakeRootID,
+      entryID,
       homeName: String(this.page?.workspace?.name || '').trim() || 'this Home',
       anchor: element || null,
       beside: beside || element || null,
@@ -14577,6 +14581,7 @@ export class WorkspaceCommandView {
         /* the map below still re-syncs from whatever the panel holds */
       }
     }
+    if (this.filesView?.controller) void this.filesView.readLayout();
     this.syncDetachmentToolbarCount();
     await this.loadLibraryEmptyState();
     this.syncSetupProjectsChip();
