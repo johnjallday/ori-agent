@@ -522,25 +522,6 @@
   text-transform: uppercase;
 }
 
-/* No extra layout box unless the current page supplies a companion control. */
-.assistant-launcher-dock {
-  display: contents;
-}
-
-.assistant-launcher-dock:has(.map-team-tab) {
-  position: relative;
-  display: flex;
-  flex-direction: row-reverse;
-  align-self: flex-end;
-  align-items: center;
-  gap: 4px;
-}
-
-.assistant-launcher-dock:has(.personal-assistant-launcher[hidden]),
-.ori-guide:has(.personal-assistant-panel:not([hidden])) .assistant-launcher-dock {
-  display: none;
-}
-
 .personal-assistant-launcher {
   display: flex;
   max-width: min(280px, calc(100vw - 40px));

@@ -50,7 +50,7 @@ test('a nested group has its own map team; disclosure and chat are separate door
     await page.goto(`/workspaces/${ws.folder_slug}?mode=map`);
     const close = page.locator('#personalAssistantClose');
     if (await close.isVisible()) await close.click();
-    await expect(tab).toHaveText(`Team ${count}`);
+    await expect(tab).toHaveText(`Roster ${count}`);
     await expect(page.locator('.ws-map-unit.is-commander')).toBeVisible();
     await tab.focus();
     await page.keyboard.press('Enter');

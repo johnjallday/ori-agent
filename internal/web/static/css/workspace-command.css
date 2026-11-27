@@ -998,11 +998,27 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   align-items: flex-start;
   gap: 10px;
 }
-.ws-cmd-map-shell.is-group .ws-cmd-map-quest-dock {
-  top: 80px;
-  max-height: min(65vh, 620px);
-  max-width: calc(100% - 36px);
-  overflow-y: auto;
+/* Keep the group roster and selection in one column above the camera controls.
+   Only the visible cards catch clicks; the rest of the map remains draggable. */
+.ws-cmd-map-corner {
+  position: absolute;
+  inset: 12px 12px 94px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+.ws-cmd-map-corner > .ws-cmd-map-quest-dock {
+  position: static;
+  max-width: 100%;
+  min-height: 0;
+  overflow: auto;
+  pointer-events: auto;
+}
+.ws-cmd-map-corner > .ws-cmd-map-quest-dock:not(:has(> :not([hidden]))) {
+  display: none;
 }
 .ws-cmd-map-member-folders {
   width: min(340px, calc(100vw - 72px));
@@ -1060,32 +1076,56 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
-/* A group map's team index: a small tab on the paper chat pill, with
-   faces and place labels arranged like entries in a field notebook. */
+.map-team-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 0;
+  max-width: 100%;
+}
+body:has(#personalAssistantPanel:not([hidden])) .map-team-dock {
+  display: none;
+}
 .map-team-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   min-height: 44px;
   padding: 4px 12px;
-  border: 1px solid var(--ori-line);
-  border-radius: 16px 6px 6px 16px;
-  background: var(--ori-surface);
-  color: var(--ori-accent-text);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 6px;
+  background: var(--ws-panel);
+  color: var(--ws-ink);
   font-weight: 700;
   white-space: nowrap;
+  pointer-events: auto;
 }
-.map-team-tab[aria-expanded="true"] {
-  border-color: var(--ori-accent-strong);
+.map-team-tab::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-2px) rotate(45deg);
+}
+.map-team-tab[aria-expanded="true"]::after {
+  transform: translateY(2px) rotate(225deg);
 }
 .map-team-deck {
-  position: absolute;
-  right: 0;
-  width: min(304px, calc(100vw - 32px));
+  width: 304px;
+  max-width: 100%;
+  max-height: 380px;
+  min-height: 0;
+  pointer-events: auto;
   overflow: auto;
   overscroll-behavior: contain;
   padding: 12px;
-  border: 1px solid var(--ori-line);
-  border-radius: 12px;
-  background: var(--ori-surface);
-  color: var(--ori-ink);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 8px;
+  background: var(--ws-panel);
+  color: var(--ws-ink);
   box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
 }
 .map-team-deck h2 {
@@ -1110,14 +1150,14 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   text-align: left;
 }
 .map-team-deck button:hover {
-  background: var(--ori-paper);
+  background: var(--ws-panel-2);
 }
 .map-team-places {
   padding-inline-start: 40px;
   list-style: none;
 }
 .map-team-wait {
-  color: var(--ori-accent-text);
+  color: var(--ws-faction);
   font-weight: 700;
 }
 .map-team-deck .map-team-card {
@@ -1125,7 +1165,7 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   align-items: center;
   gap: 12px;
   padding: 8px 4px;
-  border-top: 1px solid var(--ori-line);
+  border-top: 1px solid var(--ws-line);
   overflow-wrap: anywhere;
 }
 .map-team-face {
@@ -1156,7 +1196,7 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
 .map-team-deck h3 {
   margin: 12px 4px 4px;
   font-size: 0.8rem;
-  color: var(--ori-accent-text);
+  color: var(--ws-ink-dim);
 }
 .map-team-slot {
   display: flex;
@@ -1164,27 +1204,26 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   justify-content: space-between;
   gap: 8px;
   padding: 3px 8px;
-  border: 1px dashed var(--ori-line);
+  border: 1px dashed var(--ws-line);
   border-radius: 6px;
 }
 .map-team-slot button,
 .map-team-slot a {
   width: auto;
-  color: var(--ori-accent-text);
+  color: var(--ws-faction);
   font-weight: 700;
 }
 .map-team-tab:focus-visible,
 .map-team-deck :is(button, a):focus-visible {
-  outline: 2px solid var(--ori-accent-strong);
+  outline: 2px solid var(--ws-faction);
   outline-offset: 1px;
 }
-@media (max-width: 760px) {
-  .assistant-launcher-dock:has(.map-team-tab) {
-    margin: 0 12px 12px;
-  }
-  .assistant-launcher-dock:has(.map-team-tab) .personal-assistant-launcher {
-    min-width: 0;
-    margin: 0;
+.ws-cmd-detachment-slot:has(.music-folder-view) .music-folder-view {
+  padding-top: 68px;
+}
+@media (max-width: 900px) {
+  .ws-cmd-map-corner {
+    bottom: calc(var(--ori-launcher-clearance-y, 88px) + 148px);
   }
 }
 

@@ -3223,6 +3223,7 @@ export class WorkspaceCommandView {
     const memberActive = typeof document === 'undefined' ? null : document.activeElement;
     if (memberActive && membersNode?.contains?.(memberActive)) this.membersFocus = memberActive;
     this.restoreSharedSurface('members');
+    this.mapTeamDeck?.rememberFocus();
     const hqDetails = this.viewMode === 'details' && this.isPersonalHQ();
     this.container.innerHTML =
       this.commandBarHTML(ws, name, mode, stats) +
@@ -12654,8 +12655,9 @@ export class WorkspaceCommandView {
       (post ? '<div class="ws-cmd-map-command-post">' + post + '</div>' : '') +
       this.renderMapHQStations() +
       '</section>' +
-      '</div>' +
+      '<div class="ws-cmd-map-corner"><div class="map-team-dock"></div>' +
       this.mapGiveWorkHTML() +
+      '</div></div>' +
       this.renderMapWindow(selected) +
       '</div>'
     );
@@ -14733,9 +14735,11 @@ export class WorkspaceCommandView {
     const host = this.ensureDetachmentHost();
     if (!host) return;
     if (host.parentNode !== slot) slot.appendChild(host);
-    const dock = globalThis.document?.querySelector?.('.assistant-launcher-dock');
-    if (dock && !this.mapTeamDeck) this.mapTeamDeck = mountMapTeamDeck(this, dock);
-    this.mapTeamDeck?.update();
+    const dock = this.container.querySelector('.map-team-dock');
+    if (dock) {
+      this.mapTeamDeck ??= mountMapTeamDeck(this);
+      this.mapTeamDeck.attach(dock);
+    }
     this.attachMusicFolders(slot);
     // The dock was rebuilt with the rest of the view; the selected song's card
     // comes back from the last read, without a fetch.

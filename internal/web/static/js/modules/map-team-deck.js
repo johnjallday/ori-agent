@@ -1,5 +1,5 @@
-// The launcher owns chat. The scoped map supplies a sibling disclosure only
-// while mounted; neither opening nor refreshing it touches the map camera.
+// The group map owns its roster disclosure. Opening or refreshing it does
+// not touch the camera or route through the Commander’s chat launcher.
 import { linkedAgents } from './linked-agents.js';
 import { escapeHtml } from './workspace-detail-members.js';
 
@@ -125,7 +125,7 @@ function cardHTML(view, card, expanded) {
   );
 }
 
-export function mountMapTeamDeck(view, dock) {
+export function mountMapTeamDeck(view) {
   const tab = document.createElement('button');
   tab.type = 'button';
   tab.className = 'map-team-tab';
@@ -136,49 +136,14 @@ export function mountMapTeamDeck(view, dock) {
   list.className = 'map-team-deck';
   list.setAttribute('aria-label', 'Map team');
   list.hidden = true;
-  dock.append(tab, list);
   let previous = '';
   let expanded = '';
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
 
-  // Find clear vertical space on the pill's side. A selected song's card and
-  // the map controls remain usable, even when the page is scrolled on a phone.
-  const position = () => {
-    if (list.hidden) return;
-    const base = dock.getBoundingClientRect();
-    const top = Math.max(8, document.querySelector('.navbar')?.getBoundingClientRect().bottom || 0);
-    const left = base.right - list.offsetWidth;
-    let ranges = [[top, base.top - 6]];
-    for (const node of view.container.querySelectorAll(
-      '.ws-map-control-dock, .ws-cmd-map-quest-dock > :not([hidden])'
-    )) {
-      const r = node.getBoundingClientRect();
-      if (!r.height || left >= r.right + 4 || base.right <= r.left - 4) continue;
-      ranges = ranges
-        .flatMap(([a, b]) => [
-          [a, Math.min(b, r.top - 6)],
-          [Math.max(a, r.bottom + 6), b]
-        ])
-        .filter(([a, b]) => b > a);
-    }
-    const [a, b] = ranges.sort(
-      (x, y) => Math.min(380, y[1] - y[0]) - Math.min(380, x[1] - x[0]) || y[1] - x[1]
-    )[0] || [top, base.top];
-    list.style.bottom = `${base.bottom - b}px`;
-    const height = view.detachmentMapEl?.clientHeight || 380;
-    list.style.maxHeight = `${Math.min(height, b - a, 380)}px`;
-  };
-  let memberDock;
   function update() {
-    const nextDock = view.container.querySelector('.ws-cmd-map-quest-dock');
-    if (memberDock !== nextDock) {
-      if (memberDock) observer.unobserve(memberDock);
-      memberDock = nextDock;
-      if (memberDock) observer.observe(memberDock);
-    }
     const { cards, incomplete } = teamSnapshot(view);
-    tab.textContent = `Team ${cards.length}`;
+    tab.textContent = `Roster ${cards.length}`;
     if (list.hidden) return;
     const html =
       '<h2>Map team</h2>' +
@@ -205,7 +170,6 @@ export function mountMapTeamDeck(view, dock) {
         (next || tab).focus({ preventScroll: true });
       }
     }
-    position();
   }
   function close(focus = false) {
     list.hidden = true;
@@ -280,22 +244,28 @@ export function mountMapTeamDeck(view, dock) {
   tab.addEventListener('click', click);
   document.addEventListener('keydown', key, true);
   document.addEventListener('click', outside, true);
-  document.addEventListener('scroll', position, true);
-  window.addEventListener('resize', position);
-  // Includes programmatic drawer opening and late launcher identity changes.
+  // Closing chat must not reopen a roster that chat displaced.
   const observer = new ResizeObserver(() => {
-    if (!dock.offsetWidth) close();
-    else position();
+    if (!tab.offsetWidth) close();
   });
-  observer.observe(dock);
+  observer.observe(tab);
+  let focusBeforeRender;
   return {
+    rememberFocus() {
+      const active = document.activeElement;
+      focusBeforeRender = active === tab || list.contains(active) ? active : null;
+    },
+    attach(dock) {
+      if (tab.parentNode !== dock) dock.append(tab, list);
+      focusBeforeRender?.focus({ preventScroll: true });
+      focusBeforeRender = null;
+      update();
+    },
     update,
     destroy() {
       observer.disconnect();
       document.removeEventListener('keydown', key, true);
       document.removeEventListener('click', outside, true);
-      document.removeEventListener('scroll', position, true);
-      window.removeEventListener('resize', position);
       tab.remove();
       list.remove();
     }

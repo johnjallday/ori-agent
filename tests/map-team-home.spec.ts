@@ -111,13 +111,35 @@ for (const width of [1440, 390]) {
       const deck = page.getByRole('region', { name: 'Map team' });
       const close = page.locator('#personalAssistantClose');
       if (await close.isVisible()) await close.click();
+      await page
+        .getByRole('region', { name: 'Group map', exact: true })
+        .evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
       await tab.focus();
       await page.keyboard.press('Enter');
+      await expect(deck).toBeVisible();
+      const geometry = await deck.evaluate(el => {
+        const surface = el.closest('[aria-label="Group map"]')!.getBoundingClientRect();
+        const tab = el.previousElementSibling!.getBoundingClientRect();
+        const menu = el.getBoundingClientRect();
+        return {
+          left: tab.left - surface.left,
+          top: tab.top - surface.top,
+          aligned: menu.left === tab.left,
+          below: menu.top >= tab.bottom
+        };
+      });
+      expect(geometry.left).toBeGreaterThan(0);
+      expect(geometry.left).toBeLessThan(20);
+      expect(geometry.top).toBeGreaterThan(0);
+      expect(geometry.top).toBeLessThan(20);
+      expect(geometry.aligned && geometry.below).toBe(true);
       const waiting = deck.getByRole('button', { name: /Has a question for you/ });
       await expect(waiting).toBeVisible();
       await expect(deck.getByRole('button', { name: /Songkeeper.*2 songs/ })).toBeVisible();
       await page.screenshot({ path: `tasks/evidence-map-agent-deck/team-${width}-${theme}.png` });
       await waiting.focus();
+      await page.evaluate(() => (window as any).workspaceCommand.render());
+      await expect(waiting).toBeFocused();
       await page.keyboard.press('Enter');
       await expect(deck).toBeHidden();
       const line = page.locator('.commander-balloon-line:visible');
@@ -134,7 +156,7 @@ for (const width of [1440, 390]) {
       await expect(page.locator('.ws-map-tile[aria-pressed="true"]')).toContainText('After Hours');
       expect(new URL(page.url()).pathname).toBe(new URL(route, 'http://localhost').pathname);
       await tab.click();
-      // Even after a selection paints the dock, Team must not obscure it or
+      // Even after a selection paints the dock, Roster must not obscure it or
       // the move/zoom strip. Inspect geometry, not just a visible CSS class.
       await expect
         .poll(() =>
