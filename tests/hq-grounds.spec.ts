@@ -30,7 +30,8 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
   const { status } = await (await request.get('/api/personal-hq/status')).json();
   const workspace = `/api/workspaces/${status.workspace_id}`;
   const root = await mkdtemp(join(home, 'grounds-inbox-'));
-  const files = ['brief.pdf', 'index.csv', 'map.png'];
+  const loose = 'atlas-' + 'quarterly-inventory-'.repeat(6) + 'index.csv';
+  const files = ['brief.pdf', loose, 'map.png'];
   const old = new Date(Date.now() - 3600000);
   for (const name of files) {
     await writeFile(join(root, name), 'Example: ' + name);
@@ -72,7 +73,13 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
     panelBox.x + panelBox.width <= depotBox.x || depotBox.x + depotBox.width <= panelBox.x
   ).toBe(true);
   await expect(depot).toHaveCSS('outline-style', 'solid');
+  await expect(review.locator('.fj-console-folder')).toHaveText(basename(root));
   await page.screenshot({ path: info.outputPath('depot-panel.png') });
+  await review.getByRole('button', { name: 'All files', exact: true }).click();
+  const leaveLoose = review.getByRole('checkbox', { name: `Select ${loose}`, exact: true });
+  await leaveLoose.uncheck();
+  const fileTwo = review.getByRole('button', { name: 'File 2 files', exact: true });
+  await expect(fileTwo).toBeEnabled();
   await page.keyboard.press('Escape');
   await expect(review).toBeHidden();
   await expect(depot).toBeFocused();
@@ -125,6 +132,29 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
   await page.screenshot({ path: info.outputPath('dark-phone-unavailable.png') });
   await depot.tap();
   await expect(review).toBeVisible();
+  await expect(fileTwo).toBeEnabled();
+  const sheet = (await review.boundingBox())!;
+  expect(sheet.y).toBeGreaterThan(0);
+  expect(sheet.y + sheet.height).toBeCloseTo(844, 0);
+  if (await review.getByRole('button', { name: 'All files', exact: true }).isVisible())
+    await review.getByRole('button', { name: 'All files', exact: true }).tap();
+  const row = review.getByRole('row').filter({ hasText: loose });
+  await row.scrollIntoViewIfNeeded();
+  await expect(row).toHaveCSS('display', 'grid');
+  await expect(leaveLoose).not.toBeChecked();
+  await page.screenshot({ path: info.outputPath('depot-sheet.png') });
+  // 390 x 844 at 200% zoom exposes half as many CSS pixels on both axes.
+  await page.setViewportSize({ width: 195, height: 422 });
+  await leaveLoose.scrollIntoViewIfNeeded();
+  await expect(leaveLoose).toBeInViewport();
+  await expect(review.getByRole('button', { name: 'Back to map' })).toBeInViewport();
+  await fileTwo.scrollIntoViewIfNeeded();
+  await expect(fileTwo).toBeInViewport();
+  const scroller = review.locator('.fj-depot-content');
+  expect(await scroller.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(leaveLoose).not.toBeChecked();
+  await expect(fileTwo).toBeEnabled();
   await review.getByRole('button', { name: 'Back to map' }).tap();
   await expect(review).toBeHidden();
   expect((await readdir(root)).sort()).toEqual(before);

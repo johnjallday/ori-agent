@@ -2550,7 +2550,7 @@
     if (!target) return;
     target.focus({ preventScroll: true });
     const rect = target.getBoundingClientRect?.();
-    const scroller = lookup('fileJanitorConsoleBody')?.getBoundingClientRect?.();
+    const scroller = consoleScroller()?.getBoundingClientRect?.();
     const footer = lookup('fileJanitorApprove')?.closest?.('.fj-footer')?.getBoundingClientRect();
     if (
       rect &&
@@ -3373,7 +3373,7 @@
         focusedReviewControl.focus({ preventScroll: true });
     };
     const fileFocus = captureFileFocus();
-    const scroller = document.getElementById('fileJanitorConsoleBody');
+    const scroller = consoleScroller();
     const scrollTop = scroller?.scrollTop;
     clear(container);
     // In the picture, #fileJanitorView-all is the header's button; in All files it
@@ -6323,6 +6323,13 @@
     return firstVisible('[data-cmd-view-mode="' + workspaceViewMode() + '"]');
   }
 
+  function consoleScroller() {
+    return (
+      document.getElementById('fileJanitorDepotContent') ||
+      document.getElementById('fileJanitorConsoleBody')
+    );
+  }
+
   function renderConsole() {
     const host = consoleHost();
     if (!host) return;
@@ -6358,11 +6365,22 @@
     // Labelled by the visible title, so the name a sighted user reads and the
     // name a screen reader announces are the same string (FR-119).
     dialog.setAttribute('aria-labelledby', CONSOLE_TITLE_ID);
-    dialog.appendChild(renderConsoleHeader(status));
+    // Only the title and return control need to stay pinned in the depot.
+    // Keep the folder, tabs and choices in one scroll area, even at high zoom.
+    let content = dialog;
+    let depotBar = null;
+    if (host.getAttribute('data-fj-map-side')) {
+      depotBar = el('div', 'fj-depot-bar');
+      dialog.appendChild(depotBar);
+      content = el('div', 'fj-depot-content');
+      content.id = 'fileJanitorDepotContent';
+      dialog.appendChild(content);
+    }
+    content.appendChild(renderConsoleHeader(status, depotBar));
 
     const body = el('div', 'fj-console-body');
     body.id = 'fileJanitorConsoleBody';
-    dialog.appendChild(body);
+    content.appendChild(body);
 
     // Attach BEFORE filling the body.
     //
@@ -6427,7 +6445,7 @@
     }
   }
 
-  function renderConsoleHeader(status) {
+  function renderConsoleHeader(status, depotBar) {
     const configured = isConfigured(status);
     const settings = (status && status.settings) || {};
     const header = el('header', 'fj-console-head');
@@ -6436,12 +6454,16 @@
     const title = el('h2', 'fj-console-title', 'Filing');
     title.id = CONSOLE_TITLE_ID;
     title.setAttribute('tabindex', '-1');
-    heading.appendChild(title);
+    (depotBar || heading).appendChild(title);
     if (!downloadsReviewRequested() || status?.downloads_review === 'ready') {
       // The managed folder is shown by its display name, cleaned the same way a
       // filename is: a folder can be named as adversarially as a file.
       const folder = settings.root_path ? safeName(settings.root_path) : '';
-      if (folder) heading.appendChild(el('p', 'fj-console-folder', folder));
+      if (folder) {
+        const name = el('p', 'fj-console-folder', depotBar ? compactFolderName(folder) : folder);
+        name.title = folder;
+        heading.appendChild(name);
+      }
       const privacy = compactPrivacy(status);
       heading.appendChild(
         el('p', 'fj-console-privacy', privacy.value + (privacy.note ? ' · ' + privacy.note : ''))
@@ -6481,7 +6503,7 @@
       actions.appendChild(scan);
       actions.appendChild(pauseControl(settings));
     }
-    const backToMap = workspaceViewMode() === 'map';
+    const backToMap = depotBar || workspaceViewMode() === 'map';
     const closeButton = button(backToMap ? 'Back to map' : 'Close', 'fj-btn fj-btn-secondary', () =>
       close()
     );
@@ -6489,7 +6511,7 @@
     closeButton.setAttribute('data-fj-console-close', '');
     closeButton.setAttribute('aria-label', backToMap ? 'Back to map' : 'Close Filing');
     consoleCloseButton = closeButton;
-    actions.appendChild(closeButton);
+    (depotBar || actions).appendChild(closeButton);
     header.appendChild(actions);
 
     // Before setup finishes there are no tabs: there is nothing to review, no
