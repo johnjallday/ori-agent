@@ -26,6 +26,33 @@ test('the manager offers a first look on Open; dismissal and return do not start
   expect(
     (await (await request.get('/api/settings/workspace-root')).json()).default_workspace_root
   ).toBe(join(home, 'Ori Workspaces'));
+  const advice = process.env.ORI_STATION_ADVICE;
+  if (advice === 'legacy-check') {
+    // Reopen the same isolated workspace on the fixed build; do not recreate
+    // the hire or rewrite the older build's toolbox or run receipt.
+    const wsFile = join(home, 'Ori Workspaces', 'documents', 'workspace.json');
+    const ws = JSON.parse(await readFile(wsFile, 'utf8'));
+    const endpoint = `/api/personal-assistant/folder-agent/${ws.id}`;
+    const receipt = await request.get(endpoint);
+    expect(receipt.status()).toBe(200);
+    const view = (await receipt.json()).folder_agent;
+    expect(view.filing_recommendation_done).toBe(true);
+    expect(view.filing_review_hint).toBe('partial');
+    expect(view.filing_pile).toBeUndefined();
+    await installLocalCdn(page);
+    await page.goto('/workspaces/documents?mode=details');
+    await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
+    const card = page.locator('.folder-agent-card--report:visible');
+    await expect(card).toContainText('That step did not build a station or scan the folder.');
+    await expect(card).toContainText('The look did not finish counting loose documents');
+    await expect(card.locator('button')).toHaveCount(0);
+    await card.screenshot({ path: info.outputPath('historical-advice-receipt.png') });
+    const after = JSON.parse(await readFile(wsFile, 'utf8'));
+    expect(after.toolboxes).toEqual(ws.toolboxes);
+    expect(after.toolbox_assignments).toEqual(ws.toolbox_assignments);
+    expect(after.mcp_bindings).toEqual(ws.mcp_bindings);
+    return;
+  }
   const hq = await freshGuidedHQ(request);
   const root = join(home, 'Documents');
   await mkdir(root, { mode: 0o750 });
@@ -55,6 +82,11 @@ test('the manager offers a first look on Open; dismissal and return do not start
       await writeFile(join(root, name), stationFiles[name], { mode: 0o600 });
       await utimes(join(root, name), old, old);
     }
+  }
+  if (advice === 'partial' || advice === 'legacy-seed') {
+    // Exceed the walk's entry budget inside an existing shelf. The loose
+    // count is positive but cannot authorize a station from this look.
+    for (let i = 0; i < 2001; i++) await writeFile(join(root, 'Orders', `fixture-${i}.txt`), '');
   }
   const stationTree = [...Object.keys(stationFiles), ...stationFolders].sort();
   if (liveModel) {
@@ -179,6 +211,56 @@ test('the manager offers a first look on Open; dismissal and return do not start
   await report.click();
   const savedReport = page.locator('.folder-agent-card--report:visible');
   await expect(savedReport).toBeVisible();
+  if (advice) {
+    const recordURL = `/api/personal-assistant/folder-agent/${id}`;
+    const workspaceFile = join(home, 'Ori Workspaces', folder.folder_slug, 'workspace.json');
+    const pin = async () => {
+      const ws = JSON.parse(await readFile(workspaceFile, 'utf8'));
+      return [ws.toolboxes, ws.toolbox_assignments, ws.mcp_bindings];
+    };
+    const original = await pin();
+    await savedReport.getByRole('checkbox').check();
+    await savedReport.locator('[data-folder-agent-action="set_up"]').click();
+    if (advice === 'legacy-seed') {
+      await expect.poll(async () => (await request.get(recordURL)).status()).toBe(409);
+      const sidecar = join(
+        home,
+        'Ori Workspaces',
+        folder.folder_slug,
+        '.ori',
+        'folder-agent-v1.json'
+      );
+      await expect
+        .poll(async () => JSON.parse(await readFile(sidecar, 'utf8')).setup.status)
+        .toBe('done');
+      expect(await pin()).not.toEqual(original);
+      return;
+    }
+    await expect(savedReport).toContainText(
+      'That step did not build a station or scan the folder.'
+    );
+    await expect(savedReport.locator('.folder-agent-card__run-clock[data-started-at]')).toHaveCount(
+      0
+    );
+    const actual = await request.get(recordURL);
+    expect(actual.status()).toBe(200);
+    expect((await actual.json()).folder_agent.setup.status).toBe('done');
+    expect(await pin()).toEqual(original);
+    expect(
+      (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+    ).toBe(false);
+    await verifyBytes();
+    if (advice === 'partial') {
+      await expect(savedReport).toContainText('The look did not finish counting loose documents');
+      await expect(savedReport).not.toContainText('Check the workspace’s access settings');
+      await expect(savedReport.getByRole('button', { name: 'Build a Filing station' })).toHaveCount(
+        0
+      );
+      expect(effects).toEqual([]);
+      await savedReport.screenshot({ path: info.outputPath('partial-advice-receipt.png') });
+      return;
+    }
+  }
   const suggestionButton = savedReport.getByRole('button', { name: 'Review filing suggestions' });
   if (empty) {
     await expect(suggestionButton).toHaveCount(0);

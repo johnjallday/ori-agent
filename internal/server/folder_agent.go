@@ -64,6 +64,9 @@ func (b *ServerBuilder) wireFolderAgent() {
 			}
 			return b.sessionHandler.AssignedLookRoot(ctx, owner, id, agent, link)
 		},
+		ReleasedAdviceReceipt: func(ctx context.Context, owner, id, agent, link string) bool {
+			return b.sessionHandler != nil && b.sessionHandler.ReleasedDocumentsAdviceReceipt(ctx, owner, id, agent, link)
+		},
 		Store:                  store,
 		Folders:                b.personalAssistantFolderDigest,
 		Workspaces:             folderAgentWorkspaces{builder: b},

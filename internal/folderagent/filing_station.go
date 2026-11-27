@@ -42,10 +42,22 @@ func (s *Service) StationLook(owner, id string) (filejanitor.StationLook, error)
 	return look, nil
 }
 
+func completeStationMap(m *foldermap.Map) bool {
+	if m == nil || m.Stopped != "" {
+		return false
+	}
+	for _, f := range m.Folders {
+		if f.State != foldermap.StateWalked && f.State != foldermap.StateClosed {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Service) stationLook(r *Record) (filejanitor.StationLook, bool) {
 	var no filejanitor.StationLook
 	guided := strings.HasPrefix(r.AssignedLink, GuidedDocumentsLinkPrefix)
-	if (!guided && r.AssignedLink != "") || (r.State != StateReported && r.State != StateKept && !completed(r)) || r.Map == nil || r.LooseDocuments == nil || r.LooseDocuments.Pile == nil || r.Map.Stopped != "" {
+	if (!guided && r.AssignedLink != "") || (r.State != StateReported && r.State != StateKept && !completed(r)) || !completeStationMap(r.Map) || r.LooseDocuments == nil || r.LooseDocuments.Pile == nil {
 		return no, false
 	}
 	pile := r.LooseDocuments.Pile
@@ -54,11 +66,6 @@ func (s *Service) stationLook(r *Record) (filejanitor.StationLook, bool) {
 	}
 	for _, name := range pile.Names {
 		if (guided && !reviewableDocumentName(name)) || (!guided && !stationFileName(name)) {
-			return no, false
-		}
-	}
-	for _, f := range r.Map.Folders {
-		if f.State != foldermap.StateWalked && f.State != foldermap.StateClosed {
 			return no, false
 		}
 	}

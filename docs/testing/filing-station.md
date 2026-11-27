@@ -60,3 +60,11 @@ For the first command, `ORI_STATION_SAVED_REVIEW=1` seeds a historical kept
 view before Build; `ORI_STATION_THEME=light ORI_STATION_REDUCED=1` repeats the
 combined journey with reduced motion and a light theme. The ordinary run uses
 a controlled response to test cloud disclosure and decline, not a live provider.
+
+For the report’s **Set it up** route, use `ORI_STATION_ADVICE=partial` or
+`complete` with the first command. The manager’s recommendation finishes without
+changing its toolbox, installing Filing or leaving a clock running. Only the
+complete look continues through **Build** and File/Undo. To check an already
+affected workspace, use `ORI_STATION_ADVICE=legacy-seed` with `--rev f7c2c5d15`,
+then `ORI_STATION_ADVICE=legacy-check` with `--sandbox <printed sandbox>` on
+the current build. The old receipt is visible without changing its permissions.

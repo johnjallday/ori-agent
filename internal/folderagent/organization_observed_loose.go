@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
-	"github.com/johnjallday/ori-agent/internal/foldermap"
 )
 
 // This is a hint about the saved look, not a selection or permission to read.
@@ -72,9 +71,7 @@ func (s *Service) looseDocumentHint(rec *Record) string {
 		return "history"
 	}
 	seen := rec.LooseDocuments
-	if seen == nil || seen.Pile == nil || seen.RootModified.IsZero() || rec.Map.Stopped != "" || slices.ContainsFunc(rec.Map.Folders, func(f foldermap.Folder) bool {
-		return f.State != foldermap.StateWalked && f.State != foldermap.StateClosed
-	}) {
+	if seen == nil || seen.Pile == nil || seen.RootModified.IsZero() || !completeStationMap(rec.Map) {
 		return "partial"
 	}
 	if !s.currentLooseObservation(rec, access.Root) {

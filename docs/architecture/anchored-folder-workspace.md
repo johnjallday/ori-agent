@@ -166,6 +166,10 @@ These three roots stay folders with their hired agents: the host never offers
 or runs whole-root project tools, Home membership or group conversion, including
 old pending reports or forged selections. A Filing step on a new hire is a
 recommendation: **Set it up** does not install Filing, grant it access, or scan.
+A recommendation-only plan neither widens nor releases the first-look toolbox.
+An older guided Documents run that already released that exact toolbox may show
+its completed recommendation as a read-only receipt; it cannot authorize Build
+or a Documents review. An incomplete look does not offer Build.
 A complete saved look can instead show the loose count and a station offer. On
 **Build the station** the existing manager becomes Curator without another hire;
 uninstall leaves that agent attached. The first scan reads metadata and creates

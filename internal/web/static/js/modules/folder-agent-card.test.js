@@ -2724,6 +2724,39 @@ test('a placement line newly done tells Home to build the place; other polls do 
   );
 });
 
+test('a refused status poll replaces the running clock and cannot replay setup', async () => {
+  const chat = { session_id: 'thread', message_id: 'report' };
+  let requests = 0;
+  const views = [];
+  const stop = followFolderAgent(
+    { ...settingUp(), chat },
+    {
+      fetchImpl: async (_path, options) => {
+        assert.equal(options.method || 'GET', 'GET');
+        requests++;
+        return { ok: false, status: 409, json: async () => ({}) };
+      },
+      pollMs: 1,
+      onView: (next, finished) => {
+        assert.equal(finished, false);
+        views.push(next);
+      }
+    }
+  );
+  await untilTrue(() => views.length === 1);
+  await settle();
+  stop();
+  assert.equal(requests, 1);
+  assert.deepEqual(views[0], {
+    workspace_id: settingUp().workspace_id,
+    state: 'status_unavailable',
+    chat
+  });
+  const card = renderFolderAgentReport(folderAgentReportView(views[0]), stubDocument());
+  assert.match(card.children[0].textContent, /could not be verified/);
+  assert.equal(card.querySelectorAll('button').length, 0);
+});
+
 test('every follower of a run announces a placement through one helper, before it opens the place', async () => {
   const events = [];
   const previousWindow = globalThis.window;

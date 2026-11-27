@@ -39,6 +39,27 @@ type guidedLook struct {
 // Inspect only the anchor directory and local authority records. No listing,
 // profile writes, search service, or ticket is needed to answer the offer.
 func (h *Handler) guidedDocumentsLook(ctx context.Context, ws *workspace.Workspace) (guidedLook, bool) {
+	return h.checkGuidedDocumentsLook(ctx, ws, folderagent.ListingPinAllowed)
+}
+
+// ReleasedDocumentsAdviceReceipt is display-only: the caller gets neither a
+// root nor access. The saved creation receipt, lead, binding and physical
+// witness must still match. Only the old, unassigned host recipe differs.
+func (h *Handler) ReleasedDocumentsAdviceReceipt(ctx context.Context, owner, id, agent, link string) bool {
+	if h.workspaceStore == nil || owner == "" || !strings.HasPrefix(link, documentsLinkPrefix) {
+		return false
+	}
+	ws, err := h.workspaceStore.Get(id)
+	if err != nil || ws == nil || ws.ID != id || ws.OwnerUserID != owner {
+		return false
+	}
+	look, ok := h.checkGuidedDocumentsLook(ctx, ws, folderagent.ReleasedFirstLookRecipe)
+	return ok && look.agent == agent && look.link == link && look.verification == "" && look.filingBinding == ""
+}
+
+type guidedPinCheck func(*workspace.Workspace, string, string) bool
+
+func (h *Handler) checkGuidedDocumentsLook(ctx context.Context, ws *workspace.Workspace, checkAnchorPin guidedPinCheck) (guidedLook, bool) {
 	var no guidedLook
 	if h.documentsWitness == nil || h.store == nil || h.store.DB() == nil || ws == nil || ws.OwnerUserID == "" || !ws.IsAnchored() || ws.SharedData[guidedPurposeKey] != documentsPurpose || (ws.GetStatus() != "" && ws.GetStatus() != workspace.StatusActive) {
 		return no, false
@@ -87,11 +108,11 @@ func (h *Handler) guidedDocumentsLook(ctx context.Context, ws *workspace.Workspa
 	}
 	grant := original.Grants[0].ID
 	filingBinding := ""
-	if !guidedListingAllowed(ws, lead.ID, grant, ref.Path, workspace.AnchorFolderMCPAlias) {
+	if !guidedListingAllowed(ws, lead.ID, grant, ref.Path, workspace.AnchorFolderMCPAlias, checkAnchorPin) {
 		// Filing setup intentionally narrows the *same* binding to listing. A
 		// different binding, an alias edit alone, or an unverified old receipt
 		// cannot stand in for the independently approved Filing root.
-		if !saved.Valid || h.managedFilingRoot == nil || !guidedListingAllowed(ws, lead.ID, grant, ref.Path, filejanitor.LegacyBindingAlias) {
+		if !saved.Valid || h.managedFilingRoot == nil || !guidedListingAllowed(ws, lead.ID, grant, ref.Path, filejanitor.LegacyBindingAlias, folderagent.ListingPinAllowed) {
 			return no, false
 		}
 		managed, err := h.managedFilingRoot(ws.OwnerUserID, ws.ID)
@@ -135,7 +156,7 @@ func (h *Handler) GuidedFilingAccess(owner, id, agent, link string) (folderagent
 	return folderagent.DocumentsAccess{}, folderagent.ErrWrongState
 }
 
-func guidedListingAllowed(ws *workspace.Workspace, instance, binding, root, alias string) bool {
+func guidedListingAllowed(ws *workspace.Workspace, instance, binding, root, alias string, checkPin guidedPinCheck) bool {
 	if binding == "" {
 		return false
 	}
@@ -161,7 +182,7 @@ func guidedListingAllowed(ws *workspace.Workspace, instance, binding, root, alia
 	if access, limited := ws.GetAgentMCPAccess(instance); limited && !slices.Contains(access.EnabledBindingIDs, binding) {
 		return false
 	}
-	return found && folderagent.ListingPinAllowed(ws, instance, binding)
+	return found && checkPin(ws, instance, binding)
 }
 
 func (h *Handler) guidedLookDraft(w http.ResponseWriter, r *http.Request, ws *workspace.Workspace) bool {

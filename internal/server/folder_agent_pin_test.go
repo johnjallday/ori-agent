@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -64,6 +65,26 @@ func TestPinFolderAgentToolbox_ListingUntilTheOwnerChooses(t *testing.T) {
 	}
 	if !sameSet(pinnedTools(t, ws), want) {
 		t.Fatal("a later look narrowed the pin")
+	}
+}
+
+func TestReleasedFirstLookRecipeIsNotListingAuthority(t *testing.T) {
+	ws := folderAgentPinWorkspace()
+	matches := func() bool { return folderagent.ReleasedFirstLookRecipe(ws, "inst-1", "mb-anchor") }
+	for _, read := range []bool{false, true} {
+		if err := pinFolderAgentToolbox(ws, "Songs Manager", read); err != nil || matches() {
+			t.Fatal("assigned pin treated as a historical receipt", err)
+		}
+	}
+	if err := (folderAgentPins{store: &singleWorkspaceStore{ws: ws}}).Release(ws.ID, "Songs Manager"); err != nil {
+		t.Fatal(err)
+	}
+	if !matches() || folderagent.ListingPinAllowed(ws, "inst-1", "mb-anchor") || folderagent.ReleasedFirstLookRecipe(ws, "inst-1", "other-binding") {
+		t.Fatal("released historical recipe must match the exact binding, for receipt display only")
+	}
+	ws.Toolboxes[0].History[0].MCPBindings[0].AllowedTools = []string{"read_file"}
+	if matches() {
+		t.Fatal("accepted an unrelated recipe history")
 	}
 }
 

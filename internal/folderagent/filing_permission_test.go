@@ -27,10 +27,15 @@ func TestView_FilingPermissionIsLiveNotPartOfTheSavedPlan(t *testing.T) {
 	if pending, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID); pending.FilingPermissionRequired || calls != 0 {
 		t.Fatal("unfinished plan asks for filing permission")
 	}
+	pins := &fakePins{}
+	h.svc.deps.Pins = pins
 	if _, err := h.svc.SetUp(t.Context(), "u1", v.WorkspaceID, SetUpRequest{PlanDigest: shown.Plan.Digest}); err != nil {
 		t.Fatal(err)
 	}
 	h.svc.Wait()
+	if len(pins.pins) != 0 || len(pins.released) != 0 {
+		t.Fatalf("recommendation changed the manager's toolbox: %v / %v", pins.pins, pins.released)
+	}
 	if recommended, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID); recommended.FilingPermissionRequired {
 		t.Fatal("recommendation projected as an install")
 	}

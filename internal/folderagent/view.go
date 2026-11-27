@@ -59,6 +59,8 @@ type View struct {
 	Actions            []string               `json:"actions,omitempty"`
 	Plan               *PlanView              `json:"plan,omitempty"`
 	Setup              *Setup                 `json:"setup,omitempty"`
+	// FilingRecommendationDone describes a completed recommendation, not an install.
+	FilingRecommendationDone bool `json:"filing_recommendation_done,omitempty"`
 	// FilingPermissionRequired is live display state, never persisted or hashed.
 	FilingPermissionRequired bool          `json:"filing_permission_required,omitempty"`
 	Failure                  string        `json:"failure,omitempty"`
@@ -271,7 +273,13 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	v.ProjectHolders = projectHoldersView(rec)
 	v.RootPolicy = rec.RootPolicy
 	if strings.HasPrefix(rec.AssignedLink, GuidedDocumentsLinkPrefix) {
-		v.FilingReviewHint = s.looseDocumentHint(rec)
+		// During setup review access is deliberately inactive. That is not
+		// evidence of a broken binding. A partial walk is already known.
+		if rec.State != StateSettingUp {
+			v.FilingReviewHint = s.looseDocumentHint(rec)
+		} else if !completeStationMap(rec.Map) {
+			v.FilingReviewHint = "partial"
+		}
 		v.OrganizationReview = v.FilingReviewHint == "eligible" || v.FilingReviewHint == "history"
 	} else if rec.RootPolicy == folderlook.RootDocuments || completed(rec) {
 		_, err := s.organizationAccess(rec.OwnerUserID, rec)
@@ -301,6 +309,7 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	}
 	plan := BuildPlan(*rec, selected)
 	if completed(rec) {
+		v.FilingRecommendationDone = filingAdviceOnly(rec.Setup.Lines)
 		// A completed card is a receipt, not a newly generated offer catalog.
 		// Retain the confirmed lines and omit alternatives it never ran.
 		plan.Lines = rec.Setup.Lines
