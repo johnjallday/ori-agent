@@ -5990,6 +5990,7 @@
   }
 
   let consoleOpen = false;
+  let consoleSuspended = false;
   let consoleVisit = 0;
   let consoleTab = 'review';
   let consoleItem = '';
@@ -6033,6 +6034,14 @@
     host = el('div', 'fj-console-host');
     host.id = CONSOLE_HOST_ID;
     host.hidden = true;
+    // Consume Escape inside this owner before the map's document-level handler
+    // can collapse a tray or close a map window behind it.
+    host.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.stopPropagation();
+      event.preventDefault();
+      if (canEscapeConsole()) close();
+    });
     document.body.appendChild(host);
     return host;
   }
@@ -6122,14 +6131,21 @@
         id: consoleOverlayId,
         kind: 'modal',
         container: host,
-        trigger: consoleTrigger,
-        canEscape: () => !pressing && !revokeConfirmed,
+        // Resolve after inertness is released; the original station may be gone.
+        trigger: { focus: restoreConsoleFocus },
+        canEscape: canEscapeConsole,
         onClose: info => {
           // The coordinator closes this for its own reasons too (Escape, a
           // modal that must replace it). Mirror that into local state so the
           // console never believes it is open while hidden.
-          if (info && info.reason === 'suspended') return;
-          if (consoleOpen) close({ viaCoordinator: true });
+          if (info?.reason === 'suspended') {
+            consoleSuspended = true;
+            host.hidden = true;
+          } else if (consoleOpen) close({ viaCoordinator: true });
+        },
+        onResume: () => {
+          consoleSuspended = false;
+          if (consoleOpen) renderConsole();
         }
       });
     }
@@ -6184,8 +6200,22 @@
     window.addEventListener('load', run, { once: true });
   }
 
+  function filingInFlight() {
+    return pressing || Boolean(shelfVisit?.surface?.filing?.());
+  }
+
+  function canEscapeConsole() {
+    return !filingInFlight() && !revokeConfirmed && !removalConfirming;
+  }
+
   function close(options = {}) {
-    if (!consoleOpen) return false;
+    if (!consoleOpen || (!disposed && !options.viaCoordinator && filingInFlight())) return false;
+    // Leaving a confirmation is cancellation, never a first press that can
+    // unexpectedly arm a destructive second press on the next visit.
+    revokeConfirmed = false;
+    removalConfirming = false;
+    removalCompanionChecked = false;
+    consoleSuspended = false;
     discardProtectionApproval();
     shelfVisit = null;
     methodVisit = null;
@@ -6211,16 +6241,7 @@
       clear(host);
     }
     const coordinator = overlayCoordinator();
-    if (!options.viaCoordinator && coordinator && typeof coordinator.close === 'function') {
-      // The coordinator releases the background inert marking here, which has
-      // to happen BEFORE focus moves: an inert element cannot take focus, so
-      // restoring first would silently do nothing.
-      coordinator.close(consoleOverlayId);
-    }
-    // Restore focus ourselves either way. The coordinator holds the same
-    // element reference we were given, and it is just as likely to be stale —
-    // only this module knows how to find the control's live replacement.
-    restoreConsoleFocus();
+    if (!options.viaCoordinator && !coordinator?.close?.(consoleOverlayId)) restoreConsoleFocus();
     consoleOverlayId = '';
     const wasDownloads = Boolean(lastStatus?.downloads_review);
     if (!options.keepUrl) syncUrl();
@@ -6251,12 +6272,13 @@
     consoleTrigger = null;
 
     if (isVisibleFocusTarget(trigger)) {
-      trigger.focus();
+      trigger.focus({ preventScroll: true });
       return;
     }
 
-    const replacement = liveTrigger(trigger);
-    if (isVisibleFocusTarget(replacement)) replacement.focus();
+    const fromDepot = document.getElementById(CONSOLE_HOST_ID)?.getAttribute('data-fj-map-side');
+    const replacement = (fromDepot && firstVisible(MAP_DEPOT)) || liveTrigger(trigger);
+    if (isVisibleFocusTarget(replacement)) replacement.focus({ preventScroll: true });
   }
 
   function isInDocument(node) {
@@ -6331,6 +6353,7 @@
   }
 
   function renderConsole() {
+    if (consoleSuspended) return;
     const host = consoleHost();
     if (!host) return;
     const status =
@@ -6645,7 +6668,19 @@
     if (url.search === before) return;
     const method = options.replace ? 'replaceState' : 'pushState';
     if (typeof window.history[method] !== 'function') return;
-    window.history[method]({ fileJanitor: consoleOpen }, '', url.toString());
+    window.history[method](consoleHistoryState(), '', url.toString());
+  }
+
+  // History can return to a depot visit; a copied URL remains an ordinary
+  // review link. Presentation never comes from an approval or query param.
+  function consoleHistoryState() {
+    return {
+      ...window.history.state,
+      fileJanitor: consoleOpen,
+      fileJanitorDepot:
+        consoleOpen &&
+        Boolean(document.getElementById(CONSOLE_HOST_ID)?.getAttribute('data-fj-map-side'))
+    };
   }
 
   // applyUrlState opens or closes the console to match the URL. It runs on load
@@ -6656,6 +6691,12 @@
     if (typeof window === 'undefined' || !window.location) return;
     const params = new URLSearchParams(window.location.search || '');
     const wants = params.get('panel') === CONSOLE_PANEL_PARAM;
+    if (consoleOpen && filingInFlight()) {
+      // Back cannot discard a pending receipt. Restore this visit in history;
+      // Back works normally again once the request settles.
+      syncUrl();
+      return;
+    }
     if (!wants) {
       if (consoleOpen) close({ keepUrl: true });
       return;
@@ -6696,7 +6737,8 @@
       renderConsole();
       return;
     }
-    open({ source: options.source || 'url', tab, item });
+    const depot = window.history?.state?.fileJanitorDepot && firstVisible(MAP_DEPOT);
+    open({ source: depot ? 'map-depot' : options.source || 'url', trigger: depot, tab, item });
     // The URL already says what it says; rewriting it here would push a
     // duplicate entry and make one Back press appear to do nothing.
     syncUrl({ replace: true });
@@ -6946,7 +6988,7 @@
       url.searchParams.delete('preparation');
       url.searchParams.delete('batch_id');
     }
-    window.history.replaceState({ fileJanitor: consoleOpen }, '', url.toString());
+    window.history.replaceState(consoleHistoryState(), '', url.toString());
   }
 
   async function requestStopBuild(operation_id) {
@@ -7941,10 +7983,17 @@
     // rather than navigating away from a page the user never left (FR-124).
     window.addEventListener('popstate', () => applyUrlState({ source: 'popstate' }));
     window.addEventListener('keydown', event => {
-      if (!consoleOpen || event.key !== 'Escape') return;
+      if (
+        !consoleOpen ||
+        consoleSuspended ||
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        document.querySelector?.('dialog:modal')
+      )
+        return;
       // A destructive confirmation owns Escape while it is on screen (FR-120), and
       // a File request that is in flight is not closed under.
-      if (pressing || revokeConfirmed) return;
+      if (!canEscapeConsole()) return;
       event.preventDefault();
       close();
     });
@@ -8709,6 +8758,8 @@
       buildObserver?.reset();
       buildProgress = null;
       consoleOpen = false;
+      consoleSuspended = false;
+      revokeConfirmed = false;
       consoleTab = 'review';
       consoleItem = '';
       consoleTrigger = null;

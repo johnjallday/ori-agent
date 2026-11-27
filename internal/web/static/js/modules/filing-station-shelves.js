@@ -660,7 +660,12 @@
       }
     }
     draw();
-    return { host, load, pending: () => busy || Boolean(waiting) };
+    return {
+      host,
+      load,
+      pending: () => busy || Boolean(waiting),
+      filing: () => busy && Boolean(waiting)
+    };
   }
   // Settings shares the workspace feedback store with Documents. Removing a
   // pattern never edits the receipt, the contents of a folder, or an approval.

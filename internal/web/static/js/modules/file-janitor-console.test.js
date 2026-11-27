@@ -13,6 +13,7 @@ import {
   protectionStripSentence,
   TRIP_KEY
 } from './file-janitor-protection.js';
+import { OverlayCoordinator } from './workspace-overlay-coordinator.js';
 import * as pictureModule from './file-janitor-picture.js';
 import * as receiptModule from './file-janitor-receipt.js';
 import * as connectionsModule from './file-janitor-connections.js';
@@ -2613,6 +2614,43 @@ test('closing returns focus to the control that opened it', () => {
   panel.open({ source: 'map-station', trigger: station });
   panel.close();
   assert.equal(doc.activeElement, station, 'focus must go back where the user left it');
+});
+
+test('coordinated dismissal resolves the repainted depot after inertness is released', () => {
+  const doc = setup();
+  let inert = false;
+  const coordinator = new OverlayCoordinator({
+    setInert: () => {
+      inert = true;
+    },
+    releaseInert: () => {
+      inert = false;
+    },
+    restoreFocus: trigger => {
+      assert.equal(inert, false);
+      trigger.focus();
+    }
+  });
+  window.workspaceOverlayCoordinator = coordinator;
+  try {
+    panel.render(statusFixture());
+    const original = doc.register('original');
+    panel.open({ source: 'map-depot', trigger: original });
+    const host = doc.getElementById('fileJanitorConsole');
+    coordinator.open({ id: 'child', kind: 'modal', container: doc.register('child') });
+    panel.render(statusFixture());
+    assert.equal(host.hidden, true, 'a suspended console stays hidden through status refresh');
+    coordinator.close('child');
+    assert.equal(host.hidden, false);
+    original._connected = false;
+    const rebuilt = doc.register('rebuilt');
+    doc.querySelector = selector => (selector.includes('.ws-cmd-map-hq-station') ? rebuilt : null);
+    coordinator.escapeTopmost();
+    assert.equal(panel.isOpen(), false);
+    assert.equal(doc.activeElement, rebuilt);
+  } finally {
+    delete window.workspaceOverlayCoordinator;
+  }
 });
 
 test('closing during a recommendation read lands in its region, not the competing card', () => {

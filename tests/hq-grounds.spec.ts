@@ -43,6 +43,11 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
   const before = (await readdir(root)).sort();
   await installLocalCdn(page);
   await page.addInitScript(() => localStorage.setItem('ori-theme', 'light'));
+  const fileRequests: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && /\/batches\/[^/]+\/file$/.test(new URL(req.url()).pathname))
+      fileRequests.push(req.url());
+  });
   await page.goto(path + '?mode=map');
   const grounds = page.getByRole('region', { name: 'HQ grounds' });
   const btn = (key: string) => grounds.locator(`[data-cmd-hq-station="${key}"]`);
@@ -61,6 +66,12 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
   await expect(depot).toBeFocused();
   await depot.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
   await page.screenshot({ path: info.outputPath('light-keyboard.png') });
+  const mapContext = () =>
+    depot.evaluate(el => {
+      const { x, y } = el.getBoundingClientRect();
+      return { x, y, position: el.getAttribute('style'), scrollX, scrollY };
+    });
+  const atDepot = await mapContext();
   await depot.press('Enter');
   await expect(review).toBeVisible();
   await expect(review.getByRole('tab', { name: 'Review' })).toHaveAttribute(
@@ -73,6 +84,10 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
     panelBox.x + panelBox.width <= depotBox.x || depotBox.x + depotBox.width <= panelBox.x
   ).toBe(true);
   await expect(depot).toHaveCSS('outline-style', 'solid');
+  expect(await depot.evaluate(el => !!el.closest('[inert]'))).toBe(true);
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await page.mouse.move(depotBox.x + depotBox.width / 2, depotBox.y + depotBox.height / 2);
+  await page.mouse.wheel(0, 480);
   await expect(review.locator('.fj-console-folder')).toHaveText(basename(root));
   await page.screenshot({ path: info.outputPath('depot-panel.png') });
   await review.getByRole('button', { name: 'All files', exact: true }).click();
@@ -83,7 +98,17 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
   await page.keyboard.press('Escape');
   await expect(review).toBeHidden();
   await expect(depot).toBeFocused();
+  expect(await mapContext()).toEqual(atDepot);
   expect((await readdir(root)).sort()).toEqual(before);
+  await depot.press('Enter');
+  await expect(fileTwo).toBeEnabled();
+  await page.goBack();
+  await expect(review).toBeHidden();
+  await expect(depot).toBeFocused();
+  await page.goForward();
+  await expect(review.locator('.fj-depot-bar')).toBeVisible();
+  await review.getByRole('button', { name: 'Back to map' }).click();
+  await expect(depot).toBeFocused();
   for (const name of files)
     expect(await readFile(join(root, name), 'utf8')).toBe('Example: ' + name);
 
@@ -158,6 +183,49 @@ test('HQ grounds: review without filing, place a building, remember Flow', async
   await review.getByRole('button', { name: 'Back to map' }).tap();
   await expect(review).toBeHidden();
   expect((await readdir(root)).sort()).toEqual(before);
+
+  expect(fileRequests).toEqual([]);
+  await depot.tap();
+  await expect(fileTwo).toBeEnabled();
+  // Hold the request, not its result: the real server files the two files
+  // only when the one explicit File press is released below.
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await page.route('**/batches/*/file', async route => {
+    await held;
+    await route.continue();
+  });
+  await fileTwo.tap();
+  try {
+    await expect.poll(() => fileRequests.length).toBe(1);
+    await page.keyboard.press('Escape');
+    await expect(review).toBeVisible();
+    await review.getByRole('button', { name: 'Back to map' }).tap();
+    await expect(review).toBeVisible();
+    await page.goBack();
+    await expect(review).toBeVisible();
+    await expect(page).toHaveURL(/panel=file-janitor/);
+  } finally {
+    release();
+  }
+  const receipt = review.locator('#fileJanitorReceipt');
+  await expect(receipt).toContainText('2 files filed.', { timeout: 60000 });
+  await expect(receipt).toContainText('1 file stays loose');
+  await expect(receipt).toContainText('Filed/Documents');
+  await expect(receipt).toContainText('Filed/Images');
+  await page.screenshot({ path: info.outputPath('depot-receipt.png') });
+  expect(fileRequests).toHaveLength(1);
+  expect((await readdir(root)).sort()).toEqual(['Filed', loose].sort());
+  for (const [folder, name] of [
+    ['Documents', 'brief.pdf'],
+    ['Images', 'map.png']
+  ]) {
+    expect(await readdir(join(root, 'Filed', folder))).toEqual([name]);
+    expect(await readFile(join(root, 'Filed', folder, name), 'utf8')).toBe('Example: ' + name);
+  }
+  expect(await readFile(join(root, loose), 'utf8')).toBe('Example: ' + loose);
 
   const ordinary = (await (await post('/api/workspaces', { name: 'Archive only' })).json()).folder;
   await page.goto(`/workspaces/${ordinary.folder_slug}?mode=map`);

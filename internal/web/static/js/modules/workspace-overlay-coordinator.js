@@ -268,7 +268,8 @@ function trapFocus(container) {
   if (typeof document === 'undefined' || !container) return;
   if (trapByContainer.has(container)) return;
   const onKeydown = event => {
-    if (event.key !== 'Tab') return;
+    // A native modal (e.g. Filing's destination chooser) traps its own Tab.
+    if (event.key !== 'Tab' || event.target?.closest?.('dialog:modal')) return;
     const focusable = Array.from(container.querySelectorAll?.(FOCUSABLE) || []).filter(
       node =>
         node.getAttribute?.('tabindex') !== '-1' &&

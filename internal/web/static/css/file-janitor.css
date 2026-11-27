@@ -2612,9 +2612,12 @@ body:has(.fj-console-host[data-fj-map-side]:not([hidden]))
   outline-offset: 3px;
 }
 
+html:has(.fj-console-host[data-fj-map-side]:not([hidden])) {
+  overflow: hidden;
+}
+
 .fj-console-host[data-fj-map-side] .fj-console-backdrop {
   background: rgb(0 0 0 / 24%);
-  overscroll-behavior: contain;
 }
 
 .fj-depot-bar {
