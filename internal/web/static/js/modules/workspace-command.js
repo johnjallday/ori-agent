@@ -104,6 +104,7 @@ import {
 import { openHomeFeed, pendingHomeFeeds, homeFolderChips } from './home-map-folders.js';
 import { memberCommanders } from './member-commanders.js';
 import { nodeAgentNames } from './linked-agents.js';
+import { mountMapTeamDeck } from './map-team-deck.js';
 import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
 import {
   deleteWorkspace as deleteWorkspaceAction,
@@ -14720,6 +14721,9 @@ export class WorkspaceCommandView {
     const host = this.ensureDetachmentHost();
     if (!host) return;
     if (host.parentNode !== slot) slot.appendChild(host);
+    const dock = globalThis.document?.querySelector?.('.assistant-launcher-dock');
+    if (dock && !this.mapTeamDeck) this.mapTeamDeck = mountMapTeamDeck(this, dock);
+    this.mapTeamDeck?.update();
     this.attachMusicFolders(slot);
     // The dock was rebuilt with the rest of the view; the selected song's card
     // comes back from the last read, without a fetch.
@@ -15067,6 +15071,8 @@ export class WorkspaceCommandView {
   }
 
   unmountDetachmentMap() {
+    this.mapTeamDeck?.destroy();
+    this.mapTeamDeck = null;
     this.homeFeedDialog?.close();
     this.closeMusicFolders();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;

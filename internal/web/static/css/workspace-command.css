@@ -1060,6 +1060,84 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
+/* A group map's team index: a small tab on the paper chat pill, with
+   faces and place labels arranged like entries in a field notebook. */
+.map-team-tab {
+  min-height: 44px;
+  padding: 4px 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 16px 6px 6px 16px;
+  background: var(--ori-surface);
+  color: var(--ori-accent-text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.map-team-tab[aria-expanded="true"] {
+  border-color: var(--ori-accent-strong);
+}
+.map-team-deck {
+  position: absolute;
+  right: 0;
+  width: min(304px, calc(100vw - 32px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 12px;
+  background: var(--ori-surface);
+  color: var(--ori-ink);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+}
+.map-team-deck h2 {
+  margin: 0 4px 6px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.map-team-deck p {
+  margin: 8px 4px 0;
+}
+.map-team-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-top: 1px solid var(--ori-line);
+  overflow-wrap: anywhere;
+}
+.map-team-face {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+}
+.map-team-face .ws-map-av-label {
+  display: none;
+}
+.map-team-face .ws-map-av,
+.map-team-face .ws-cmd-character {
+  margin: 0;
+}
+.map-team-card small {
+  display: block;
+}
+.map-team-tab:focus-visible,
+.map-team-deck button:focus-visible {
+  outline: 2px solid var(--ori-accent-strong);
+  outline-offset: 1px;
+}
+@media (max-width: 760px) {
+  .assistant-launcher-dock:has(.map-team-tab) {
+    margin: 0 12px 12px;
+  }
+  .assistant-launcher-dock:has(.map-team-tab) .personal-assistant-launcher {
+    min-width: 0;
+    margin: 0;
+  }
+}
+
 /* A Home's selected linked song (song-card PRD FR9): the shared card from
    components.css, under Give work, scrolling inside itself when tall. */
 .ws-cmd-map-song-card {
