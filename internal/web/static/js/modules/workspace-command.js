@@ -75,6 +75,7 @@ import {
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 import { openLibrarySheet } from './map-library-sheet.js';
+import { openMusicMapFinder } from './music-map-finder.js';
 import { folderMapTree, drawFolderMap } from './music-folder-map.js';
 import { readWorkspaceSourceFolders } from './workspace-source-folders.js';
 import {
@@ -12763,6 +12764,10 @@ export class WorkspaceCommandView {
           ?.focus?.({ preventScroll: true });
         return;
       }
+      if (event.target.closest('[data-music-find]')) {
+        this.findMusicProject();
+        return;
+      }
       const folderRoot = event.target.closest('[data-cmd-folder-root]');
       if (folderRoot) {
         const menu = folderRoot.closest('details');
@@ -13953,6 +13958,9 @@ export class WorkspaceCommandView {
       '<span class="ws-map-folder-names" data-cmd-folder-names>' +
       this.mapFolderNamesHTML() +
       '</span>' +
+      (this.isMusicHomeMap()
+        ? '<button type="button" class="ws-cmd-nav-btn" data-music-find aria-haspopup="dialog">Find a project</button>'
+        : '') +
       '<span data-cmd-folder-toggle-slot' +
       (this.canBrowseMusicFolders() ? '' : ' hidden') +
       '>' +
@@ -14305,6 +14313,67 @@ export class WorkspaceCommandView {
     if (this.active) this.syncDetachmentMap();
   }
 
+  isMusicHomeMap() {
+    const status = this.groupTemplateStatus;
+    return (
+      status?.kind === 'managed_home' &&
+      status.provider?.plugin_id === 'music-project-management' &&
+      status.workspace_id === this.workspaceId()
+    );
+  }
+
+  findMusicProject() {
+    const home = this.workspaceId();
+    if (!this.isMusicHomeMap() || this.musicFinder) return;
+    this.musicFinder = openMusicMapFinder({
+      home,
+      query: this.musicQuery,
+      current: () => this.active && this.viewMode === 'map' && this.workspaceId() === home,
+      remember: query => {
+        this.musicQuery = query;
+      },
+      reveal: (row, view) => this.revealMusicProject(row, view),
+      restoreFocus: () => this.container?.querySelector('[data-music-find]')?.focus(),
+      onClose: () => {
+        this.musicFinder = null;
+      }
+    });
+  }
+
+  revealMusicProject(row, view) {
+    const map = window.OriWorkspaceMap,
+      id = row.workspace_id;
+    if (
+      !this.isMusicHomeMap() ||
+      view.homeID !== this.workspaceId() ||
+      map?.getScopeGroupId() !== this.workspaceId()
+    )
+      return null;
+    const grouped = this.musicFolders;
+    const tile = grouped
+      ? Array.from(grouped.querySelectorAll('[data-folder-workspace]')).find(
+          el => el.dataset.folderWorkspace === id
+        )
+      : Array.from(this.detachmentMapEl.querySelectorAll('.ws-map-tile[data-ws-id]')).find(
+          el => el.dataset.wsId === id
+        );
+    if (!tile || !map.reveal(id, { frameFolder: true })) return null;
+    if (grouped) {
+      const section = tile.closest('details');
+      if (section) section.open = true;
+    }
+    this.detachmentFolderRow = null;
+    void this.memberFolderSelection().select('');
+    this.detachmentSongRead = Symbol();
+    this.detachmentSongCardHidden = '';
+    this.detachmentSongCardId = id;
+    (this.detachmentSongCards ??= new Map()).set(id, view);
+    this.paintDetachmentSongCard();
+    return () => {
+      tile.focus({ preventScroll: !grouped });
+    };
+  }
+
   /**
    * The map's selection changed. A workspace directly under a managed Home is
    * a song candidate; the server decides, and `linked:false` shows nothing.
@@ -14325,7 +14394,7 @@ export class WorkspaceCommandView {
     this.paintDetachmentFolders();
     const candidate =
       Boolean(id && row && homeId) &&
-      row.parent_id === homeId &&
+      parent === homeId &&
       !isGroupRow(row) &&
       this.groupTemplateStatus?.kind === 'managed_home';
     // A click on a tile (even the same one) brings a hidden card back.
@@ -14399,16 +14468,21 @@ export class WorkspaceCommandView {
 
   async loadDetachmentSongCard(id) {
     if (!this.detachmentSongCards) this.detachmentSongCards = new Map();
+    const home = this.workspaceId();
+    const token = (this.detachmentSongRead = Symbol());
     let view = null;
     try {
-      const response = await fetch(songCardURL(id), { headers: { Accept: 'application/json' } });
+      const response = await fetch(songCardURL(id), {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store'
+      });
       if (!response.ok) throw new Error(`song card ${response.status}`);
       view = songCardView(await response.json());
     } catch (err) {
       console.warn('workspace-command: song card unavailable', err);
-      if (this.detachmentSongCards.has(id)) return; // Keep the last good card.
     }
-    this.detachmentSongCards.set(id, view);
+    if (token !== this.detachmentSongRead || home !== this.workspaceId()) return;
+    this.detachmentSongCards.set(id, view?.homeID === home ? view : null);
     // The selection may have moved on meanwhile; paint shows whatever is current.
     if (this.detachmentSongCardId === id) this.paintDetachmentSongCard();
   }
@@ -15095,6 +15169,7 @@ export class WorkspaceCommandView {
     this.mapTeamDeck?.destroy();
     this.mapTeamDeck = null;
     this.homeFeedDialog?.close();
+    this.musicFinder?.close(false);
     this.closeMusicFolders();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (this.detachmentMapEl && map && typeof map.unmount === 'function') {

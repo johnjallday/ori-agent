@@ -37,6 +37,7 @@ type Search struct {
 
 type SearchRow struct {
 	FolderSection  *FolderSection `json:"folder_section,omitempty"`
+	FolderLabel    string         `json:"folder_label,omitempty"` // Owner map display only, never a resolver input.
 	WorkspaceID    string         `json:"workspace_id,omitempty"`
 	ID             string         `json:"id"`
 	Name           string         `json:"name"`
@@ -487,7 +488,13 @@ func (s *Store) query(scope Scope, query Search, withSections bool) (SearchPage,
 		// match one root while showing another root's unrelated format.
 		row := s.projectSearchRowInRoot(scope, entry, roots, linked, inactive, query.RootID, factsOn)
 		if withSections {
-			row.FolderSection = observedSection(entry, roots, inactive, query.RootID)
+			if source := uniqueFolderSource(entry, roots, inactive, query.RootID); source != nil {
+				row.FolderSection = sourceSection(source, roots)
+				row.FolderLabel = folderRootLabel(roots[source.RootID])
+				if source.RelativeFolder != "" {
+					row.FolderLabel += " / " + strings.ReplaceAll(filepath.ToSlash(source.RelativeFolder), "/", " / ")
+				}
+			}
 			if row.Connection == "connected" {
 				row.WorkspaceID = entry.Link.WorkspaceID
 			}

@@ -648,6 +648,79 @@
   background: var(--bg-primary);
   color: var(--text-primary);
 }
+.music-map-finder {
+  width: min(34rem, calc(100% - 2rem));
+  max-height: min(78dvh, 44rem);
+  overflow: auto;
+  padding: 1.25rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+.music-map-finder::backdrop {
+  background: rgb(10 14 19 / 65%);
+}
+.music-map-finder header,
+.music-map-finder form {
+  display: flex;
+  align-items: end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.music-map-finder header {
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.music-map-finder h2 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+.music-map-finder small {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.music-map-finder label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+.music-map-finder label:first-child {
+  flex: 1 1 11rem;
+  min-width: 0;
+}
+.music-map-finder :is(input, select, button) {
+  min-height: 2.5rem;
+  min-width: 0;
+  padding: 0.4rem 0.65rem;
+  color: inherit;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.4rem;
+}
+.music-map-finder ul {
+  list-style: none;
+  padding: 0;
+}
+.music-map-finder li button {
+  display: grid;
+  width: 100%;
+  text-align: start;
+  gap: 0.2rem;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  overflow-wrap: anywhere;
+}
+.music-map-finder li span,
+.music-map-finder [role="status"] {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.music-map-finder [data-preview] {
+  padding: 0.85rem;
+  border-inline-start: 3px solid var(--primary-color);
+}
 .music-folder-map__district,
 .music-folder-map details {
   margin-block: 0.7rem;

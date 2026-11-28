@@ -18,7 +18,7 @@ type FolderSection struct {
 	Breadcrumb string `json:"breadcrumb,omitempty"`
 }
 
-func observedSection(entry Entry, roots map[string]Root, inactive map[string]bool, inRoot string) *FolderSection {
+func uniqueFolderSource(entry Entry, roots map[string]Root, inactive map[string]bool, inRoot string) *Observation {
 	var source *Observation
 	for i := range entry.Observations {
 		o := &entry.Observations[i]
@@ -31,6 +31,14 @@ func observedSection(entry Entry, roots map[string]Root, inactive map[string]boo
 		}
 		source = o
 	}
+	return source
+}
+
+func observedSection(entry Entry, roots map[string]Root, inactive map[string]bool, inRoot string) *FolderSection {
+	return sourceSection(uniqueFolderSource(entry, roots, inactive, inRoot), roots)
+}
+
+func sourceSection(source *Observation, roots map[string]Root) *FolderSection {
 	if source == nil {
 		return nil
 	}
@@ -39,9 +47,13 @@ func observedSection(entry Entry, roots map[string]Root, inactive map[string]boo
 		return nil
 	}
 	id := sha256.Sum256([]byte(source.RootID + "\x00" + label))
-	rootName := filepath.Base(roots[source.RootID].Path)
+	return &FolderSection{ID: hex.EncodeToString(id[:]), RootLabel: folderRootLabel(roots[source.RootID]), Label: label, Breadcrumb: strings.ReplaceAll(crumb, "/", " / ")}
+}
+
+func folderRootLabel(root Root) string {
+	rootName := filepath.Base(root.Path)
 	if !validText(rootName, 255) || rootName == "." || rootName == string(filepath.Separator) {
 		rootName = "Folder"
 	}
-	return &FolderSection{ID: hex.EncodeToString(id[:]), RootLabel: rootName, Label: label, Breadcrumb: strings.ReplaceAll(crumb, "/", " / ")}
+	return rootName
 }
