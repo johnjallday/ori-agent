@@ -14339,6 +14339,13 @@ export class WorkspaceCommandView {
         this.musicQuery = query;
       },
       reveal: (row, view) => this.revealMusicProject(row, view),
+      setup: entry =>
+        this.openLibrarySetupSheet(
+          this.container.querySelector('[data-music-find]'),
+          null,
+          '',
+          entry
+        ),
       restoreFocus: () => this.container?.querySelector('[data-music-find]')?.focus(),
       onClose: () => {
         this.musicFinder = null;

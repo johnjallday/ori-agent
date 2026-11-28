@@ -1,7 +1,7 @@
 // A Home-local metadata browser. Search results and history are hints; the
 // current detail and reciprocal card must agree before we reveal a building.
 import { STAGE_LABELS, stageLabel } from './field-labels.js';
-import { createLibraryClient } from './library-setup.js';
+import { createLibraryClient, plainSetupReason } from './library-setup.js';
 import { ReadEpoch } from './project-library-browser.js';
 import { songCardURL, songCardView } from './song-card.js';
 
@@ -41,11 +41,27 @@ export async function readFinderSelection(home, row, client, signal, fetchImpl =
   return { detail, view: songCardView(card) };
 }
 
+// No activation request here: it inspects the source directory. Only the
+// existing setup sheet (opened by a separate press) needs that live check.
+export function previewBlocker({ row, provider_read_only }) {
+  if (row.connection !== 'catalog_only') return plainSetupReason('link_needs_review');
+  if (row.last_observed_availability === 'revoked_source')
+    return plainSetupReason('revoked_source');
+  if (row.last_observed_availability === 'unavailable') return plainSetupReason('unavailable');
+  if (!['available', 'ambiguous'].includes(row.last_observed_availability))
+    return 'No available source was recorded for this project.';
+  if (provider_read_only !== false) return plainSetupReason('home_provider_unavailable');
+  if (!row.can_open)
+    return `No installed project tool can open the recorded format${row.format ? ` (${row.format})` : ''}.`;
+  return '';
+}
+
 export function openMusicMapFinder({
   home,
   query = {},
   remember,
   reveal,
+  setup,
   restoreFocus,
   current,
   onClose
@@ -103,12 +119,34 @@ export function openMusicMapFinder({
         return;
       }
       const heading = document.createElement('h3');
-      heading.textContent = row.name;
+      const detail = selection.detail;
+      heading.textContent = detail.row.name;
       const meta = document.createElement('p');
-      meta.textContent = resultLabel(row);
+      meta.textContent = resultLabel({
+        ...detail.row,
+        folder_label: detail.sources?.[0]?.relative_folder
+      });
       const next = document.createElement('p');
-      next.textContent = selection.detail.fields?.next_action || 'No next action recorded.';
+      next.textContent = detail.fields?.next_action
+        ? `Current next action: ${detail.fields.next_action}`
+        : 'No next action recorded.';
       preview.replaceChildren(heading, meta, next);
+      const reason = previewBlocker(detail);
+      if (reason) {
+        const note = document.createElement('p');
+        note.textContent = reason;
+        preview.append(note);
+      } else {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'Set up on map';
+        button.addEventListener('click', () => {
+          if (!live(turn)) return;
+          close(false);
+          setup(detail.row.id);
+        });
+        preview.append(button);
+      }
       preview.hidden = false;
       status.textContent = 'Project preview';
       preview.focus();

@@ -129,3 +129,37 @@ test('read the recap, visit its notes and workspace, and return to the same sele
   await find(page).click();
   await expect(dialog.getByRole('searchbox')).toHaveValue('Night Drive');
 });
+
+test('inspect the demo, cancel at explicit file choice, and explain blocked previews', async ({
+  page,
+  request
+}) => {
+  await installLocalCdn(page);
+  await page.goto(home);
+  const dialog = await search(page);
+  const snapshot = async () =>
+    libraryJSON(await request.get(`${base}/projects?folder_sections=1&text=Night`));
+  const before = await snapshot();
+  await dialog.getByRole('button', { name: /Night Drive.*Library only.*Demo/ }).click();
+  const preview = dialog.getByRole('region', { name: 'Project preview' });
+  await preview.screenshot({ path: join(evidence, 'demo-preview.png') });
+  await preview.getByRole('button', { name: 'Set up on map' }).click();
+  const sheet = page.locator('[data-library-sheet="finder-home"]');
+  const radios = sheet.getByRole('radiogroup', { name: 'Project file for Night Drive' });
+  await expect(radios.getByRole('radio')).toHaveCount(2);
+  await expect(radios.locator(':checked')).toHaveCount(0);
+  await sheet.screenshot({ path: join(evidence, 'file-choice.png') });
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
+  await expect(sheet).toHaveCount(0);
+  expect(await snapshot()).toEqual(before);
+  await find(page).click();
+  for (const [name, reason] of [
+    ['Other format', '(ableton)'],
+    ['Offline song', 'last scan did not find']
+  ]) {
+    await dialog.getByRole('searchbox').fill(name);
+    await dialog.getByRole('button', { name: new RegExp(name) }).click();
+    await expect(preview).toContainText(reason);
+    await expect(preview.getByRole('button', { name: 'Set up on map' })).toHaveCount(0);
+  }
+});
