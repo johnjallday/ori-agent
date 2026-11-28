@@ -1639,7 +1639,9 @@ export class ProjectLibraryPanel {
     if (this.arrivalHandled) return;
     const hash = globalThis.location?.hash;
     let heading = null;
-    if (hash === '#projectLibraryProposals') {
+    if (this.mapNotesArrival && this.handoffEntry === this.mapNotesArrival) {
+      heading = document.getElementById('projectLibraryPaneTitle');
+    } else if (hash === '#projectLibraryProposals') {
       const section = document.getElementById('projectLibraryProposals');
       if (section && !section.hidden) {
         const management = document.getElementById('projectLibraryManagement');
@@ -4167,8 +4169,16 @@ export class ProjectLibraryPanel {
 
   async restoreBrowserResults({ metadataOnly = false } = {}) {
     const turn = this.restoreRead.begin();
-    const intent = this.pendingBrowserIntent || this.browserIntent();
+    let intent = this.pendingBrowserIntent || this.browserIntent();
     this.pendingBrowserIntent = null;
+    // The map names only an entry in this Home. Do not restore a previous
+    // project's Files tab (or require this entry to be on the first page).
+    const notes = /^#project-session=([a-zA-Z0-9_-]{1,160})$/.exec(globalThis.location?.hash || '');
+    if (notes && this.musicHandoff && !this.mapNotesArrival && !metadataOnly) {
+      this.mapNotesArrival = this.handoffEntry = notes[1];
+      this.paneHidden = false;
+      intent = { query: {}, pages: 1, selected: notes[1], tab: 'sessions' };
+    }
     this.restoringBrowser = true;
     this.collectionScope = null; // Return/reload resolves fresh membership; no stored revision is authority.
     try {

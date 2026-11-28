@@ -658,6 +658,20 @@
   background: var(--bg-primary);
   color: var(--text-primary);
 }
+[data-music-map-notice]:empty {
+  display: none;
+}
+.music-map-resume {
+  margin-block: 0.65rem;
+  border-block: 1px solid var(--border-color);
+  padding-block: 0.65rem;
+}
+.music-map-resume p {
+  margin: 0.15rem 0 0.5rem;
+}
+.music-map-resume button {
+  margin: 0.2rem 0.3rem 0.2rem 0;
+}
 .music-map-finder::backdrop {
   background: rgb(10 14 19 / 65%);
 }

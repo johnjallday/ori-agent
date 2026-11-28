@@ -97,3 +97,35 @@ test('find a late-page song, distinguish duplicate names and reveal the existing
   await expect(tile).toBeVisible();
   await expect(tile).toBeFocused();
 });
+
+test('read the recap, visit its notes and workspace, and return to the same selection and camera', async ({
+  page
+}) => {
+  await installLocalCdn(page);
+  await page.goto(home);
+  const dialog = await search(page);
+  await dialog.getByRole('button', { name: /Night Drive.*On map.*EP/ }).click();
+  const card = page.locator('[data-cmd-song-card-slot]');
+  const resume = card.locator('.music-map-resume');
+  await expect(resume).toContainText('Kept take 3');
+  await expect(resume).toContainText('Comp the bridge.');
+  await expect(resume).toContainText('Observed file save:');
+  await card.screenshot({ path: join(evidence, 'resume-card.png') });
+  const camera = () => page.evaluate(() => (window as any).OriWorkspaceMap.getCamera());
+  // Not just the auto-framed viewport: the producer panned after selection.
+  await page.evaluate(() => (window as any).OriWorkspaceMap.panBy(45, 30));
+  const before = await camera();
+  await resume.getByRole('button', { name: 'View session notes' }).click();
+  await expect(page.locator('#projectLibraryPaneTitle')).toHaveText('Night Drive');
+  await expect(page.locator('.project-library-session-history')).toContainText('Kept take 3');
+  await page.goBack();
+  await expect(resume).toContainText('Kept take 3');
+  expect(await camera()).toEqual(before);
+  await resume.getByRole('button', { name: 'Open workspace' }).click();
+  await expect(page).toHaveURL(/\/workspaces\/ep-workspace(?:[?#]|$)/);
+  await page.goBack();
+  await expect(resume).toContainText('Kept take 3');
+  expect(await camera()).toEqual(before);
+  await find(page).click();
+  await expect(dialog.getByRole('searchbox')).toHaveValue('Night Drive');
+});
