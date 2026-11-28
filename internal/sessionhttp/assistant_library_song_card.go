@@ -19,6 +19,7 @@ type songCardResponse struct {
 	*projectlibrary.SongCard
 	// Words are the Home's package words for the card (neutral without one).
 	Words            *projectlibrary.Words `json:"words,omitempty"`
+	WorkspaceRoute   string                `json:"workspace_route,omitempty"`
 	HomeName         string                `json:"home_name,omitempty"`
 	StatusLine       string                `json:"status_line,omitempty"`
 	HomeRoute        string                `json:"home_route,omitempty"`
@@ -80,6 +81,9 @@ func (h *Handler) GetSongCard(w http.ResponseWriter, r *http.Request) {
 	}
 	response := songCardResponse{Linked: true, SongCard: &card, Words: &words, HomeName: home.Name,
 		StatusLine: projectlibrary.StatusLine(card, words, now)}
+	if card.EntryID != "" && workspace.IsCanonicalWorkspaceSlug(child.FolderSlug) {
+		response.WorkspaceRoute = "/workspaces/" + url.PathEscape(child.FolderSlug)
+	}
 	if workspace.IsCanonicalWorkspaceSlug(home.FolderSlug) {
 		base := "/workspaces/" + url.PathEscape(home.FolderSlug)
 		response.HomeRoute = base

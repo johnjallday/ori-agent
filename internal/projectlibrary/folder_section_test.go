@@ -72,7 +72,7 @@ func TestOwnerSectionPageOnlyOnExplicitQuery(t *testing.T) {
 	walkScopes(t, r, scope, root, []string{"Albums"}, 3)
 	query := Search{PageSize: 1}
 	page, err := r.library.QueryFolderSections(scope, query)
-	if err != nil || len(page.Rows) != 1 || page.Rows[0].FolderSection == nil || page.NextCursor == "" {
+	if err != nil || len(page.Rows) != 1 || page.Rows[0].FolderSection == nil || page.Rows[0].FolderLabel != page.Rows[0].FolderSection.RootLabel+" / Albums / One" || page.NextCursor == "" {
 		t.Fatalf("page: %+v %v", page, err)
 	}
 	query.Cursor = page.NextCursor
@@ -85,7 +85,7 @@ func TestOwnerSectionPageOnlyOnExplicitQuery(t *testing.T) {
 	}
 	query.Cursor = ""
 	normal, err := r.library.Query(scope, query)
-	if err != nil || len(normal.Rows) != 1 || normal.Rows[0].FolderSection != nil {
+	if err != nil || len(normal.Rows) != 1 || normal.Rows[0].FolderSection != nil || normal.Rows[0].FolderLabel != "" {
 		t.Fatal(normal, err)
 	}
 }

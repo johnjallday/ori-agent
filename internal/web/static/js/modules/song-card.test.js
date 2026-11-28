@@ -82,6 +82,7 @@ function makeNode(tag, doc) {
     set innerHTML(_value) {
       throw new Error('innerHTML must not be used');
     },
+    addEventListener() {},
     append(...nodes) {
       this.children.push(...nodes);
     },
@@ -182,6 +183,17 @@ test('the rendered card uses native anchors only, in the PRD order, and no butto
     ]
   );
   assert.equal(tags(card, 'BUTTON').length, 0);
+});
+
+test('only a successfully read empty history says no session note yet', () => {
+  const container = makeDocument().createElement('div');
+  const resume = overrides =>
+    renderSongCard(container, songCardView(linked(overrides)), { onResume() {} });
+  assert.match(resume({}).textContent, /No session note yet/);
+  assert.match(resume({ has_session_note: true }).textContent, /No recap to show/);
+  assert.doesNotMatch(resume({ entry_id: '' }).textContent, /No session note yet/);
+  renderSongCard(container, null);
+  assert.doesNotMatch(container.textContent, /No session note yet/);
 });
 
 test('facts off says so and links to the Home switch; it never offers to toggle', () => {

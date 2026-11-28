@@ -610,5 +610,12 @@ func (h *Handler) GetAssistantLibraryProject(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	detail.ProviderReadOnly = !h.assistantLibraryProviderEvidence(scope, station)
+	if !detail.ProviderReadOnly && detail.Row.Connection == "catalog_only" {
+		// Preview uses the shelf's metadata-only hint. Live source verification
+		// belongs to the setup sheet, not to selecting a search result.
+		rows := []projectlibrary.SearchRow{detail.Row}
+		h.markOpenableRows(scope, station, rows)
+		detail.Row = rows[0]
+	}
 	_ = orihttp.RespondSuccess(w, detail)
 }

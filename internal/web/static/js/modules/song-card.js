@@ -144,6 +144,12 @@ export function songCardView(data, { now = new Date(), words } = {}) {
   if (data.fields && typeof data.fields === 'object') {
     view.details = songCardDetails(data.fields, resolvedWords, now);
   }
+  view.entryID = text(data.entry_id);
+  view.workspaceRoute = safeWorkspaceRoute(data.workspace_route);
+  view.recap = text(data.last_session?.first_sentence);
+  view.hasSessionNote = !!(view.recap || data.has_session_note);
+  view.nextAction = text(data.fields?.next_action);
+  view.savedAt = text(data.last_saved_at);
   view.suggestions = (Array.isArray(data.suggestions) ? data.suggestions : [])
     .map(suggestion => suggestionView(suggestion, resolvedWords, now))
     .filter(suggestion => suggestion.id && suggestion.rows.length);
@@ -233,7 +239,7 @@ function anchor(doc, className, link) {
  * `onAccept(suggestion, button)` and `onDismiss(suggestion, button)` give the
  * suggestion block its two native buttons; without them it is read-only.
  */
-export function renderSongCard(container, view, { onAccept, onDismiss } = {}) {
+export function renderSongCard(container, view, { onAccept, onDismiss, onResume } = {}) {
   if (!container) return null;
   const doc = container.ownerDocument || globalThis.document;
   if (!view) {
@@ -259,6 +265,41 @@ export function renderSongCard(container, view, { onAccept, onDismiss } = {}) {
     head.append(home);
   }
   card.append(head);
+  const resume = onResume && view.entryLinked;
+  if (resume) {
+    const lead = element(doc, 'div', 'music-map-resume');
+    lead.append(
+      element(doc, 'strong', '', 'Last session'),
+      element(
+        doc,
+        'p',
+        '',
+        view.recap ||
+          (view.hasSessionNote ? 'No recap to show. View the saved notes.' : 'No session note yet')
+      ),
+      element(doc, 'strong', '', 'Current next action'),
+      element(doc, 'p', '', view.nextAction || 'Not recorded')
+    );
+    const at = new Date(view.savedAt);
+    lead.append(
+      element(
+        doc,
+        'p',
+        'song-card-saved',
+        `Observed file save: ${Number.isFinite(at.getTime()) ? at.toLocaleString() : 'Unknown'}`
+      )
+    );
+    for (const [action, label] of [
+      ['workspace', 'Open workspace'],
+      ['notes', 'View session notes']
+    ]) {
+      const button = element(doc, 'button', 'modern-btn modern-btn-secondary', label);
+      button.type = 'button';
+      button.addEventListener('click', () => onResume(action));
+      lead.append(button);
+    }
+    card.append(lead);
+  }
 
   const facts = element(
     doc,
@@ -274,7 +315,7 @@ export function renderSongCard(container, view, { onAccept, onDismiss } = {}) {
   const learned = renderLearned(doc, view.learned);
   if (learned) card.append(learned);
 
-  if (view.savedText) card.append(element(doc, 'p', 'song-card-saved', view.savedText));
+  if (view.savedText && !resume) card.append(element(doc, 'p', 'song-card-saved', view.savedText));
   card.append(
     element(
       doc,
@@ -302,7 +343,7 @@ export function renderSongCard(container, view, { onAccept, onDismiss } = {}) {
 export function renderInteractiveSongCard(
   container,
   view,
-  { reload, fetchImpl, confirm, onError } = {}
+  { reload, fetchImpl, confirm, onError, onResume } = {}
 ) {
   const handlers = suggestionHandlers(view, {
     fetchImpl,
@@ -310,7 +351,7 @@ export function renderInteractiveSongCard(
     onError,
     onChanged: () => (typeof reload === 'function' ? reload() : undefined)
   });
-  return renderSongCard(container, view, handlers);
+  return renderSongCard(container, view, { ...handlers, onResume });
 }
 
 /** Fetches and renders a workspace's card; any failure leaves the container hidden. */

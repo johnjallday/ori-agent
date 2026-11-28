@@ -55,6 +55,7 @@ type SongCard struct {
 	LastSavedAt     *time.Time             `json:"last_saved_at,omitempty"`
 	KeeperAgentName string                 `json:"keeper_agent_name,omitempty"`
 	LastSession     *SongSession           `json:"last_session,omitempty"`
+	HasSessionNote  bool                   `json:"has_session_note,omitempty"`
 	OpenWork        workspace.TicketCounts `json:"open_work_counts"`
 	// Fields are the connected entry's portfolio and plugin fields (PRD #792
 	// FR14). Nil for a broken, diverged or not yet adopted link.
@@ -203,6 +204,16 @@ func (s *Store) SongCard(scope Scope, childID string, words Words) (SongCard, er
 			card.FactsState = FactsStateOn
 		}
 		card.LastSession = lastAcceptedRecap(doc.Sessions, entry.ID)
+		card.HasSessionNote = card.LastSession != nil
+		if !card.HasSessionNote {
+			// An accepted goal (or a recap withheld from the card) is not an empty history.
+			for _, record := range doc.Sessions {
+				if record.EntryID == entry.ID && record.State == "accepted" {
+					card.HasSessionNote = true
+					break
+				}
+			}
+		}
 		card.Fields = songCardFields(entry.Fields, words)
 		card.Suggestions = s.songCardSuggestions(scope, doc, entry.ID, words)
 		return card, nil
