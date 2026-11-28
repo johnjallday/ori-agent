@@ -142,7 +142,10 @@
           /* Children, not the wrapper: the setup wizard's <dialog> lives in here
              and must still open (from the attention strip) on the HQ. */
           body[data-hq-details="1"] #workspaceTopMounts > :not(dialog) { display: none !important; }
-          .documents-look:not([hidden]) { display: grid; gap: .7rem; padding: 1rem 1.25rem; margin: 0 auto 1rem; max-width: 64rem; border: 1px solid var(--bs-border-color); border-inline-start: .25rem solid var(--bs-primary); border-radius: .65rem; background: var(--bs-body-bg); }
+          .documents-look:not([hidden]) { display: grid; gap: .7rem; padding: 1rem 1.25rem; margin: 0 auto 1rem; max-width: 64rem; border: 1px solid var(--bs-border-color); border-inline-start: .25rem solid var(--bs-primary); border-radius: .65rem; background: var(--bs-body-bg); color: var(--bs-body-color); }
+          .documents-look [data-documents-project-panel] { min-width: 0; overflow-wrap: anywhere; }
+          .documents-look [data-documents-project-panel] .btn-outline-primary { color: var(--bs-body-color); background: var(--bs-tertiary-bg); border-color: var(--bs-secondary-color); }
+          .documents-look [data-documents-project-panel] .btn-outline-primary:hover { background: var(--bs-secondary-bg); }
           .documents-look__byline, .documents-look__actions { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; }
           .documents-look h2 { margin: .6rem 0 .3rem; font-size: 1.2rem; }
           .documents-look p { margin: 0; max-width: 68ch; }
@@ -158,9 +161,11 @@
           </div>
           <div class="documents-look__actions">
             <button class="btn btn-primary" type="button" data-documents-action>Look around Documents</button>
+            <button class="btn btn-outline-primary" type="button" data-documents-projects hidden>Find projects in this folder</button>
             <button class="btn btn-outline-primary" type="button" data-documents-build hidden>Build a Filing station</button>
             <button class="btn btn-outline-secondary" type="button" data-documents-dismiss>Not now</button>
           </div>
+          <section data-documents-project-panel aria-label="Project discovery" class="border-top pt-3" hidden></section>
           <p class="form-text mb-0" role="status" tabindex="-1" data-documents-status></p>
         </section>
         <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->

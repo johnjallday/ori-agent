@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 97
+const schemaVersion = 98
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -271,6 +271,12 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		if isDuplicateColumnError(err) {
 			return nil
 		}
+		return err
+	case 98:
+		// Suppression only, never a folder or content grant. Delete with the manager receipt.
+		_, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS ignored_documents_projects (
+			manager_id TEXT NOT NULL REFERENCES workspace_creation_operations(workspace_id) ON DELETE CASCADE,
+			folder_ref TEXT NOT NULL, PRIMARY KEY (manager_id,folder_ref))`)
 		return err
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)

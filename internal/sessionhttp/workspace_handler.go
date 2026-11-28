@@ -131,6 +131,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		subPath := parts[1]
 
 		switch subPath {
+		case "documents-projects":
+			h.handleDocumentsProjects(w, r, id)
+			return
 		case "verify-documents-folder":
 			h.handleVerifyDocumentsFolder(w, r, id)
 			return
@@ -1009,6 +1012,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		req.TemplateID = ""
 	}
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
+	if course, ok := r.Context().Value(courseCreateKey{}).(courseCreate); ok {
+		// Reserve one managed workspace for the witnessed folder, without attaching it.
+		ws.ID, ws.OwnerUserID = course.id, course.owner
+	}
 	if assistantSetup, ok := assistantSetupCreationFromContext(r.Context()); ok {
 		// This server-only descriptor preallocates identity before any profile or
 		// workspace write. No browser JSON field can select these values.
@@ -1509,7 +1516,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(ctx context.Context, w http.Re
 				seed = h.seedTemplateAgents(ws, tmpl)
 			}
 			if !seed.EntrySet {
-				if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
+				if agentName := h.autoCreateManagerEntryAgent(ctx, ws); agentName != "" {
 					setWorkspaceEntryAgent(ws, agentName)
 					seed.EntrySet = true
 				}
@@ -1562,7 +1569,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(ctx context.Context, w http.Re
 			seed = h.seedTemplateAgents(ws, tmpl)
 		}
 		if !seed.EntrySet {
-			if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
+			if agentName := h.autoCreateManagerEntryAgent(ctx, ws); agentName != "" {
 				setWorkspaceEntryAgent(ws, agentName)
 				seed.EntrySet = true
 			}

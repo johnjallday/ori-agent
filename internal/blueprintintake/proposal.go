@@ -108,7 +108,13 @@ func ParseProposalOutput(raw string, requirement workspace.IntakeRequirement, so
 	if location == nil {
 		location = time.Local
 	}
-	decoder := json.NewDecoder(bytes.NewBufferString(strings.TrimSpace(raw)))
+	// Some providers surround the entire JSON result with one Markdown fence.
+	// Accept that presentation only, not commentary or a second payload.
+	raw = strings.TrimSpace(raw)
+	if header, body, ok := strings.Cut(raw, "\n"); ok && (header == "```json" || header == "```") && strings.HasSuffix(body, "\n```") {
+		raw = strings.TrimSuffix(body, "\n```")
+	}
+	decoder := json.NewDecoder(bytes.NewBufferString(raw))
 	decoder.DisallowUnknownFields()
 	var envelope proposalEnvelope
 	if err := decoder.Decode(&envelope); err != nil {

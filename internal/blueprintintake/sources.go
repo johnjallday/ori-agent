@@ -184,6 +184,12 @@ func (s *SourceService) AddFile(ctx context.Context, workspaceID, intakeKey, fil
 	if !requirement.Sources.Files {
 		return FileResult{}, ErrFilesDisabled
 	}
+	if requirement.Sources.ReviewFiles {
+		status, err := s.ConsentStatus(ctx, workspaceID, requirement.Key)
+		if err != nil || !status.Accepted {
+			return FileResult{}, ErrConsentNeeded
+		}
+	}
 	intakeKey = requirement.Key
 	lock := s.lockFor(workspaceID, intakeKey)
 	lock.Lock()

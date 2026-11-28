@@ -873,6 +873,11 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 // segments in order reproduces the previous single-string prompt exactly when no
 // trimming occurs.
 func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task, reviewedInBase ...bool) []promptSegment {
+	if task.DisableTools && len(task.RuntimeSkillPrompts) != 0 {
+		// A host-owned intake transforms the approved source. Do not mix in
+		// profile data, unrelated workspace context, or the normal prose closer.
+		return []promptSegment{{label: "header", text: task.Description + "\n\n" + task.Details + "\nReturn only the requested JSON object. No prose or Markdown."}}
+	}
 	segs := make([]promptSegment, 0, 6)
 
 	// Protected header: assignment framing, description, details, reference URL,

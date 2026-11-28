@@ -427,13 +427,19 @@ func listContainedEntries(root, relativePath string, depth int, page bool, witne
 				if item.Kind == "file" {
 					item.Size = info.Size()
 				}
+			} else if witness != "" {
+				listing.Incomplete = true
 			}
 			var sub *os.Root
 			if item.Kind == "folder" {
 				// Opened before it is listed: another workspace's folder, or one of
 				// Ori's own inside a workspace folder, is not named at all.
 				opened, err := openContainedDir(current, name)
-				if errors.Is(err, ErrSourceExcluded) || (witness != "" && err != nil) {
+				if errors.Is(err, ErrSourceExcluded) {
+					continue
+				}
+				if witness != "" && err != nil {
+					listing.Incomplete = true
 					continue
 				}
 				sub = opened // nil when unreadable or swapped for a link: listed, left unexpanded

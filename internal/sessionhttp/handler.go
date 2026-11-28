@@ -199,6 +199,7 @@ type Handler struct {
 	// Durable claims remain the cross-restart identity; this is only admission.
 	buildPreparationMu sync.Mutex
 	filingCreationMu   sync.Mutex
+	projectDiscoveryMu sync.Mutex // serialize explicit ignore/open decisions across tabs
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem

@@ -58,6 +58,10 @@
     try {
       const payload = await request(ctx, '', { method: 'GET' });
       state.proposal = payload.proposal || null;
+      state.courseDeadlines =
+        payload.requirement?.skill === 'syllabus-intake' &&
+        payload.requirement?.sources?.review_files;
+      state.sources = new Map((payload.sources || []).map(s => [s.id, s.name]));
       state.run = payload.run || null;
       state.skill = payload.skill || null;
       state.bundledSkill = payload.bundled_skill || null;
@@ -223,6 +227,44 @@
 
   function drawProposal(container, ctx, state) {
     const proposal = state.proposal;
+    if (state.courseDeadlines) {
+      const now = new Date();
+      const today = toLocalInput(now).slice(0, 10);
+      const next = proposal.items
+        .filter(
+          i =>
+            i.kind === 'ticket' &&
+            i.due_at &&
+            !i.unusable_reason &&
+            (i.no_time_given ? i.due_input >= today : new Date(i.due_at) >= now)
+        )
+        .sort((a, b) => new Date(a.due_at) - new Date(b.due_at))[0];
+      container.appendChild(node('h4', '', 'Next stated deadline'));
+      if (next) {
+        container.appendChild(
+          node(
+            'p',
+            '',
+            `${next.title} · ${next.no_time_given ? next.due_input : new Date(next.due_at).toLocaleString()}`
+          )
+        );
+        container.appendChild(node('blockquote', '', next.source.quote));
+        container.appendChild(
+          node(
+            'p',
+            'blueprint-intake-hint',
+            `Source: ${state.sources.get(next.source.source_id) || 'selected syllabus'}. Dates marked TBD remain unknown.`
+          )
+        );
+      } else
+        container.appendChild(
+          node(
+            'p',
+            '',
+            'No upcoming deadline with a supporting quote was found. Dates marked TBD remain unknown.'
+          )
+        );
+    }
     const counts = {};
     const countLabels = {
       ticket: ['ticket', 'tickets'],

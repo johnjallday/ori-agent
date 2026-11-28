@@ -217,7 +217,7 @@ func defaultGroupEntryAgentName(workspaceName string) string {
 // entry agent. Groups never take this path: their reviewed Group Roster is the
 // sole source of a Manager. Failures leave the workspace agent-less so its
 // normal missing-entry-agent recovery can guide the person.
-func (h *Handler) autoCreateManagerEntryAgent(ws *session.Workspace) string {
+func (h *Handler) autoCreateManagerEntryAgent(ctx context.Context, ws *session.Workspace) string {
 	if h == nil || h.agentStore == nil || ws == nil {
 		return ""
 	}
@@ -241,10 +241,11 @@ func (h *Handler) autoCreateManagerEntryAgent(ws *session.Workspace) string {
 			"break work into tasks for specialists when needed.",
 		strings.TrimSpace(ws.Name),
 	)
-	if err := h.agentStore.CreateAgent(name, &store.CreateAgentConfig{
-		Role:         types.RoleOrchestrator,
-		SystemPrompt: systemPrompt,
-	}); err != nil {
+	cfg := &store.CreateAgentConfig{Role: types.RoleOrchestrator, SystemPrompt: systemPrompt}
+	if _, course := ctx.Value(courseCreateKey{}).(courseCreate); course && h.systemModelReader != nil {
+		cfg.LLMProvider, cfg.Model = h.systemModelReader.GetSystemModel()
+	}
+	if err := h.agentStore.CreateAgent(name, cfg); err != nil {
 		logger.Warn("Failed to auto-create workspace entry agent", logger.Fields{"agent": name, "error": err})
 		return ""
 	}

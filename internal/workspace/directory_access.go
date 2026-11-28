@@ -44,6 +44,8 @@ type DirectoryListing struct {
 	Entries      []DirectoryEntry
 	// Truncated reports that the entry cap stopped the listing early.
 	Truncated bool
+	// Incomplete distinguishes an unreadable entry in a witnessed page from an empty directory.
+	Incomplete bool `json:"-"`
 }
 
 // ResolveDirectoryPath resolves relativePath under a linked directory and

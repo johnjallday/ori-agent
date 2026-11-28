@@ -18,7 +18,9 @@ The host-owned proposal schema supports tickets, one-line validated memory entri
 
 ## Source boundaries
 
-Uploaded files are copied into the workspace. Public links are fetched only after provider-aware consent, through the shared SSRF policy: HTTP(S) only, no private or loopback host before or after redirects, DNS checked again at connection time, bounded response size and timeout. Ori stores the fetched page plus its extracted-text hash and text snapshot. Folder paths come only from scoped native-picker tokens; Ori reads no subfolders, resolves every immediate entry before containment checking, ignores escaping symlinks, and stores parsed text without copying the source file.
+Uploaded files are copied into the workspace. An intake declaring `sources.review_files` holds the file selection in the browser until the person approves the provider statement and the read; the server also checks consent before copying or parsing a file. Documents course discovery uses this mode. Its handoff stages the Course example's file intake and skill for a managed workspace, not an anchor on the source folder or an import into the template library. The deadline preview uses upcoming proposed tickets with quotes found in the parsed snapshot; ambiguous or TBD dates stay unset. Skill trust and Apply remain separate decisions.
+
+Public links are fetched only after provider-aware consent, through the shared SSRF policy: HTTP(S) only, no private or loopback host before or after redirects, DNS checked again at connection time, bounded response size and timeout. Ori stores the fetched page plus its extracted-text hash and text snapshot. Folder paths come only from scoped native-picker tokens; Ori reads no subfolders, resolves every immediate entry before containment checking, ignores escaping symlinks, and stores parsed text without copying the source file.
 
 ## Re-intake automation
 

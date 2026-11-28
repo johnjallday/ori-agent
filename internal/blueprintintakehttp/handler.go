@@ -100,6 +100,10 @@ func (h *Handler) UploadFiles(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		result, addErr := h.sources.AddFile(r.Context(), workspaceID, requirement.Key, part.FileName(), part)
+		if errors.Is(addErr, blueprintintake.ErrConsentNeeded) {
+			_ = orihttp.RespondForbidden(w, "Approve reading the selected file before uploading it.")
+			return
+		}
 		_ = part.Close()
 		if addErr != nil && !errors.Is(addErr, blueprintintake.ErrFileLimit) {
 			name := strings.TrimSpace(part.FileName())
