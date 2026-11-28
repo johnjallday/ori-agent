@@ -165,7 +165,7 @@ The established command names remain; missing/incompatible source fails without
 fetching or falling back. Legacy Away paths remain available to installed jobs.
 
 Ori owns `devtools-project.sh` / `lib/devtools-project.zsh`: same-repository
-non-overwriting permission/secret provisioning, picker/npm setup, isolated demo,
+local Claude profile provisioning (including [paired plugin worktrees](../docs/devtools.md#paired-plugin-worktrees-claude-code)), non-overwriting secret copy, picker/npm setup, isolated demo,
 and target pre-PR gates. Release implementation stays here. The canonical
 planning protocol and `.herdr/devflow.toml` also remain Ori-owned.
 

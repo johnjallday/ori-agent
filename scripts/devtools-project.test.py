@@ -36,7 +36,7 @@ class ProjectTests(unittest.TestCase):
         (self.dev / ".gitignore").write_text("/.env\n/.claude/\n/bin/\n")
         (self.dev / "scripts/lib").mkdir(parents=True)
         for name in ("devtools-project.sh", "lib/devtools-selector.sh", "lib/devtools-project.zsh",
-                     "demo-server.sh"):
+                     "lib/feature-claude-profile.py", "demo-server.sh"):
             shutil.copy(ROOT / "scripts" / name, self.dev / "scripts" / name)
         (self.dev / "scripts/ci-local.sh").write_text("# fixture target CI marker\n")
         (self.dev / "scripts/build-folder-picker.sh").write_text(
@@ -112,6 +112,84 @@ raise SystemExit(int(os.environ.get('SERVER_EXIT', '0')))
         self.assertIn("npm:" + str(self.feature) + ":install", events)
         # Both helpers failed; legacy provisioning is still best-effort.
         self.assertNotIn("go:", events)
+
+    def paired_fixture(self, names):
+        self.command(["git", "worktree", "move", self.feature, self.root / "demo"], self.dev)
+        self.feature = self.root / "demo"  # branch feature/demo, just as wt start creates it
+        (self.dev / "tasks").mkdir()
+        plan = self.dev / "tasks/tasks-demo.md"
+        plan.write_text(f"# Demo\n\nPaired plugins: `{names}`\n\n## Tasks\n")
+        return plan
+
+    def plugin_fixture(self, name):
+        root = self.home / "Projects" / ("ori/plugins" if name == "reaper-plugin" else "") / name
+        tree = root.with_name(name + "-worktrees") / "demo"
+        self.command(["git", "init", "-qb", "main", root])
+        self.command(["git", "remote", "add", "origin", f"https://github.com/johnjallday/{name}.git"], root)
+        self.command(["git", "commit", "-qm", "base", "--allow-empty"], root)
+        self.command(["git", "worktree", "add", "-qb", "feature/demo", tree], root)
+        return root, tree
+
+    def test_prepared_plugins_only_and_late_local_refresh_preserves_other_settings(self):
+        music = "music-project-management"
+        plan = self.paired_fixture(music)
+        _, music_tree = self.plugin_fixture(music)
+        _, reaper_tree = self.plugin_fixture("reaper-plugin")
+        self.adapter("provision", self.dev, "acceptEdits")
+        profile = self.feature / ".claude/settings.local.json"
+        settings = json.loads(profile.read_text())
+        self.assertEqual(settings["permissions"]["additionalDirectories"], [str(music_tree)])
+        settings["custom"] = {"preserve": True}
+        settings["permissions"]["allow"] = ["Bash(make test)"]
+        settings["permissions"]["additionalDirectories"].append("/my-own-dir")
+        profile.write_text(json.dumps(settings))
+        (self.feature / "tasks").mkdir()
+        (self.feature / "tasks" / plan.name).write_text(plan.read_text().replace(music, music + ", reaper-plugin"))
+        self.adapter("plugin-permissions")
+        settings["permissions"]["additionalDirectories"].append(str(reaper_tree))
+        self.assertEqual(json.loads(profile.read_text()), settings)
+        before = profile.read_bytes()
+        self.adapter("plugin-permissions")
+        self.assertEqual(profile.read_bytes(), before)
+        (self.feature / "tasks" / plan.name).unlink()
+        self.adapter("plugin-permissions")
+        settings["permissions"]["additionalDirectories"] = ["/my-own-dir"]
+        self.assertEqual(json.loads(profile.read_text()), settings)
+
+    def test_rejects_unprepared_wrong_branch_foreign_and_symlinked_trees(self):
+        self.paired_fixture("reaper-plugin")
+        root, tree = self.plugin_fixture("reaper-plugin")
+        profile = self.feature / ".claude/settings.local.json"
+        def check():
+            result = self.adapter("provision", self.dev, "acceptEdits")
+            self.assertIn("No Claude grant", result.stderr)
+            self.assertFalse(json.loads(profile.read_text())["permissions"].get("additionalDirectories"))
+
+        self.adapter("provision", self.dev, "acceptEdits")
+        self.assertEqual(json.loads(profile.read_text())["permissions"]["additionalDirectories"], [str(tree)])
+        self.command(["git", "switch", "--detach"], tree)
+        check()
+        self.command(["git", "switch", "-c", "feature/other"], tree)
+        check()
+        self.command(["git", "worktree", "move", tree, tree.parent / "other"], root)
+        check()
+        tree.symlink_to(tree.parent / "other", target_is_directory=True)
+        check()
+        tree.unlink()
+        self.command(["git", "clone", "-q", root, tree])
+        self.command(["git", "switch", "-c", "feature/demo"], tree)
+        check()
+
+    def test_paths_examples_and_issue_text_are_not_permission_sources(self):
+        plan = self.paired_fixture("../../outside")
+        self.plugin_fixture("reaper-plugin")
+        self.adapter("provision", self.dev, "acceptEdits", status=2)
+        profile = self.feature / ".claude/settings.local.json"
+        self.assertFalse(profile.exists())
+        (plan.parent / "issue-demo.md").write_text("Paired plugins: `reaper-plugin`\n")
+        plan.write_text("# Demo\n## Tasks\nPaired plugins: `reaper-plugin`\n")
+        self.adapter("provision", self.dev, "acceptEdits")
+        self.assertNotIn("additionalDirectories", json.loads(profile.read_text())["permissions"])
 
     def test_provision_copy_failure_warns_without_overwriting_and_foreign_repo_refuses(self):
         (self.dev / ".env").write_text("INVENTED_ONLY=1\n")

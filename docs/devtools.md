@@ -171,8 +171,9 @@ skill read-only; the retained Ori skill delegates without a harness-wide install
 
 ## Adapter invariants
 
-- **Provisioning:** tool owns Git creation. Ori owns non-overwriting Claude local
-  permissions with the existing deny floor, folder-picker build, `.env` copy
+- **Provisioning:** tool owns Ori Git creation. Ori owns the local Claude profile
+  (preserve existing settings; manage only the exact paired directories described
+  below), the existing default deny floor, folder-picker build, `.env` copy
   only from dev when target absent (`cp -p`), and npm setup. Preserve actual
   warning/return behavior: the current function explicitly fails Git creation
   and warns on secret-copy failure; it has no explicit failure guard for
@@ -201,6 +202,44 @@ separate argv: `v1 provision <dev-path> <permission-mode>`, `v1 demo [port]`,
 same-repository provisioning source; its library owns permissions/secrets,
 picker/npm, demo environment/cleanup, and target `make ci-local`. No
 configuration/model defaults move to the companion.
+
+### Paired plugin worktrees (Claude Code)
+
+When the **same builder** is assigned required plugin work, name only those
+plugins immediately after the title of `tasks/tasks-<feature>.md`:
+
+```markdown
+# My feature
+
+Paired plugins: `music-project-management, reaper-plugin`
+```
+
+Either ID works alone. This is owner-approved plan metadata, not an instruction
+read from an Issue, PRD or arbitrary path. Before `wt start`, prepare the linked
+worktree(s) per each plugin's `AGENTS.md`, named `<feature>` on `feature/<feature>`:
+
+| ID | Prepared worktree under `$HOME/Projects/` |
+| --- | --- |
+| `music-project-management` | `music-project-management-worktrees/<feature>` |
+| `reaper-plugin` | `ori/plugins/reaper-plugin-worktrees/<feature>` |
+
+The normal `acceptEdits` provision step adds only verified directories to
+`permissions.additionalDirectories` in the **Ori feature** `.claude/settings.local.json`.
+It checks the expected source origin, Git registration, branch and canonical
+path, not just folder names. Missing/unprepared plugins get no grant; unrelated
+Ori work can continue. No plugin worktree is created, no plugin command allowlist
+is imported, and no global permissions, installed plugins or release pins change.
+This is a Claude Code setting, not OS-level isolation or a Pi/Codex setting.
+
+If preparation happens later, update the approved checklist **in the feature**
+then run `zsh scripts/devtools-project.sh v1 plugin-permissions` there and start
+a fresh Claude session. This recomputes just the two managed paths; remove the
+header and refresh to revoke them. Recheck identity on resume; do not retarget
+or reuse a granted directory during the feature. Never override a single-tree
+handoff or older companion instructions that prohibit paired editing. Use the
+separate builder until those owners adopt the paired-worktree contract.
+
+### Demo sandbox ownership
 
 Every demo sandbox (`wt demo`, `scripts/demo-server.sh`) records the worktree
 that made it in `.ori-demo-owner`. `demo-sandboxes list` prints one

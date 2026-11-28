@@ -334,13 +334,21 @@ so it must stand on its own:
   candidates, companion PRs and releases, the floor bump as the last Ori commit,
   then the Ori PR.
 
-Each repository gets its own builder session, started inside that repository's
-worktree so its own `AGENTS.md` and permissions apply. The Ori builder never
-adds a companion directory to its session and never edits a companion checkout;
-a companion builder never edits Ori. Only the Ori integration owner changes the
-contract. It tells the affected companion session which field changed, and that
-session updates its own checklist. A companion candidate becomes evidence for an
-Ori task once the owner has built or installed it into disposable demo state;
+Normally each repository gets its own builder session inside its own worktree;
+a companion builder never edits Ori. For required Music Project Management or
+REAPER changes, default to one Claude implementation owner **if both repositories'
+`AGENTS.md` and the handoff allow paired work**. Directly below the approved task
+list's `#` title put e.g. `Paired plugins: ` followed by the backticked value
+`music-project-management, reaper-plugin` (or just the one required ID). Omit
+this line for unresolved, host-only, or separately staffed work. The owner
+prepares a distinct same-feature worktree in each named repo before `wt start`;
+planning and the builder never create them. See `docs/devtools.md` (Paired plugin
+worktrees) for the checked paths and refresh command. A directory mentioned in
+prose, or visible in a Claude profile alone, is not an assignment. Keep each
+repo's checklist, checks, commits and PR separate even with one builder.
+Only the Ori integration owner changes the contract; tell any separate companion
+session which field changed so it can update its checklist. A companion candidate
+becomes evidence for an Ori task once the owner has built or installed it into disposable demo state;
 the published release and the reviewed floor remain later, separately approved
 states.
 
@@ -358,11 +366,13 @@ Before initial implementation and on continuation:
    bounded read-only assessment and record the result in the active checklist
    (or session findings when no checklist exists). Missing assessment never
    implies `not required`; no new PRD or planning approval loop is needed.
-3. Keep the builder's writes inside the worktree authorized by its handoff.
-   A companion path in a checklist is evidence, not permission to write there.
-   Companion work requires a separately authorized owner/handoff following its
-   own repository guidance. Do not create/remove worktrees to repair a missing
-   companion when the current handoff forbids it, and never edit an installed
+3. Keep writes inside the worktrees authorized by the handoff. For each paired
+   plugin, verify the approved header, exact registered path and matching branch,
+   its feature-local Claude directory grant, its `AGENTS.md`, and sole writer
+   before editing (including on resume). If any disagree, do not edit there.
+   All other companion work needs its own authorized owner/handoff. Do not
+   create/remove worktrees to repair a missing companion when the current handoff
+   forbids it, and never edit an installed
    checkout as a shortcut.
 4. If required companion work is unprepared, or evidence leaves a dependency
    unresolved, report the companion, missing preparation/decision, and blocked
@@ -372,7 +382,8 @@ Before initial implementation and on continuation:
 5. Keep source implementation, disposable local installation, and production
    release evidence separate through the final report. Do not claim the feature
    is fully activated while a required release or reviewed pin remains blocked.
-6. A companion builder is a separate session started inside that companion's
+6. Unless using the validated paired-owner case above, a companion builder is
+   a separate session started inside that companion's
    worktree. It receives the `Cross-Repository Contract` section and its own
    checklist, not the Ori checklist or an added Ori directory, and follows that
    repository's `AGENTS.md`.
