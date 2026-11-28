@@ -2,26 +2,7 @@
 # Workflow Git creation, navigation, confirmation and delivery remain external.
 function ori_devtools_provision {
   local target="$1" env_source="$2" mode="$3"
-  local claude_local="$target/.claude/settings.local.json"
-  if [[ ! -f "$claude_local" ]]; then
-    echo "Writing feature-worktree Claude profile ($mode)..."
-    mkdir -p "$target/.claude"
-    cat > "$claude_local" <<JSON
-{
-  "permissions": {
-    "defaultMode": "$mode",
-    "deny": [
-      "Bash(rm -rf:*)",
-      "Bash(git push --force:*)",
-      "Bash(git push -f:*)",
-      "Bash(./scripts/release.sh:*)",
-      "Read(**/.env)",
-      "Read(**/*secret*)"
-    ]
-  }
-}
-JSON
-  fi
+  python3 "$target/scripts/lib/feature-claude-profile.py" "$target" "$env_source" "$mode" || return 2
   if [[ -f "$target/scripts/build-folder-picker.sh" ]]; then
     echo "Building folder picker in new worktree..."
     (cd "$target" && bash scripts/build-folder-picker.sh)

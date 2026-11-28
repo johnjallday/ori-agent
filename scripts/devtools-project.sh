@@ -6,7 +6,7 @@ source "${0:A:h}/lib/devtools-selector.sh" || exit 2
 source "${0:A:h}/lib/devtools-project.zsh" || exit 2
 root="$(ori_devtools_anchor "${0:A:h:h}")" || exit 2
 if [[ "${1:-}" != v1 ]]; then
-  print -u2 -- 'Usage: devtools-project.sh v1 provision|demo|pre-pr|demo-sandboxes [arguments]'
+  print -u2 -- 'Usage: devtools-project.sh v1 provision|plugin-permissions|demo|pre-pr|demo-sandboxes [arguments]'
   exit 2
 fi
 action="${2:-}"
@@ -23,6 +23,12 @@ case "$action" in
       [[ "${common:A}" == "${dev_common:A}" ]] || { print -u2 -- 'Provisioning source belongs to a different Git repository'; exit 2; }
     fi
     ori_devtools_provision "$root" "$dev" "$mode"
+    ;;
+  plugin-permissions)
+    [[ $# == 0 && -f "$root/.git" && "$(git -C "$root" branch --show-current)" == "feature/${root:t}" ]] || {
+      print -u2 -- 'Run plugin-permissions in the matching Ori feature worktree'; exit 2
+    }
+    python3 "$root/scripts/lib/feature-claude-profile.py" "$root" "$root" acceptEdits
     ;;
   demo)
     (( $# <= 1 )) || exit 2
