@@ -24,7 +24,7 @@ RC = re.compile(r"(v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))-rc\
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 HOLD = {"1", "true", "yes", "on"}
 PENDING = {"requested", "queued", "waiting", "pending", "in_progress"}
-DEFAULT_MIN_PRS = 12
+DEFAULT_MIN_PRS = 15
 # The repair branch for a squashed merge-back: a zero-diff merge commit that restores release ancestry on dev.
 MERGE_BACK = "release-merge-back"
 

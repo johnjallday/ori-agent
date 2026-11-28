@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: 'Prepare an RC below 12 PRs (green CI is still required)'
+        description: 'Prepare an RC below 15 PRs (green CI is still required)'
         type: boolean
         default: false
       candidate:

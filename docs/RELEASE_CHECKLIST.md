@@ -8,7 +8,7 @@ tags are obsolete. Planning and feature delivery are unchanged.
 
 ```text
 Feature PRs → dev ─────────────────────────────────→ more feature PRs
-               │ at least 12 unshipped PRs + green CI
+               │ at least 15 unshipped PRs + green CI
                ▼
         release/vX.Y.Z → vX.Y.Z-rc.1 → install and test
                │          ↑ fixes produce rc.2, rc.3…
@@ -20,7 +20,7 @@ Feature PRs → dev ────────────────────
 ```
 
 **RC means release candidate.** It is installable, but not the stable update.
-There is at most one active candidate branch. Reaching another 12 PRs while
+There is at most one active candidate branch. Reaching another 15 PRs while
 an RC is being tested holds only the next candidate, never development.
 
 The candidate branch starts at the validated `dev` commit plus one VERSION-only
@@ -87,7 +87,7 @@ run, not merely an unrelated successful check. Fetch/API failures fail closed.
 # Read readiness without pushing or publishing:
 ./scripts/release-ready.sh
 
-# Evaluate now; below 12 PRs this will hold:
+# Evaluate now; below 15 PRs this will hold:
 ./scripts/release.sh candidate
 
 # Prepare sooner, without bypassing CI or an existing candidate:

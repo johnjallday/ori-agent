@@ -1,6 +1,6 @@
 #!/bin/bash
 # Read-only readiness entry point (fetches refs; never pushes or publishes).
-# RELEASE_MIN_PRS defaults to 12; FORCE_RELEASE=true bypasses cadence only.
+# RELEASE_MIN_PRS defaults to 15; FORCE_RELEASE=true bypasses cadence only.
 # AUTO_RELEASE_HOLD stops lifecycle writes. Active candidates hold new batches.
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
