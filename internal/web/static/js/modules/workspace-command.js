@@ -74,7 +74,7 @@ import {
 } from './group-template-status.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
-import { openLibrarySheet } from './map-library-sheet.js';
+import { currentLibrarySheet, openLibrarySheet } from './map-library-sheet.js';
 import { resumeMapSong, restoreMapSong } from './music-map-resume.js';
 import { openMusicMapFinder } from './music-map-finder.js';
 import { folderMapTree, drawFolderMap } from './music-folder-map.js';
@@ -14322,6 +14322,7 @@ export class WorkspaceCommandView {
     const status = this.groupTemplateStatus;
     return (
       status?.kind === 'managed_home' &&
+      status.program_id === 'music-producer-assistant' &&
       status.provider?.plugin_id === 'music-project-management' &&
       status.workspace_id === this.workspaceId()
     );
@@ -14330,6 +14331,13 @@ export class WorkspaceCommandView {
   findMusicProject() {
     const home = this.workspaceId();
     if (!this.isMusicHomeMap() || this.musicFinder) return;
+    // Don't replace a review in progress, or hand a search result to a sheet
+    // already showing some other entry. Finish or cancel that sheet first.
+    const sheet = currentLibrarySheet();
+    if (sheet) {
+      sheet.focus();
+      return;
+    }
     this.musicResumeTurn = Symbol();
     this.musicFinder = openMusicMapFinder({
       home,
@@ -14411,13 +14419,13 @@ export class WorkspaceCommandView {
     this.paintDetachmentFolders();
     const candidate =
       Boolean(id && row && homeId) &&
-      parent === homeId &&
+      (row.parent_id === homeId || (parent === homeId && this.isMusicHomeMap())) &&
       !isGroupRow(row) &&
       this.groupTemplateStatus?.kind === 'managed_home';
     // A click on a tile (even the same one) brings a hidden card back.
     if (!fromMount) this.detachmentSongCardHidden = '';
     this.detachmentSongCardError = '';
-    if (candidate) this.detachmentSongCards?.delete(id);
+    if (candidate && this.isMusicHomeMap()) this.detachmentSongCards?.delete(id);
     this.detachmentSongCardId = candidate ? id : '';
     this.paintDetachmentSongCard();
     if (candidate) void this.loadDetachmentSongCard(id);
@@ -14503,8 +14511,9 @@ export class WorkspaceCommandView {
       console.warn('workspace-command: song card unavailable', err);
     }
     if (token !== this.detachmentSongRead || home !== this.workspaceId()) return;
+    if (failed && !this.isMusicHomeMap() && this.detachmentSongCards.has(id)) return;
     this.detachmentSongCardError = failed ? id : '';
-    this.detachmentSongCards.set(id, view?.homeID === home ? view : null);
+    this.detachmentSongCards.set(id, this.isMusicHomeMap() && view?.homeID !== home ? null : view);
     // The selection may have moved on meanwhile; paint shows whatever is current.
     if (this.detachmentSongCardId === id) this.paintDetachmentSongCard();
   }

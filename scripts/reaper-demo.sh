@@ -48,6 +48,7 @@ Options:
                         arrangement (populated Home: Organize library, collection
                         review, one queued activation; only the model is a
                         scripted loopback fixture, so this is not live judgment),
+                        finder (find and resume from a model-free Music map),
                         or studio (REAPER Studio: the candidate's own readers
                         inspect disposable REAPER folders seeded in the sandbox
                         HOME, then a linked song looks entries up; no model).
@@ -197,7 +198,7 @@ fi
 if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
 fi
-[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" || "$test_suite" == "awareness" || "$test_suite" == "arrangement" || "$test_suite" == "studio" ]] || fail "--suite needs legacy, guidance, awareness, arrangement or studio"
+[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" || "$test_suite" == "awareness" || "$test_suite" == "arrangement" || "$test_suite" == "studio" || "$test_suite" == "finder" ]] || fail "--suite needs legacy, guidance, awareness, arrangement, finder or studio"
 # Studio also serves a manual demo over the same seeded folders.
 if [[ "$test_suite" == "studio" ]]; then
 	if [[ "$mode" == "artifact" || -z "$music_source" || "$install_order" == "reaper-only" ]]; then
@@ -324,7 +325,11 @@ if curl -fsS -o /dev/null --max-time 1 "$base_url/health" 2>/dev/null; then
 	fail "port $port already has an Ori server; choose another with --port"
 fi
 
-if [[ -n "$sandbox" ]]; then
+if [[ "$test_suite" == "finder" ]]; then
+	[[ -z "$sandbox" ]] || fail "the finder suite needs a fresh generated sandbox"
+	sandbox="$(mktemp -d "${TMPDIR:-/tmp}/ori-demo.XXXXXX")"
+	printf 'worktree=%s\n' "$repo_root" >"$sandbox/.ori-demo-owner"
+elif [[ -n "$sandbox" ]]; then
 	mkdir -p "$sandbox"
 	sandbox="$(CDPATH= cd -- "$sandbox" && pwd)"
 else
@@ -589,7 +594,10 @@ if [[ "$mode" == "test" ]]; then
 			playwright_file="tests/reaper-studio-candidate.spec.ts"
 		fi
 		suite_env=()
-		if [[ -n "$model_port" ]]; then
+		if [[ "$test_suite" == "finder" ]]; then
+			playwright_file="tests/music-map-finder.spec.ts"
+			suite_env=(ORI_MUSIC_FINDER_SANDBOX="$sandbox")
+		elif [[ -n "$model_port" ]]; then
 			suite_env=(ORI_ARRANGEMENT_MODEL_PORT="$model_port")
 		fi
 		# With an upgrade source, the installed package is the older one: the
@@ -713,7 +721,7 @@ if [[ "$mode" == "test" ]]; then
 	# The drawer baseline, the arrangement and the Studio suites own different
 	# fixtures and do not substitute for legacy/paired-guidance completed-project
 	# and restart acceptance, so none re-runs that restart check.
-	if ((test_status == 0)) && [[ -n "$install_order" && "$test_suite" != "awareness" && "$test_suite" != "arrangement" && "$test_suite" != "studio" ]]; then
+	if ((test_status == 0)) && [[ -n "$install_order" && ( "$test_suite" == "legacy" || "$test_suite" == "guidance" ) ]]; then
 		printf 'Restarting Ori against the same isolated candidate state...\n'
 		kill "$server_pid"
 		wait "$server_pid" 2>/dev/null || true

@@ -27,6 +27,7 @@ const (
 // implies integration readiness, and neither is inferred from names.
 type groupTemplateStatus struct {
 	WorkspaceID string                                  `json:"workspace_id"`
+	ProgramID   string                                  `json:"program_id,omitempty"`
 	Name        string                                  `json:"name"`
 	Kind        projecttemplates.GroupTemplateKind      `json:"kind"`
 	Template    *groupTemplateStatusTemplate            `json:"template,omitempty"`
@@ -122,6 +123,7 @@ func (h *Handler) GetGroupTemplateStatus(w http.ResponseWriter, r *http.Request)
 		status.Template.CreatedFromTemplate = true
 		status.Template.GroupTemplateID = provenance.GroupTemplateID
 	}
+	status.ProgramID = key.ProgramID
 	status.Provider = groupTemplateStatusProvider(key, state.GroupTemplate)
 	status.Team = h.groupTemplateTeam(current, state)
 	status.Integration = h.groupTemplateIntegration(r, current, key)

@@ -107,6 +107,11 @@ export async function restoreMapSong(cmd) {
   const state = { ...window.history.state };
   delete state.musicMap;
   window.history.replaceState(state, '');
+  // A back-forward cached page still contains its old card. Hide it before
+  // the profile/link reads, rather than displaying stale notes or actions.
+  cmd.detachmentSongRead = Symbol();
+  cmd.detachmentSongCardId = '';
+  cmd.paintDetachmentSongCard();
   const token = (cmd.musicResumeTurn = Symbol());
   try {
     if ((await profileID()) !== saved.owner || !current(cmd, home, token)) return;

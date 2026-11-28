@@ -22,6 +22,12 @@ An initialized Music Production Home shows **Pick up where you left off** above 
 
 Planning another session uses the existing review and explicit save. If the Home provider disappears, the Sessions read still shows permitted history and suppresses write actions. A saved recap or goal is not a folder grant, a workspace connection, or proof of work. Separate workspace shortcuts still recheck the exact reciprocal link before navigating. None of these reading or browsing actions starts a scan, staffing, ticket, model call, or DAW operation.
 
+### Find a project on the Music Home map
+
+The Music Home’s own Map toolbar searches this Home’s paged catalog, not just the visible buildings. **Find a project** uses the recorded stage and owner-only folder labels. Selecting **On map** rechecks entry detail and the child song card against the exact Home, entry and workspace IDs. Saved layout frames the existing building; By folder reveals its disclosure. The resume controls recheck the same link before opening the Ori workspace or that entry’s Sessions pane. Browser Back restores presentation from the current history entry (profile/Home, IDs, query, camera and folder view); no note, path, review or placement permission is stored there. An unresolved link keeps the search without selecting a replacement.
+
+**Library only** previews saved metadata. An openable source can enter the existing single-entry map setup sheet, which verifies the source and requires an explicit file choice when appropriate. Neither discovery nor browsing consents to a scan, placement, staffing or model call. Run the isolated Chromium journey with `scripts/reaper-demo.sh test --suite finder --reaper-source … --music-source …`.
+
 ### Files authority is independent of discovery
 
 The owner-only routes are:

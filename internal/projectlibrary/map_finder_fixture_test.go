@@ -97,13 +97,24 @@ func TestExportMapFinderFixture(t *testing.T) {
 		id := fmt.Sprintf("early-%02d", i)
 		doc.Entries = append(doc.Entries, Entry{ID: id, Revision: 1, Fields: Fields{DisplayName: fmt.Sprintf("Early project %02d", i)}, Observations: []Observation{{RootID: "songs", RelativeFolder: id, FileIdentity: id, Format: "reaper", Availability: "unavailable", ScanID: "listed", ScannedAt: now}}})
 	}
-	child := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "EP workspace"})
-	child.ID, child.OwnerUserID = "finder-child", "local"
-	link := workspace.AssistantProjectLinkID(home.ID, child.ID)
-	child.SetAssistantProjectLink(&workspace.AssistantProjectLink{SchemaVersion: workspace.AssistantProjectLinkSchemaVersion, ID: link, StationWorkspaceID: home.ID, Key: key, StateRevision: 1})
-	if err = folders.Save(child); err != nil {
-		t.Fatal(err)
+	linkedChild := func(id, name string) *ExactLink {
+		t.Helper()
+		child := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: name})
+		child.ID, child.OwnerUserID = id, scope.OwnerUserID
+		link := workspace.AssistantProjectLinkID(home.ID, id)
+		child.SetAssistantProjectLink(&workspace.AssistantProjectLink{SchemaVersion: workspace.AssistantProjectLinkSchemaVersion, ID: link, StationWorkspaceID: home.ID, Key: key, StateRevision: 1})
+		if err := folders.Save(child); err != nil {
+			t.Fatal(err)
+		}
+		return &ExactLink{WorkspaceID: id, LinkID: link, Revision: 1}
 	}
+	ep := linkedChild("finder-child", "EP workspace")
+	// The operator disconnects only this second fixture. The acceptance EP
+	// and demo remain available for inspection after the test.
+	stale := linkedChild("finder-stale", "Old workspace")
+	doc.Entries[0].Link = stale
+	doc.Entries[0].Fields.DisplayName = "Old mix"
+	doc.Entries[1].Fields.DisplayName = "Old mix"
 	for _, v := range []string{"EP", "Demo", "Unsupported", "Offline"} {
 		rel := v + "/Night Drive"
 		dir := filepath.Join(source, rel)
@@ -133,7 +144,7 @@ func TestExportMapFinderFixture(t *testing.T) {
 		if v == "EP" {
 			e.Fields.Stage = "mixing"
 			e.Fields.NextAction = "Comp the bridge."
-			e.Link = &ExactLink{WorkspaceID: child.ID, LinkID: link, Revision: 1}
+			e.Link = ep
 		}
 		doc.Entries = append(doc.Entries, e)
 	}
@@ -149,17 +160,11 @@ func TestExportMapFinderFixture(t *testing.T) {
 	if err = folders.Update(home.ID, func(ws *workspace.Workspace) error {
 		s := ws.GetAssistantProgramState()
 		s.ProjectLibrary = data
-		s.LinkedProjectIDs = []string{child.ID}
+		s.LinkedProjectIDs = []string{ep.WorkspaceID, stale.WorkspaceID}
 		ws.SetAssistantProgramState(s)
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, ws := range []*workspace.Workspace{home, child} {
-		path, err := folders.GetFolderPath(ws.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%s=%s", ws.ID, path)
-	}
+
 }
